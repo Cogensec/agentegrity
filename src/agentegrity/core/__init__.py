@@ -1,7 +1,7 @@
-from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.core.attestation import AttestationChain, AttestationRecord
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
-from agentegrity.core.attestation import AttestationRecord, AttestationChain
 from agentegrity.core.monitor import IntegrityMonitor
+from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 
 __all__ = [
     "AgentProfile",

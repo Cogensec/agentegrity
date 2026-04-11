@@ -5,12 +5,12 @@ Agentegrity defines what it means for an autonomous AI agent to be whole:
 adversarially coherent, environmentally portable, and verifiably assured.
 """
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 
-from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.core.attestation import AttestationChain, AttestationRecord
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
-from agentegrity.core.attestation import AttestationRecord, AttestationChain
 from agentegrity.core.monitor import IntegrityMonitor
+from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.sdk.client import AgentegrityClient
 
 __all__ = [

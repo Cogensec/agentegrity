@@ -1,6 +1,5 @@
 """Tests for AgentProfile."""
 
-import pytest
 
 from agentegrity.core.profile import (
     CAPABILITY_CODE_EXECUTION,

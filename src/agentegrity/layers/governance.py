@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
@@ -55,7 +54,7 @@ class PolicyRule:
     rule_id: str
     name: str
     description: str
-    condition: Callable[[AgentProfile, dict, dict], bool]
+    condition: Callable[[AgentProfile, dict[str, Any], dict[str, Any]], bool]
     decision: PolicyDecision = PolicyDecision.DENY
     severity: float = 0.50
 
@@ -128,7 +127,7 @@ class AuditEntry:
 
 # Built-in policy rules
 def _rule_high_risk_tool_access(
-    profile: AgentProfile, action: dict, context: dict
+    profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
     """Block high-risk agents from using sensitive tools without approval."""
     sensitive_tools = {"database_write", "file_delete", "payment_execute", "admin_api"}
@@ -140,14 +139,14 @@ def _rule_high_risk_tool_access(
 
 
 def _rule_code_execution_boundary(
-    profile: AgentProfile, action: dict, context: dict
+    profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
     """Require approval for code execution actions."""
     return action.get("type") == "code_execution" and not context.get("sandbox", False)
 
 
 def _rule_financial_threshold(
-    profile: AgentProfile, action: dict, context: dict
+    profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
     """Flag financial transactions above threshold."""
     amount = action.get("amount", 0)
@@ -156,7 +155,7 @@ def _rule_financial_threshold(
 
 
 def _rule_multi_agent_escalation(
-    profile: AgentProfile, action: dict, context: dict
+    profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
     """Require human oversight for multi-agent coordination actions."""
     return (
@@ -238,7 +237,7 @@ class GovernanceLayer:
         policy_set: str = "enterprise-default",
         custom_rules: list[PolicyRule] | None = None,
         enable_audit: bool = True,
-        escalation_callback: Callable | None = None,
+        escalation_callback: Callable[..., Any] | None = None,
     ):
         self.policy_set_name = policy_set
         self._rules = list(DEFAULT_POLICIES.get(policy_set, []))

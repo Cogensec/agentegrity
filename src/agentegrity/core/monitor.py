@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -70,6 +69,16 @@ class IntegrityMonitor:
         Custom callback invoked on violation. Receives (ViolationEvent).
     enable_attestation : bool
         Whether to generate attestation records for each evaluation.
+
+    Notes
+    -----
+    The monitor operates in fail-closed mode by default: when the
+    evaluator's ``fail_fast`` flag is True and a layer returns a
+    'block' action, the ``@guard`` decorator prevents the wrapped
+    function from executing. This is appropriate when the library's
+    checks are deterministic and pattern-based. v0.2 will add a
+    fail_open mode for use with LLM-backed checks where
+    infrastructure failures should not cascade into agent failures.
 
     Examples
     --------
@@ -133,7 +142,7 @@ class IntegrityMonitor:
 
         return score
 
-    def guard(self, func: Callable) -> Callable:
+    def guard(self, func: Callable[..., Any]) -> Callable[..., Any]:
         """
         Decorator that wraps an agent function with integrity evaluation.
 
@@ -142,7 +151,7 @@ class IntegrityMonitor:
         """
         if asyncio.iscoroutinefunction(func):
             @functools.wraps(func)
-            async def async_wrapper(*args, **kwargs):
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 context = kwargs.get("context", {})
 
                 # Pre-execution check
@@ -166,7 +175,7 @@ class IntegrityMonitor:
             return async_wrapper
         else:
             @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 context = kwargs.get("context", {})
 
                 pre_score = self.evaluate(context)

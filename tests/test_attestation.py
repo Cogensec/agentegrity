@@ -1,6 +1,5 @@
 """Tests for AttestationRecord and AttestationChain."""
 
-import pytest
 
 from agentegrity.core.attestation import (
     AttestationChain,

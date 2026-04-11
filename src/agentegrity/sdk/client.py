@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentegrity.core.attestation import AttestationChain, AttestationRecord, Evidence
+from agentegrity.core.attestation import AttestationRecord, Evidence
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.monitor import IntegrityMonitor, ViolationAction
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier

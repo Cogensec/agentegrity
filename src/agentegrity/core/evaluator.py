@@ -113,7 +113,7 @@ class PropertyWeights:
     environmental_portability: float = 0.25
     verifiable_assurance: float = 0.35
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         total = (
             self.adversarial_coherence
             + self.environmental_portability
@@ -144,6 +144,13 @@ class IntegrityEvaluator:
     fail_fast : bool
         If True, stop evaluation on the first blocking result.
         Defaults to True.
+
+        When True (default), evaluation stops at the first layer that
+        returns a 'block' action and the agent action is prevented from
+        executing. This is appropriate when the library's checks are
+        deterministic and pattern-based. v0.2 will add a fail_open mode
+        for use with LLM-backed checks where infrastructure failures
+        should not cascade into agent failures.
 
     Examples
     --------
@@ -291,5 +298,5 @@ class IntegrityEvaluator:
         return round(min(coverage, detail_completeness), 4)
 
     def __repr__(self) -> str:
-        layer_names = [l.name for l in self.layers]
+        layer_names = [layer.name for layer in self.layers]
         return f"IntegrityEvaluator(layers={layer_names})"

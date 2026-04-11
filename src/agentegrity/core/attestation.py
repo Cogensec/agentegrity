@@ -22,8 +22,6 @@ try:
     )
     from cryptography.hazmat.primitives.serialization import (
         Encoding,
-        NoEncryption,
-        PrivateFormat,
         PublicFormat,
     )
 
@@ -181,7 +179,7 @@ class AttestationChain:
     forming a tamper-evident history.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._records: list[AttestationRecord] = []
 
     def append(self, record: AttestationRecord) -> None:

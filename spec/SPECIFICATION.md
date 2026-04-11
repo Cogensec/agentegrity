@@ -1,6 +1,6 @@
 # Agentegrity Framework Specification
 
-**Version 1.0.0**
+**Version 0.1.0**
 **Status: Draft**
 **Date: March 2026**
 
@@ -208,6 +208,8 @@ See [Verifiable Assurance property spec](properties/verifiable-assurance.md) for
 
 **Components:**
 
+> These are design targets for v1.0 of the specification. The v0.1.0 reference implementation does not yet measure or enforce these targets.
+
 | Component | Function | Latency Target |
 |---|---|---|
 | Attack Surface Mapper | Enumerate all input channels and tool interfaces | Async (background) |
@@ -230,6 +232,8 @@ See [Adversarial Layer spec](layers/adversarial-layer.md) for full detail.
 **Position:** Middle layer. Protects reasoning, memory, and behavioral consistency.
 
 **Components:**
+
+> These are design targets for v1.0 of the specification. The v0.1.0 reference implementation does not yet measure or enforce these targets.
 
 | Component | Function | Latency Target |
 |---|---|---|
@@ -254,6 +258,8 @@ See [Cortical Layer spec](layers/cortical-layer.md) for full detail.
 **Position:** Innermost layer. Closest to the agent's action execution.
 
 **Components:**
+
+> These are design targets for v1.0 of the specification. The v0.1.0 reference implementation does not yet measure or enforce these targets.
 
 | Component | Function | Latency Target |
 |---|---|---|
@@ -319,7 +325,7 @@ Agent Action Initiated
   Attestation Record Generated
 ```
 
-**Total latency budget:** < 100ms p99 for the full evaluation flow.
+**Total latency budget:** < 100ms p99 for the full evaluation flow. (This is a design target for v1.0 of the specification. The v0.1.0 reference implementation does not yet measure or enforce this target.)
 
 ---
 

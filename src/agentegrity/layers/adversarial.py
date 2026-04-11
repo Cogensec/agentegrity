@@ -8,13 +8,14 @@ and threat assessments.
 
 from __future__ import annotations
 
-import hashlib
-import time
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from agentegrity.core.evaluator import LayerResult
-from agentegrity.core.profile import AgentProfile
+from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+
+logger = logging.getLogger("agentegrity.adversarial")
 
 
 @dataclass
@@ -123,8 +124,8 @@ class AdversarialLayer:
                 custom_threats = detector(profile, ctx)
                 if custom_threats:
                     threats.extend(custom_threats)
-            except Exception:
-                pass  # Custom detector failure shouldn't block evaluation
+            except Exception as exc:
+                logger.warning("Custom detector failed: %s", exc, exc_info=True)
 
         # Step 4: Compute coherence score
         coherence_score = self._compute_coherence(profile, threats, ctx)
@@ -280,10 +281,10 @@ class AdversarialLayer:
         context = {"input": input_data, "channel": channel}
         threats = self._detect_channel_threats(
             profile or AgentProfile(
-                agent_type="conversational",
+                agent_type=AgentType.CONVERSATIONAL,
                 capabilities=[],
-                deployment_context="cloud",
-                risk_tier="medium",
+                deployment_context=DeploymentContext.CLOUD,
+                risk_tier=RiskTier.MEDIUM,
             ),
             context,
         )
