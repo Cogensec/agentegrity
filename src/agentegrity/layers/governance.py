@@ -323,6 +323,14 @@ class GovernanceLayer:
             },
         )
 
+    async def aevaluate(
+        self,
+        profile: AgentProfile,
+        context: dict[str, Any] | None = None,
+    ) -> LayerResult:
+        """Async wrapper around evaluate for use with AsyncIntegrityEvaluator."""
+        return self.evaluate(profile, context)
+
     def _write_audit(
         self,
         profile: AgentProfile,

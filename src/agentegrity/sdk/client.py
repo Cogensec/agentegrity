@@ -189,6 +189,34 @@ class AgentegrityClient:
             ],
         )
 
+    def create_claude_adapter(
+        self,
+        profile: AgentProfile,
+        enforce: bool = False,
+        api_key: str | None = None,
+    ) -> Any:
+        """Create a ClaudeAdapter wired to this client's evaluator.
+
+        Parameters
+        ----------
+        profile : AgentProfile
+            The agent being monitored.
+        enforce : bool
+            If True, governance block actions will deny tool calls.
+            Default False (measure-only).
+        api_key : str, optional
+            Anthropic API key for LLM-backed checks. Falls back to
+            ANTHROPIC_API_KEY.
+        """
+        from agentegrity.adapters.claude import ClaudeAdapter
+
+        return ClaudeAdapter(
+            profile=profile,
+            evaluator=self._evaluator,
+            enforce=enforce,
+            api_key=api_key,
+        )
+
     @property
     def evaluator(self) -> IntegrityEvaluator:
         return self._evaluator

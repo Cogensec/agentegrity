@@ -7,8 +7,7 @@ define an agent profile, run an integrity evaluation, and
 inspect the results.
 """
 
-from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
-from agentegrity import IntegrityEvaluator
+from agentegrity import AgentProfile, AgentType, DeploymentContext, IntegrityEvaluator, RiskTier
 from agentegrity.layers import AdversarialLayer, CorticalLayer, GovernanceLayer
 
 
@@ -48,7 +47,7 @@ def main():
     print(f"Passed: {result.passed}")
     print(f"Action: {result.action}")
     print(f"Latency: {result.total_latency_ms:.2f}ms")
-    print(f"Properties:")
+    print("Properties:")
     print(f"  Adversarial coherence:    {result.properties.adversarial_coherence}")
     print(f"  Environmental portability: {result.properties.environmental_portability}")
     print(f"  Verifiable assurance:      {result.properties.verifiable_assurance}")
@@ -66,10 +65,16 @@ def main():
     print(f"Passed: {result.passed}")
     print(f"Action: {result.action}")
     for layer_result in result.layer_results:
-        print(f"  [{layer_result.layer_name}] score={layer_result.score:.3f} action={layer_result.action}")
+        print(
+            f"  [{layer_result.layer_name}] score={layer_result.score:.3f} "
+            f"action={layer_result.action}"
+        )
         if layer_result.details.get("threats"):
             for t in layer_result.details["threats"]:
-                print(f"    THREAT: {t['threat_type']} (severity={t['severity']}, confidence={t['confidence']})")
+                print(
+                    f"    THREAT: {t['threat_type']} "
+                    f"(severity={t['severity']}, confidence={t['confidence']})"
+                )
     print()
 
     # 5. Run evaluation with suspicious memory
@@ -89,7 +94,10 @@ def main():
         if layer_result.layer_name == "cortical":
             mem = layer_result.details.get("memory", {})
             print(f"  Memory integrity: {mem.get('integrity_score', 'N/A')}")
-            print(f"  Suspicious reads: {mem.get('suspicious_reads', 0)}/{mem.get('total_reads', 0)}")
+            print(
+                f"  Suspicious reads: {mem.get('suspicious_reads', 0)}"
+                f"/{mem.get('total_reads', 0)}"
+            )
     print()
 
     # 6. Serialize the result

@@ -161,6 +161,14 @@ class AdversarialLayer:
             },
         )
 
+    async def aevaluate(
+        self,
+        profile: AgentProfile,
+        context: dict[str, Any] | None = None,
+    ) -> LayerResult:
+        """Async wrapper around evaluate for use with AsyncIntegrityEvaluator."""
+        return self.evaluate(profile, context)
+
     def map_attack_surface(self, profile: AgentProfile) -> AttackSurfaceMap:
         """
         Enumerate the agent's attack surface based on its profile.

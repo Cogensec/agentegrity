@@ -7,9 +7,15 @@ with continuous integrity evaluation, attestation chain generation,
 and violation handling.
 """
 
-from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
-from agentegrity import IntegrityEvaluator, IntegrityMonitor
-from agentegrity.core.monitor import ViolationAction, IntegrityViolationError
+from agentegrity import (
+    AgentProfile,
+    AgentType,
+    DeploymentContext,
+    IntegrityEvaluator,
+    IntegrityMonitor,
+    RiskTier,
+)
+from agentegrity.core.monitor import IntegrityViolationError, ViolationAction
 from agentegrity.layers import AdversarialLayer, CorticalLayer, GovernanceLayer
 
 
@@ -97,8 +103,13 @@ def main():
     print(f"  Chain valid: {chain.verify_chain()}")
     for i, record in enumerate(chain.records):
         score = record.integrity_score.get("composite", "?")
-        print(f"  [{i}] {record.record_id[:12]}... score={score} "
-              f"chain_prev={'...' + record.chain_previous[-8:] if record.chain_previous else 'None'}")
+        chain_prev = (
+            "..." + record.chain_previous[-8:] if record.chain_previous else "None"
+        )
+        print(
+            f"  [{i}] {record.record_id[:12]}... score={score} "
+            f"chain_prev={chain_prev}"
+        )
     print()
 
     # 6. Summary
@@ -107,7 +118,8 @@ def main():
     print("=" * 60)
     print(f"  Total evaluations: {monitor.evaluation_count}")
     print(f"  Total violations:  {len(monitor.violations)}")
-    print(f"  Attestation chain: {len(chain)} records, {'valid' if chain.verify_chain() else 'INVALID'}")
+    chain_status = "valid" if chain.verify_chain() else "INVALID"
+    print(f"  Attestation chain: {len(chain)} records, {chain_status}")
 
 
 if __name__ == "__main__":

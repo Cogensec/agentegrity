@@ -5,7 +5,7 @@ Agentegrity defines what it means for an autonomous AI agent to be whole:
 adversarially coherent, environmentally portable, and verifiably assured.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from agentegrity.core.attestation import AttestationChain, AttestationRecord
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore

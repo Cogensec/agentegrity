@@ -7,10 +7,9 @@ custom threat detectors, policy rules, and the high-level
 AgentegrityClient.
 """
 
-from agentegrity.sdk.client import AgentegrityClient
 from agentegrity.layers.adversarial import ThreatAssessment
-from agentegrity.layers.governance import PolicyRule, PolicyDecision
-
+from agentegrity.layers.governance import PolicyDecision, PolicyRule
+from agentegrity.sdk.client import AgentegrityClient
 
 # --- Custom threat detector ---
 
@@ -32,7 +31,10 @@ def detect_data_exfiltration(profile, context):
                     threat_type="data_exfiltration",
                     severity=0.80,
                     confidence=0.65,
-                    description="Large base64-encoded payload in tool output — potential exfiltration",
+                    description=(
+                        "Large base64-encoded payload in tool output "
+                        "— potential exfiltration"
+                    ),
                     indicators=["large_payload", "base64_encoding"],
                 ))
 

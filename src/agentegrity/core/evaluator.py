@@ -5,10 +5,11 @@ and produces composite integrity scores.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Protocol, Union
 
 
 class Layer(Protocol):
@@ -49,12 +50,14 @@ class PropertyScores:
     adversarial_coherence: float = 0.0
     environmental_portability: float = 0.0
     verifiable_assurance: float = 0.0
+    recovery_integrity: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
         return {
             "adversarial_coherence": self.adversarial_coherence,
             "environmental_portability": self.environmental_portability,
             "verifiable_assurance": self.verifiable_assurance,
+            "recovery_integrity": self.recovery_integrity,
         }
 
 
@@ -107,24 +110,32 @@ class IntegrityScore:
 
 @dataclass
 class PropertyWeights:
-    """Configurable weights for compositing the three property scores."""
+    """Configurable weights for compositing property scores.
+
+    The default weights sum to 1.0 across three dimensions (AC+EP+VA)
+    with recovery_integrity=0.0. To use four dimensions, set all four
+    weights explicitly so they sum to 1.0.
+    """
 
     adversarial_coherence: float = 0.40
     environmental_portability: float = 0.25
     verifiable_assurance: float = 0.35
+    recovery_integrity: float = 0.0
 
     def __post_init__(self) -> None:
         total = (
             self.adversarial_coherence
             + self.environmental_portability
             + self.verifiable_assurance
+            + self.recovery_integrity
         )
         if abs(total - 1.0) > 0.001:
             raise ValueError(
                 f"Property weights must sum to 1.0, got {total:.3f}. "
                 f"Current weights: AC={self.adversarial_coherence}, "
                 f"EP={self.environmental_portability}, "
-                f"VA={self.verifiable_assurance}"
+                f"VA={self.verifiable_assurance}, "
+                f"RI={self.recovery_integrity}"
             )
 
 
@@ -217,6 +228,7 @@ class IntegrityEvaluator:
             self.weights.adversarial_coherence * properties.adversarial_coherence
             + self.weights.environmental_portability * properties.environmental_portability
             + self.weights.verifiable_assurance * properties.verifiable_assurance
+            + self.weights.recovery_integrity * properties.recovery_integrity
         )
 
         total_latency = (time.perf_counter() - start) * 1000
@@ -262,6 +274,12 @@ class IntegrityEvaluator:
                     scores.verifiable_assurance, details["assurance_score"]
                 )
 
+            # Recovery integrity: pull from recovery key
+            if "recovery_score" in details:
+                scores.recovery_integrity = max(
+                    scores.recovery_integrity, details["recovery_score"]
+                )
+
         # Fallback: if no explicit property scores, derive from layer scores
         if scores.adversarial_coherence == 0.0 and results:
             adversarial_results = [r for r in results if "adversarial" in r.layer_name.lower()]
@@ -300,3 +318,101 @@ class IntegrityEvaluator:
     def __repr__(self) -> str:
         layer_names = [layer.name for layer in self.layers]
         return f"IntegrityEvaluator(layers={layer_names})"
+
+
+class AsyncLayer(Protocol):
+    """Protocol for async integrity layers."""
+
+    @property
+    def name(self) -> str: ...
+
+    async def aevaluate(
+        self, profile: Any, context: dict[str, Any] | None = None
+    ) -> LayerResult: ...
+
+
+AnyLayer = Union[Layer, AsyncLayer]
+
+
+class AsyncIntegrityEvaluator:
+    """Async evaluator that runs layers concurrently when possible.
+
+    When fail_fast=False, all layers run in parallel via asyncio.gather().
+    When fail_fast=True, layers run sequentially (each must complete
+    before deciding whether to continue).
+
+    Accepts both sync Layer and async AsyncLayer objects. Sync layers
+    are wrapped in asyncio.to_thread() for non-blocking execution.
+    """
+
+    def __init__(
+        self,
+        layers: list[AnyLayer],
+        weights: PropertyWeights | None = None,
+        fail_fast: bool = True,
+    ) -> None:
+        self.layers = layers
+        self.weights = weights or PropertyWeights()
+        self.fail_fast = fail_fast
+        self._version = "0.2.0"
+        # Reuse sync evaluator's scoring logic
+        self._sync = IntegrityEvaluator(
+            layers=[],  # unused, we override evaluate
+            weights=self.weights,
+            fail_fast=self.fail_fast,
+        )
+
+    async def _run_layer(
+        self, layer: AnyLayer, profile: Any, ctx: dict[str, Any]
+    ) -> LayerResult:
+        start = time.perf_counter()
+        if hasattr(layer, "aevaluate"):
+            result = await layer.aevaluate(profile, ctx)
+        else:
+            result = await asyncio.to_thread(
+                layer.evaluate, profile, ctx
+            )
+        result.latency_ms = (time.perf_counter() - start) * 1000
+        return result
+
+    async def evaluate(
+        self,
+        profile: Any,
+        context: dict[str, Any] | None = None,
+    ) -> IntegrityScore:
+        start = time.perf_counter()
+        ctx = context or {}
+        layer_results: list[LayerResult] = []
+
+        if self.fail_fast:
+            for layer in self.layers:
+                result = await self._run_layer(layer, profile, ctx)
+                layer_results.append(result)
+                if result.action == "block":
+                    break
+        else:
+            tasks = [self._run_layer(layer, profile, ctx) for layer in self.layers]
+            layer_results = list(await asyncio.gather(*tasks))
+
+        properties = self._sync._compute_property_scores(layer_results)
+        composite = (
+            self.weights.adversarial_coherence * properties.adversarial_coherence
+            + self.weights.environmental_portability * properties.environmental_portability
+            + self.weights.verifiable_assurance * properties.verifiable_assurance
+            + self.weights.recovery_integrity * properties.recovery_integrity
+        )
+
+        total_latency = (time.perf_counter() - start) * 1000
+
+        return IntegrityScore(
+            composite=round(composite, 4),
+            properties=properties,
+            layer_results=layer_results,
+            confidence=self._sync._compute_confidence(layer_results),
+            evaluator_version=self._version,
+            total_latency_ms=round(total_latency, 2),
+        )
+
+    def __repr__(self) -> str:
+        layer_names = [layer.name for layer in self.layers]
+        return f"AsyncIntegrityEvaluator(layers={layer_names})"
