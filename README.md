@@ -67,7 +67,7 @@ We believe in being explicit about what the library is and is not, because a sec
 
 **What it does.** It provides a Python implementation of the three-layer verification architecture defined in the [Agentegrity Specification](spec/SPECIFICATION.md). It computes integrity scores from real evaluation runs, generates cryptographically signed attestation records, builds tamper-evident attestation chains, and produces structured audit logs for governance workflows. It runs locally with zero required dependencies and never makes network calls to Cogensec or any other service. It ships with extension points for custom threat detectors, custom policy rules, and custom validators.
 
-**What it does not do.** The cortical layer's default checks are pattern-based reference implementations — substring matching for prompt injection indicators, dictionary comparisons for action distribution drift, structural inspection of memory provenance. They will catch obvious cases and miss sophisticated paraphrased attacks. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.3.0 the library ships five framework adapters (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK); adapters for Semantic Kernel, AutoGen, and AWS Bedrock Agents are on the v0.4.0 roadmap.
+**What it does not do.** The cortical layer's default checks are pattern-based reference implementations — substring matching for prompt injection indicators, dictionary comparisons for action distribution drift, structural inspection of memory provenance. They will catch obvious cases and miss sophisticated paraphrased attacks. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.4.0 the library ships five framework adapters (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK); adapters for Semantic Kernel, AutoGen, and AWS Bedrock Agents are on the v0.5.0 roadmap.
 
 **What it deliberately is not.** It is not a guardrail. It does not block agent actions on its own — when an action is blocked, that is the result of explicit governance policy, not inferred risk. It is not a runtime enforcement layer trying to compete with WAF-style products. It is not a hosted service. It is a measurement and verification library, and everything it does is in service of producing evidence that an agent has (or lacks) the structural properties of a self-securing system.
 
@@ -276,7 +276,22 @@ agentegrity-framework/
 │   └── sdk/                     # High-level convenience wrapper
 │       └── client.py            # AgentegrityClient
 │
-├── tests/                       # Test suite (126 tests, all passing)
+├── schemas/                     # Cross-language wire contract
+│   ├── exporter/                # JSON Schema (Draft 2020-12)
+│   │   ├── common.json          # Shared $defs (profile, event, score)
+│   │   ├── session_start.json
+│   │   ├── event.json
+│   │   └── session_end.json
+│   └── openapi.yaml             # OpenAPI 3.1 spec for exporter endpoints
+│
+├── clients/
+│   └── typescript/              # @agentegrity/client — TS/Bun/Node reporter
+│       ├── src/                 # AgentegrityReporter + types
+│       ├── examples/            # basic.ts wiring example
+│       ├── package.json
+│       └── README.md
+│
+├── tests/                       # Test suite (145 tests, all passing)
 │
 └── examples/                    # Usage examples
     ├── claude_adapter.py
