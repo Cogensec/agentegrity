@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/openai-agents",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Zero-config agentegrity adapter for the OpenAI Agents JS SDK (@openai/agents). Mirrors the Python agentegrity.openai_agents module.",
   "license": "Apache-2.0",
   "type": "module",

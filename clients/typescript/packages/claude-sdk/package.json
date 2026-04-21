@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/claude-sdk",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Zero-config agentegrity adapter for the Claude Agent SDK (@anthropic-ai/claude-agent-sdk). Mirrors the Python agentegrity.claude module.",
   "license": "Apache-2.0",
   "type": "module",

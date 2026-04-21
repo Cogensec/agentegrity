@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/client",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TypeScript client for agentegrity — report agent events to any backend implementing the Agentegrity Exporter HTTP API.",
   "license": "Apache-2.0",
   "type": "module",

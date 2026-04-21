@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentegrity"
-version = "0.5.0"
+version = "0.5.1"
 description = "The open standard for AI agent integrity. Evaluate, enforce, and prove that autonomous agents are adversarially coherent, environmentally portable, and verifiably assured."
 readme = "README.md"
 license = "Apache-2.0"
