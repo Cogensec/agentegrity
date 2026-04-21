@@ -157,7 +157,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
       - name: Publish @agentegrity/${{ matrix.package }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public
         working-directory: clients/typescript/packages/${{ matrix.package }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
