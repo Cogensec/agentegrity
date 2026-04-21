@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/*.test.ts",
+    "test": "AGENTEGRITY_OFFLINE=1 node --test --import tsx src/*.test.ts",
     "clean": "rm -rf dist"
   },
   "keywords": ["agentegrity", "langchain", "langgraph", "agent", "security", "observability"],

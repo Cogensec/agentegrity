@@ -142,6 +142,11 @@ export class AgentegrityReporter {
     step: string,
     body: unknown,
   ): Promise<void> {
+    // Offline mode: skip the network entirely but keep exporter fan-out.
+    // Used by the test suite so CI runs don't pay ECONNREFUSED round-trips.
+    const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+    const off = env?.AGENTEGRITY_OFFLINE;
+    if (off === "1" || off === "true" || off === "TRUE") return;
     try {
       const headers: Record<string, string> = {
         "content-type": "application/json",
