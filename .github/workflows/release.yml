@@ -111,6 +111,9 @@ jobs:
       - name: Verify version parity
         run: bun run check-versions
         working-directory: clients/typescript
+      - name: Build @agentegrity/client first
+        run: bun run --filter @agentegrity/client build
+        working-directory: clients/typescript
       - name: Build all packages
         run: bun run build
         working-directory: clients/typescript
