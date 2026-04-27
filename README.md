@@ -151,7 +151,7 @@ register_exporter(PrintExporter())
 graph = instrument_graph(my_graph)
 ```
 
-This is the integration point the commercial **`agentegrity-pro`** package attaches to — install it, register its `HTTPExporter`, and every session streams live to the hosted dashboard.
+This is the integration point the commercial [**`agentegrity-pro`**](https://github.com/cogensec/agentegrity-pro) dashboard listens on. Deploy the pro backend with `docker compose up`, set `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` on the agent, and the default adapter streams every session over the published exporter HTTP API — no extra package required.
 
 ### Non-Python agents (TypeScript / Bun / Node)
 

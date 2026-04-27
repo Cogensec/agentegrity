@@ -74,7 +74,7 @@ register_exporter(PrintExporter())
 graph = instrument_graph(my_graph)
 ```
 
-Exporter exceptions are caught and logged — the exporter can never break the instrumented agent. For a production dashboard, install the commercial `agentegrity-pro` package and register its `HTTPExporter`.
+Exporter exceptions are caught and logged — the exporter can never break the instrumented agent. For a production dashboard, deploy the commercial [`agentegrity-pro`](https://github.com/cogensec/agentegrity-pro) backend (`docker compose up`) and point the agent at it by setting `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` — the default adapter picks them up automatically and streams every session over the published exporter HTTP API.
 
 **Non-Python agents** use the same contract via one of the six TypeScript adapters, each shipping a 2–3 line zero-config enable. Pick the one that matches your framework:
 
