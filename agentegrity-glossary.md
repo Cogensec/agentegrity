@@ -98,7 +98,7 @@ A measure of how deeply security intelligence is integrated into an agent's deci
 ## Architecture
 
 **Agentegrity Stack** †
-The three-layer security architecture required to build and maintain agentegrity in autonomous AI agents: the Adversarial Layer (continuous red teaming), the Cortical Layer (embedded security models), and the Governance Layer (runtime monitoring and compliance). The three layers form a closed loop: attack, defend, observe, repeat.
+The four-layer security architecture required to build and maintain agentegrity in autonomous AI agents: the Adversarial Layer (continuous red teaming), the Cortical Layer (embedded security models), the Governance Layer (runtime monitoring and compliance), and the Recovery Layer (compromise detection and continuity verification). The four layers form a closed loop: attack, defend, observe, recover, repeat.
 
 **Adversarial Layer** †
 The first layer of the agentegrity stack. Responsible for continuously testing the agent's defenses through automated adversarial red teaming, attack simulation, and vulnerability probing across the full PDA loop. In physical AI systems, includes simulation-based adversarial testing in synthetic environments. The adversarial layer does not wait for attacks — it manufactures them proactively.
@@ -108,6 +108,9 @@ The second layer of the agentegrity stack. A family of specialized security mode
 
 **Governance Layer** †
 The third layer of the agentegrity stack. Provides runtime monitoring, observability, and compliance enforcement across deployed agent populations. Tracks agentegrity scores over time, detects degradation, manages security policy updates, and produces audit-ready assurance evidence. Operates at the fleet level rather than the individual agent level.
+
+**Recovery Layer** †
+The fourth layer of the agentegrity stack. Verifies the agent's self-recovery capability — its ability to detect when integrity has been compromised and restore itself to a known-good state. Watches the rolling history of composite scores for sustained degradation, verifies attestation chain continuity, checks behavioral baseline freshness, and confirms the agent declares the recovery mechanisms (`state_restore`, `checkpoint`, `rollback`, `session_reset`) it would need to roll back. Where the adversarial layer keeps attacks out and the cortical layer detects degradation while it happens, the recovery layer is what runs when both have been bypassed.
 
 **Cortical Model** †
 A purpose-built security model designed for embedding within an AI agent's decision architecture. Unlike guardrail models that operate at the input-output boundary, cortical models participate in the agent's reasoning process — detecting adversarial patterns, enforcing behavioral policies, and validating decision coherence in real time. The Cortex Series is an implementation of the cortical model concept.

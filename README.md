@@ -37,12 +37,16 @@ v0.5.3 ships verification for all three capabilities (self-defense via the adver
 
 ---
 
-## The Three Layers
+## The Four Layers
 
-The framework implements verification through three architectural layers. Each layer addresses a different dimension of integrity. Together they form a complete envelope around the agent.
+The framework implements verification through four architectural layers. Each layer addresses a different dimension of integrity. Together they form a complete envelope around the agent.
 
 ```
 ┌─────────────────────────────────────────────┐
+│            RECOVERY LAYER                   │
+│   Compromise detection · Continuity ·       │
+│   Sustained-degradation tracking            │
+├─────────────────────────────────────────────┤
 │           GOVERNANCE LAYER                  │
 │   Policy enforcement · Human oversight ·    │
 │   Compliance mapping · Audit trails         │
@@ -57,7 +61,7 @@ The framework implements verification through three architectural layers. Each l
 └─────────────────────────────────────────────┘
 ```
 
-The **Adversarial Layer** verifies self-defense by mapping the agent's attack surface and detecting threats across input channels. The **Cortical Layer** verifies self-stability by monitoring reasoning consistency, memory integrity, and behavioral drift from baseline. The **Governance Layer** enforces organizational policy and produces audit trails so verification results have a place to live in compliance workflows.
+The **Adversarial Layer** verifies self-defense by mapping the agent's attack surface and detecting threats across input channels. The **Cortical Layer** verifies self-stability by monitoring reasoning consistency, memory integrity, and behavioral drift from baseline. The **Governance Layer** enforces organizational policy and produces audit trails so verification results have a place to live in compliance workflows. The **Recovery Layer** verifies self-recovery by tracking the attestation chain for continuity, watching score history for sustained degradation, and confirming the agent declares the recovery capabilities it claims (`state_restore`, `checkpoint`, `rollback`, `session_reset`).
 
 ---
 
@@ -65,7 +69,7 @@ The **Adversarial Layer** verifies self-defense by mapping the agent's attack su
 
 We believe in being explicit about what the library is and is not, because a security library that overpromises is worse than one that underdelivers.
 
-**What it does.** It provides a Python implementation of the three-layer verification architecture defined in the [Agentegrity Specification](spec/SPECIFICATION.md). It computes integrity scores from real evaluation runs, generates cryptographically signed attestation records, builds tamper-evident attestation chains, and produces structured audit logs for governance workflows. It runs locally with zero required dependencies and never makes network calls to Cogensec or any other service. It ships with extension points for custom threat detectors, custom policy rules, and custom validators.
+**What it does.** It provides a Python implementation of the four-layer verification architecture defined in the [Agentegrity Specification](spec/SPECIFICATION.md). It computes integrity scores from real evaluation runs, generates cryptographically signed attestation records, builds tamper-evident attestation chains, and produces structured audit logs for governance workflows. It runs locally with zero required dependencies and never makes network calls to Cogensec or any other service. It ships with extension points for custom threat detectors, custom policy rules, and custom validators.
 
 **What it does not do.** The cortical layer's default checks are pattern-based reference implementations — substring matching for prompt injection indicators, dictionary comparisons for action distribution drift, structural inspection of memory provenance. They will catch obvious cases and miss sophisticated paraphrased attacks. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.5.3 the library ships eleven framework adapters — five in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK) and six in TypeScript (the same five plus Vercel AI SDK). Adapters for Semantic Kernel, AutoGen, and AWS Bedrock Agents are on the post-0.5.x roadmap.
 
@@ -337,7 +341,7 @@ agentegrity-framework/
 
 ## Roadmap
 
-**v0.1.0 — Initial release.** Three-layer architecture, pattern-based reference checks, cryptographic attestation, custom validator and policy extension points, three working examples.
+**v0.1.0 — Initial release.** Three-layer architecture (adversarial / cortical / governance), pattern-based reference checks, cryptographic attestation, custom validator and policy extension points, three working examples. The recovery layer joined as a default fourth layer in v0.5.3.
 
 **v0.2.0 — Claude Agent SDK, LLM-backed checks, and self-recovery.** First framework adapter targeting the Claude Agent SDK with five integration points (Harness, Tools, Sandbox, Session, Orchestration). Optional LLM-backed cortical checks using Claude for semantic analysis of reasoning chains, memory provenance, and behavioral drift. Recovery integrity layer for self-recovery verification. Async-first evaluator pipeline that runs independent layers in parallel.
 
@@ -367,6 +371,7 @@ agentegrity-framework/
 | [Adversarial Layer](spec/layers/adversarial-layer.md) | Self-defense verification architecture |
 | [Cortical Layer](spec/layers/cortical-layer.md) | Self-stability verification architecture |
 | [Governance Layer](spec/layers/governance-layer.md) | Policy enforcement and audit architecture |
+| [Recovery Layer](spec/layers/recovery-layer.md) | Self-recovery verification architecture |
 
 ---
 

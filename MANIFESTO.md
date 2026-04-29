@@ -56,9 +56,9 @@ Observational security — "we watched the agent and it seemed fine" — is not 
 
 ---
 
-## The Three Layers
+## The Four Layers
 
-Agentegrity is enforced through three architectural layers. Each layer addresses a different dimension of integrity. Together, they form a complete integrity envelope around the agent.
+Agentegrity is enforced through four architectural layers. Each layer addresses a different dimension of integrity. Together, they form a complete integrity envelope around the agent.
 
 ### Adversarial Layer
 
@@ -99,6 +99,19 @@ Core functions:
 
 The governance layer answers: **is this agent operating within authorized boundaries?**
 
+### Recovery Layer
+
+The recovery layer verifies the agent's self-recovery capability. Where the adversarial layer keeps attacks out and the cortical layer detects degradation while it happens, the recovery layer is what runs when both have been bypassed: it tracks the trajectory of the agent's integrity over time, verifies the audit trail is intact, and confirms the agent declares the mechanisms it would need to roll back to a known-good state.
+
+Core functions:
+- Sustained-degradation detection across a rolling window of composite scores
+- Behavioral baseline freshness and continuity checks
+- Recovery capability assessment against the agent's declared profile
+- Attestation chain continuity verification (tamper-evident audit trail)
+- Escalation signals when continuity is broken
+
+The recovery layer answers: **if this agent has been compromised, can it restore itself?**
+
 ---
 
 ## What Agentegrity Is Not
@@ -115,7 +128,7 @@ The governance layer answers: **is this agent operating within authorized bounda
 
 ## The Standard
 
-This manifesto defines the concept. The [Agentegrity Framework Specification](spec/SPECIFICATION.md) defines the technical standard — how to measure the three properties, how to implement the three layers, what controls are required at each maturity level, and how to produce verifiable attestation records.
+This manifesto defines the concept. The [Agentegrity Framework Specification](spec/SPECIFICATION.md) defines the technical standard — how to measure the three properties, how to implement the four layers, what controls are required at each maturity level, and how to produce verifiable attestation records.
 
 The specification is open. Implementations are welcome from any vendor, any framework, any deployment context. The integrity of autonomous agents is too important to be proprietary.
 
