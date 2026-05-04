@@ -77,6 +77,18 @@ in beta until the v1.0 stability criteria documented in
   (`test_drift.py`), checkpoint backend round-trips
   (`test_checkpoint.py`), and the tamper→restore cycle
   (`test_recovery_restore.py`).
+- **Cross-adapter conformance suite** (`test_adapter_conformance.py`).
+  Same canonical event stream is driven through every shipped Python
+  adapter (Claude / LangChain / OpenAI Agents / CrewAI / Google ADK)
+  and the same 9 invariants are pinned per adapter — base-class
+  inheritance, evaluation count vs chain length, chain verification,
+  session-id stability, exporter lifecycle (start/event×N/end),
+  exporter idempotency, fail-open on broken exporter, multi-exporter
+  fan-out, summary shape, idempotent close, unknown-event tolerance.
+  Adding a new adapter requires one line in `ADAPTER_CLASSES`; the
+  matrix runs against it automatically. 51 tests; a sentinel test
+  fails loudly if the registry size drifts so adapters can't be
+  silently dropped.
 
 ### Migration
 - Callers that constructed `PropertyWeights` with three keyword

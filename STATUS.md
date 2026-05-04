@@ -93,7 +93,7 @@ chain.
 | CI matrix (Python 3.10/3.12, Node 18/20/22) | ✅ | `.github/workflows/ci.yml`. |
 | Version-parity gate                  |   ✅   | `scripts/check_versions.py` (Python) + `scripts/check-versions.ts` (TS) wired into CI. |
 | Release workflow                     |   ✅   | `.github/workflows/release.yml` publishes Python wheel + npm matrix. |
-| Conformance test suite (cross-adapter) | 🛠 | Phase 3 plan: parametrized fixture across every adapter. |
+| Conformance test suite (cross-adapter) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (51 tests today; matrix of 9 invariants × 5 adapters + a registry-stability sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
 | Detection benchmark suite            |   🛠   | Phase 3 plan: nightly run vs PINT / AgentDojo / InjecAgent. |
 | OpenTelemetry instrumentation        |   🛠   | Phase 5 plan. |
 | Prometheus metrics                   |   🛠   | Phase 5 plan. |
@@ -118,6 +118,6 @@ the repo.
 
 ---
 
-**Last reviewed:** v0.5.3 + Phase 2a/2b/2c (2026-05-04). This file is
-the source of truth for "what's done." Update it in the same commit
+**Last reviewed:** v0.5.3 + Phase 2a/2b/2c/2d (2026-05-04). This file
+is the source of truth for "what's done." Update it in the same commit
 that ships a status change.
