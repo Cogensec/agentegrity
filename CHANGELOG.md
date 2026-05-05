@@ -10,6 +10,11 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+_Nothing yet. v0.6.0 was just cut — open issues for the next batch of
+work as they come in._
+
+## [0.6.0] - 2026-05-05
+
 ### Changed
 - **Default integrity pipeline now has four layers, not three.**
   `RecoveryLayer` joins `AdversarialLayer` / `CorticalLayer` /
@@ -249,7 +254,8 @@ in beta until the v1.0 stability criteria documented in
 - Three working examples (`basic_evaluation.py`,
   `runtime_monitoring.py`, `custom_validator.py`).
 
-[Unreleased]: https://github.com/cogensec/agentegrity-framework/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/cogensec/agentegrity-framework/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.6.0
 [0.5.3]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.5.3
 [0.5.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.5.0
 [0.4.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.4.0
