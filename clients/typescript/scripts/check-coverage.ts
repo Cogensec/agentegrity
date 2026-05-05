@@ -42,20 +42,57 @@ if (result.status !== 0 && result.status !== null) {
 const output = (result.stdout ?? "") + "\n" + (result.stderr ?? "");
 process.stdout.write(output);
 
-// "All files" line looks like:
-//   All files                            |   83.40 |   89.99 |
-// where the columns are: % Funcs | % Lines | Uncovered Lines.
-const match = output.match(/^All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/m);
-if (!match) {
+// Per-file coverage rows look like:
+//   packages/client/src/default.ts       |   82.61 |   92.36 | 165,...
+//   packages/client/dist/default.js      |   91.30 |   94.78 | ...
+// The "All files" aggregate counts both src/ AND dist/, but the
+// dist/*.js are tsc-compiled copies of the same source. Counting both
+// double-measures the package and drives the aggregate down. We skip
+// dist/ rows and recompute the aggregate ourselves so the threshold
+// gate measures the actual source surface.
+//
+// (Bun 1.3.11's bunfig `coveragePathIgnorePatterns` is documented but
+// does not actually filter coverage output — verified locally. Worked
+// around here.)
+
+interface FileRow {
+  path: string;
+  funcs: number;
+  lines: number;
+}
+
+const rowRe =
+  /^\s+([A-Za-z][^|\s][^|]*?)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/gm;
+const rows: FileRow[] = [];
+for (const m of output.matchAll(rowRe)) {
+  const path = (m[1] ?? "").trim();
+  if (!path || path === "All files" || path === "File") continue;
+  rows.push({
+    path,
+    funcs: Number(m[2]),
+    lines: Number(m[3]),
+  });
+}
+
+if (rows.length === 0) {
   console.error(
-    "\nCould not find 'All files' summary line in `bun test --coverage` output. " +
+    "\nCould not find any per-file coverage rows in `bun test --coverage` output. " +
       "Has the bun coverage reporter format changed?",
   );
   process.exit(2);
 }
 
-const funcs = Number(match[1]);
-const lines = Number(match[2]);
+// Filter out tsc-compiled dist/ rows — they're a duplicate of the
+// corresponding src/ rows and only show up because the cross-package
+// parity test imports `@agentegrity/<pkg>` which resolves to dist/.
+const srcRows = rows.filter((r) => !r.path.includes("/dist/"));
+if (srcRows.length === 0) {
+  console.error("\nAfter filtering dist/ rows, no source rows remain.");
+  process.exit(2);
+}
+
+const funcs = srcRows.reduce((s, r) => s + r.funcs, 0) / srcRows.length;
+const lines = srcRows.reduce((s, r) => s + r.lines, 0) / srcRows.length;
 
 let failed = false;
 console.log("");

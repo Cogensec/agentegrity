@@ -93,7 +93,9 @@ chain.
 | CI matrix (Python 3.10/3.12, Node 18/20/22) | ✅ | `.github/workflows/ci.yml`. |
 | Version-parity gate                  |   ✅   | `scripts/check_versions.py` (Python) + `scripts/check-versions.ts` (TS) wired into CI. |
 | Release workflow                     |   ✅   | `.github/workflows/release.yml` publishes Python wheel + npm matrix. |
-| Conformance test suite (cross-adapter) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (51 tests today; matrix of 9 invariants × 5 adapters + a registry-stability sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
+| Conformance test suite (Python adapters) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (51 tests; 9 invariants × 5 adapters + registry sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
+| Conformance test suite (TS packages)   | ✅ | `clients/typescript/test/cross-package-conformance.test.ts` is the TS mirror — 49 tests across 6 packages (claude-sdk / langchain / openai-agents / crewai / google-adk / vercel-ai), driving the same shared-core seam (`adapter()`) through the same canonical event stream and pinning the same parity invariants. The new suite caught two real bugs in `@agentegrity/client` on first run: missing `adapterName` field, no `registerExporter` deduplication. Both fixed in the same commit. |
+| Performance budget                     | ✅ | `tests/test_perf_budget.py` (run via `pytest -m benchmark`) measures 200-iteration p95 latency for each layer in isolation and the full default pipeline. Calibrated ceilings: 50 ms per-layer, 100 ms full-pipeline. Currently measured: per-layer p95 0.01-0.20 ms, pipeline p95 0.23 ms (250-5000x cushion before LLM-backed paths land). Per-layer + pipeline budgets pinned in metadata-sentinel tests so a maintainer can't silently raise them. |
 | Detection benchmark suite            |   ✅   | `pytest -m benchmark` runs the in-repo synthetic suite (~30 attacks + ~30 benign across 6 attack families) with calibrated thresholds (TPR ≥ 0.95, FPR ≤ 0.05, F1 ≥ 0.95, plus per-family floor: every family must register at least one TP). Loader stubs for PINT / AgentDojo / InjecAgent auto-skip when their `AGENTEGRITY_BENCH_*` env var is unset, so cron can plug in real datasets without touching CI defaults. `scripts/run_benchmarks.py [--all]` prints a markdown report and exits non-zero on regression. **Real-world numbers published below.** |
 | OpenTelemetry instrumentation        |   🛠   | Phase 5 plan. |
 | Prometheus metrics                   |   🛠   | Phase 5 plan. |
@@ -106,10 +108,10 @@ chain.
 | Semantic Kernel adapter (Python + TS) |   4   | `pip install agentegrity[semantic-kernel]` + `@agentegrity/semantic-kernel`. |
 | AutoGen adapter (Python)              |   4   | `pip install agentegrity[autogen]`. |
 | AWS Bedrock Agents adapter (Python)   |   4   | `pip install agentegrity[bedrock]`. |
-| Reference SessionExporter receiver    |   4   | Self-hostable FastAPI app under `examples/exporter_receiver/`. |
+| ~~Reference SessionExporter receiver~~ | ✅ | Shipped in `examples/exporter_receiver/`. FastAPI app implementing all three endpoints (`POST /sessions`, `POST /sessions/{id}/events`, `POST /sessions/{id}/end`); validates each payload against `schemas/exporter/*.json` via `jsonschema.Draft202012Validator`. 11 smoke tests cover happy-path (202) and validation errors (422). Not a production backend — in-memory store, no auth — but unblocks adoption of the exporter wire format without `agentegrity-pro`. |
 | JWS / COSE attestation serializations |   6   | Interop with generic verifiers; raw Ed25519 stays the default. |
 | Key rotation + KMS interface          |   6   | `KeyProvider` Protocol with file / env / AWS KMS impls. |
-| Threat model document                 |   6   | `spec/threat-model.md`. |
+| ~~Threat model document~~              | ✅ | Shipped at [`spec/threat-model.md`](spec/threat-model.md) — STRIDE on the framework itself, 14 mitigations cross-linked to the test suite, residual-risk discussion per category, open items for v0.7. Companion to `SECURITY.md`. |
 | Reference docs site (MkDocs / Docusaurus) | 7 | Auto-generated API reference + per-layer / per-adapter guides. |
 
 Phases reference the canonical dev plan; see `/root/.claude/plans/`
@@ -172,6 +174,6 @@ picks the same env var up from repository variables.
 
 ---
 
-**Last reviewed:** v0.5.3 + Phase 2a/2b/2c/2d/2e + Phase 2-finisher
-(2026-05-05). This file is the source of truth for "what's done."
-Update it in the same commit that ships a status change.
+**Last reviewed:** v0.6.0 + Phase 3 finisher (2026-05-06). This file
+is the source of truth for "what's done." Update it in the same commit
+that ships a status change.

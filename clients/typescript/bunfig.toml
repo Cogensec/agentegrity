@@ -1,0 +1,10 @@
+# Bun workspace config for the @agentegrity/* TypeScript packages.
+
+[test]
+# Skip transpiled dist/ output in coverage measurement. The cross-package
+# parity test in test/cross-package-conformance.test.ts imports each
+# package via its `main` (which points to dist/index.js), so without this
+# we double-count tsc output and the per-package src/ files. Measuring
+# only src/ matches what the per-package tests already do.
+coveragePathIgnorePatterns = ["dist/"]
+coverageSkipTestFiles = true

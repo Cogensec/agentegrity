@@ -52,6 +52,13 @@ export interface EmittableEvent {
 export interface DefaultAdapter {
   /** The wrapped reporter — escape hatch for advanced users. */
   readonly reporter: AgentegrityReporter;
+  /**
+   * The adapter name passed to {@link createDefaultAdapter}. Mirrors the
+   * Python `_BaseAdapter.name` field — used by the cross-package
+   * conformance suite to verify each `@agentegrity/<framework>` package
+   * is wired to the correct seam.
+   */
+  readonly adapterName: string;
   /** Current session id (stable for the lifetime of this adapter). */
   readonly sessionId: string;
   /** True if the adapter is disabled via AGENTEGRITY_DISABLED=1. */
@@ -162,6 +169,7 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
 
   const api: DefaultAdapter = {
     reporter,
+    adapterName,
     get sessionId() {
       return reporter.sessionId;
     },
@@ -232,7 +240,12 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
     },
 
     registerExporter(exporter) {
-      exporters.push(exporter);
+      // Idempotent on identity — re-registering the same instance must
+      // not double-fire on_session_start / on_event / on_session_end.
+      // Mirrors the Python `_BaseAdapter.register_exporter` contract.
+      if (!exporters.includes(exporter)) {
+        exporters.push(exporter);
+      }
     },
 
     getSummary(): SessionSummary {

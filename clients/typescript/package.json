@@ -10,7 +10,8 @@
   "scripts": {
     "build": "bun run --filter '@agentegrity/*' build",
     "typecheck": "bun run --filter '@agentegrity/*' typecheck",
-    "test": "bun run --filter '@agentegrity/*' test",
+    "test": "bun run --filter '@agentegrity/*' test && bun test test/",
+    "test:parity": "bun test test/",
     "test:coverage": "bun test --coverage",
     "check-coverage": "bun run scripts/check-coverage.ts",
     "clean": "bun run --filter '@agentegrity/*' clean",
@@ -19,7 +20,14 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "tsx": "^4.7.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "@agentegrity/client": "workspace:*",
+    "@agentegrity/claude-sdk": "workspace:*",
+    "@agentegrity/langchain": "workspace:*",
+    "@agentegrity/openai-agents": "workspace:*",
+    "@agentegrity/crewai": "workspace:*",
+    "@agentegrity/google-adk": "workspace:*",
+    "@agentegrity/vercel-ai": "workspace:*"
   },
   "engines": {
     "node": ">=18"
