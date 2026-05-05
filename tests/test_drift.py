@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from agentegrity.core.profile import (
     AgentProfile,
     AgentType,
@@ -156,6 +158,86 @@ class TestDriftIntegration:
         result = layer.evaluate(_profile(), {})
         drift = result.details["drift"]
         assert drift["drift_score"] == 0.0
+
+
+class TestWassersteinMetric:
+    """The optional Wasserstein drift metric, behind `[stats]`."""
+
+    @pytest.fixture
+    def scipy_or_skip(self):
+        try:
+            import scipy.stats  # noqa: F401
+        except ImportError:
+            pytest.skip(
+                "scipy not installed; `pip install agentegrity[stats]` to enable"
+            )
+
+    def test_identical_distributions_zero(self, scipy_or_skip):
+        layer = CorticalLayer(metric="wasserstein", min_drift_samples=10)
+        d, ok = layer._distribution_distance(
+            {"a": 50, "b": 50}, {"a": 50, "b": 50}
+        )
+        assert ok
+        assert d == 0.0
+
+    def test_disjoint_support_near_one(self, scipy_or_skip):
+        # Maximum 1D EMD over a 2-point support normalises near 1.0.
+        layer = CorticalLayer(metric="wasserstein", min_drift_samples=10)
+        d, ok = layer._distribution_distance({"a": 100}, {"b": 100})
+        assert ok
+        assert 0.5 < d <= 1.0
+
+    def test_insufficient_samples_returns_ok_false(self, scipy_or_skip):
+        layer = CorticalLayer(metric="wasserstein", min_drift_samples=20)
+        d, ok = layer._distribution_distance({"a": 5}, {"a": 4})
+        assert ok is False
+        assert d == 0.0
+
+    def test_symmetric(self, scipy_or_skip):
+        # 1D EMD is symmetric — d(P,Q) == d(Q,P) — same as JS.
+        layer = CorticalLayer(metric="wasserstein", min_drift_samples=10)
+        p = {"a": 70, "b": 30}
+        q = {"a": 20, "b": 80}
+        forward, _ = layer._distribution_distance(p, q)
+        reverse, _ = layer._distribution_distance(q, p)
+        assert forward == reverse
+
+    def test_falls_back_to_js_when_scipy_missing(self, monkeypatch, caplog):
+        # Force the resolver to return None even if scipy IS installed,
+        # so we can verify the warning + fallback path.
+        from agentegrity.layers import cortical
+
+        monkeypatch.setattr(cortical, "_resolve_wasserstein", lambda: None)
+
+        with caplog.at_level("WARNING", logger="agentegrity.cortical"):
+            layer = CorticalLayer(metric="wasserstein", min_drift_samples=10)
+        assert layer.metric == "wasserstein"
+        assert layer._wasserstein_fn is None
+        # Warning surfaces the missing-scipy story exactly once.
+        warning_messages = [
+            r.message for r in caplog.records
+            if "wasserstein" in r.message.lower()
+        ]
+        assert any("scipy" in m.lower() for m in warning_messages)
+
+        # Functionally falls back to JS — same numbers as a JS-default
+        # layer.
+        d, ok = layer._distribution_distance(
+            {"a": 100, "b": 100}, {"a": 30, "b": 170}
+        )
+        layer_js = CorticalLayer(metric="js", min_drift_samples=10)
+        d_js, _ = layer_js._distribution_distance(
+            {"a": 100, "b": 100}, {"a": 30, "b": 170}
+        )
+        assert ok
+        assert d == d_js
+
+    def test_metric_default_is_js(self):
+        # Sentinel: the default constructor must not silently switch
+        # users onto wasserstein.
+        layer = CorticalLayer()
+        assert layer.metric == "js"
+        assert layer._wasserstein_fn is None
 
 
 class TestKlMonotonicity:

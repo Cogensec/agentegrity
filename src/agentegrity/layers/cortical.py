@@ -7,13 +7,33 @@ This layer protects reasoning, memory, and behavioral consistency.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile
+
+logger = logging.getLogger("agentegrity.cortical")
+
+DriftMetric = Literal["js", "wasserstein"]
+
+
+def _resolve_wasserstein() -> Any:
+    """Lazily import scipy.stats.wasserstein_distance.
+
+    Returns the function if scipy is installed, else None. Kept at
+    module level so a single import attempt is shared across all
+    CorticalLayer instances built with metric='wasserstein' in the
+    same process.
+    """
+    try:
+        from scipy.stats import wasserstein_distance  # type: ignore[import-untyped]
+        return wasserstein_distance
+    except ImportError:
+        return None
 
 if TYPE_CHECKING:
     # Imported lazily to avoid a circular import — baseline_store imports
@@ -142,6 +162,17 @@ class CorticalLayer:
         for ``profile.agent_id`` on first ``evaluate``. ``update_baseline``
         writes through to the store after each update so baselines
         survive process restarts.
+    metric : {"js", "wasserstein"}
+        Distribution distance for drift detection. Default ``"js"`` uses
+        Jensen-Shannon distance with Laplace smoothing (always
+        available, symmetric over unordered support, bounded in [0,1]).
+        ``"wasserstein"`` uses the 1D Earth Mover's Distance from
+        ``scipy.stats.wasserstein_distance`` — useful when the support
+        set has a meaningful ordinal interpretation (latency buckets,
+        risk tiers). Wasserstein requires the ``[stats]`` extra
+        (``pip install agentegrity[stats]``); when scipy is not
+        installed the layer logs a one-time warning and falls back to
+        Jensen-Shannon.
     """
 
     def __init__(
@@ -152,6 +183,7 @@ class CorticalLayer:
         baseline: BehavioralBaseline | None = None,
         min_drift_samples: int = 20,
         baseline_store: "BaselineStore | None" = None,
+        metric: DriftMetric = "js",
     ):
         self.drift_tolerance = drift_tolerance
         self.memory_integrity_threshold = memory_integrity_threshold
@@ -160,6 +192,18 @@ class CorticalLayer:
         self.min_drift_samples = min_drift_samples
         self._baseline_store = baseline_store
         self._observation_buffer: list[dict[str, Any]] = []
+        self.metric: DriftMetric = metric
+        # Resolved at construction so a missing scipy gets a single
+        # warning per layer instance, not one per evaluate().
+        self._wasserstein_fn = (
+            _resolve_wasserstein() if metric == "wasserstein" else None
+        )
+        if metric == "wasserstein" and self._wasserstein_fn is None:
+            logger.warning(
+                "CorticalLayer(metric='wasserstein') requested but scipy "
+                "is not installed. Falling back to Jensen-Shannon. "
+                "`pip install agentegrity[stats]` to enable Wasserstein."
+            )
 
     @property
     def name(self) -> str:
@@ -442,24 +486,22 @@ class CorticalLayer:
         baseline: dict[str, float],
         current: dict[str, float],
     ) -> tuple[float, bool]:
-        """Jensen-Shannon distance between two count/probability dicts.
+        """Distribution distance between two count/probability dicts.
 
-        Returns ``(distance, ok)`` where ``distance`` is in [0, 1] and
-        ``ok`` is False if either side has fewer than
-        :attr:`min_drift_samples` total observations (in which case the
-        caller should treat the dimension as inconclusive rather than
-        clean).
+        Dispatches on :attr:`metric`:
 
-        Implementation notes:
+        * ``"js"`` (default) — Jensen-Shannon distance with Laplace
+          smoothing. Symmetric, bounded in [0, 1], well-defined over
+          unordered support. The right choice for action_distribution
+          and tool_usage where the keys carry no ordinal meaning.
+        * ``"wasserstein"`` — 1D Earth Mover's Distance from scipy with
+          each support point indexed at its sorted-key position. Useful
+          when the support has a meaningful order (latency buckets,
+          risk tiers). Falls back to JS when scipy isn't installed
+          (warning logged once at layer construction).
 
-        * Inputs are interpreted as un-normalized counts; this method
-          renormalises both sides to probability distributions over the
-          same support set.
-        * Laplace (add-one) smoothing is applied so unseen keys on
-          either side don't blow up the log term and the result remains
-          a valid probability distribution.
-        * The JS distance is the square root of JS divergence with log
-          base 2, which yields a metric bounded in [0, 1].
+        Returns ``(distance, ok)`` where ``ok`` is False if either side
+        has fewer than :attr:`min_drift_samples` total observations.
         """
         all_keys = sorted(set(baseline.keys()) | set(current.keys()))
         if not all_keys:
@@ -471,14 +513,21 @@ class CorticalLayer:
         if total_b < self.min_drift_samples or total_c < self.min_drift_samples:
             return 0.0, False
 
-        # Laplace smoothing across the union support.
+        # Laplace smoothing across the union support — same procedure
+        # for both metrics so a sparse key on one side doesn't blow up
+        # the log term in JS or produce a degenerate distribution in
+        # wasserstein.
         k = len(all_keys)
         denom_b = total_b + k
         denom_c = total_c + k
         p = [(baseline.get(key, 0) + 1) / denom_b for key in all_keys]
         q = [(current.get(key, 0) + 1) / denom_c for key in all_keys]
 
-        # Mixture distribution.
+        if self.metric == "wasserstein" and self._wasserstein_fn is not None:
+            distance = self._wasserstein_distance(p, q)
+            return round(distance, 4), True
+
+        # Jensen-Shannon (default + wasserstein-without-scipy fallback).
         m = [(pi + qi) / 2 for pi, qi in zip(p, q)]
 
         def _kl(a: list[float], b: list[float]) -> float:
@@ -487,11 +536,31 @@ class CorticalLayer:
             )
 
         js_divergence = (_kl(p, m) + _kl(q, m)) / 2
-        # JS divergence is bounded in [0, 1] under log_2; clamp for
-        # numerical safety and take the square root for the metric form.
         js_divergence = max(0.0, min(1.0, js_divergence))
         distance = math.sqrt(js_divergence)
         return round(distance, 4), True
+
+    def _wasserstein_distance(
+        self, p: list[float], q: list[float]
+    ) -> float:
+        """1D Wasserstein distance over the sorted support range,
+        normalised to [0, 1] by support size.
+
+        Each support key is placed at its integer index in the sorted
+        union. Wasserstein then measures total mass × distance moved.
+        We divide by ``len(p) - 1`` so the result is in [0, 1] and
+        comparable to JS distance — both metrics now share the same
+        threshold semantics.
+        """
+        assert self._wasserstein_fn is not None
+        n = len(p)
+        if n <= 1:
+            return 0.0
+        positions = list(range(n))
+        raw = float(self._wasserstein_fn(positions, positions, p, q))
+        # Maximum possible 1D EMD over n positions is (n-1) when all
+        # mass moves end-to-end. Normalise so the metric is bounded.
+        return min(1.0, raw / (n - 1))
 
     # Backwards-compatible private alias retained for any callers in the
     # wild that monkey-patched the old name. New code should use
