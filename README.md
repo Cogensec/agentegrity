@@ -428,3 +428,5 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 ---
 
 **Agentegrity is a Cogensec Research initiative.** The discipline is open. The framework is open. The code is open. We invite researchers, practitioners, and organizations building or deploying autonomous AI agents to adopt, implement, extend, and critique it.
+
+[![Profile Views](https://komarev.com/ghpvc/?username=cogensec&color=1E3A5F&style=flat-square&label=Profile+Views)](https://github.com/cogensec/agentegrity-framework)
