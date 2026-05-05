@@ -38,6 +38,37 @@ jobs:
       - name: Test
         run: python -m pytest tests/ -v
 
+  coverage:
+    # Separate job so the unit-test matrix above stays fast. Runs once
+    # against the latest supported Python; the threshold lives in
+    # pyproject.toml [tool.coverage.report].fail_under.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,crypto]"
+
+      - name: Run tests with branch coverage
+        run: |
+          python -m pytest tests/ \
+            --cov=agentegrity \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage-xml
+          path: coverage.xml
+          retention-days: 14
+
   typescript:
     runs-on: ubuntu-latest
     strategy:
