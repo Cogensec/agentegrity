@@ -1,0 +1,5 @@
+# External benchmark datasets fetched via scripts/fetch_benchmark_datasets.sh.
+# We don't commit them — they're large, may have separate licences, and
+# loaders treat the absence of the data as "skip the suite".
+*
+!.gitignore

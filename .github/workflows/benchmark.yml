@@ -1,0 +1,65 @@
+name: Detection benchmark
+
+# Runs the AdversarialLayer detection benchmark on a daily schedule
+# plus on demand. The synthetic suite always runs (its assertions are
+# calibrated against the in-repo fixture). External datasets — PINT,
+# AgentDojo, InjecAgent — auto-skip when their AGENTEGRITY_BENCH_*
+# secret/var is unset, so the workflow is safe to enable in any fork
+# without first wiring up dataset paths.
+
+on:
+  schedule:
+    # 04:17 UTC daily — staggered off the hour so we don't pile onto
+    # GitHub's scheduler queue at midnight.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,crypto]"
+
+      - name: Verify Python version parity
+        run: python scripts/check_versions.py
+
+      - name: Run the calibrated detection benchmark suite
+        env:
+          # External datasets: when these point to files mounted via
+          # repository variables, the loaders pick them up
+          # automatically; otherwise the relevant tests skip.
+          AGENTEGRITY_BENCH_PINT: ${{ vars.AGENTEGRITY_BENCH_PINT }}
+          AGENTEGRITY_BENCH_AGENTDOJO: ${{ vars.AGENTEGRITY_BENCH_AGENTDOJO }}
+          AGENTEGRITY_BENCH_INJECAGENT: ${{ vars.AGENTEGRITY_BENCH_INJECAGENT }}
+        run: python -m pytest tests/ -m benchmark -v
+
+      - name: Generate markdown report
+        env:
+          AGENTEGRITY_BENCH_PINT: ${{ vars.AGENTEGRITY_BENCH_PINT }}
+          AGENTEGRITY_BENCH_AGENTDOJO: ${{ vars.AGENTEGRITY_BENCH_AGENTDOJO }}
+          AGENTEGRITY_BENCH_INJECAGENT: ${{ vars.AGENTEGRITY_BENCH_INJECAGENT }}
+        run: |
+          python scripts/run_benchmarks.py --all > bench-report.md
+          echo "::group::Detection benchmark report"
+          cat bench-report.md
+          echo "::endgroup::"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detection-benchmark-report
+          path: bench-report.md
+          retention-days: 30

@@ -10,10 +10,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile
+
+if TYPE_CHECKING:
+    # Imported lazily to avoid a circular import — baseline_store imports
+    # BehavioralBaseline from this module.
+    from agentegrity.layers.baseline_store import BaselineStore
 
 
 @dataclass
@@ -131,6 +136,12 @@ class CorticalLayer:
         current distributions before drift is computed. Below this
         threshold the drift signal is treated as ``insufficient``
         (recorded in details, not factored into the score). Default 20.
+    baseline_store : BaselineStore, optional
+        A persistence backend for behavioural baselines. When supplied
+        and ``baseline`` is None, the layer attempts to load a baseline
+        for ``profile.agent_id`` on first ``evaluate``. ``update_baseline``
+        writes through to the store after each update so baselines
+        survive process restarts.
     """
 
     def __init__(
@@ -140,12 +151,14 @@ class CorticalLayer:
         reasoning_consistency_threshold: float = 0.75,
         baseline: BehavioralBaseline | None = None,
         min_drift_samples: int = 20,
+        baseline_store: "BaselineStore | None" = None,
     ):
         self.drift_tolerance = drift_tolerance
         self.memory_integrity_threshold = memory_integrity_threshold
         self.reasoning_consistency_threshold = reasoning_consistency_threshold
         self._baseline = baseline
         self.min_drift_samples = min_drift_samples
+        self._baseline_store = baseline_store
         self._observation_buffer: list[dict[str, Any]] = []
 
     @property
@@ -163,9 +176,16 @@ class CorticalLayer:
         """
         ctx = context or {}
 
-        # Initialize baseline if needed
+        # Initialize baseline if needed. If a baseline_store is wired,
+        # try to read through for this agent_id before falling back to
+        # a fresh in-memory baseline.
         if self._baseline is None:
-            self._baseline = BehavioralBaseline(agent_id=profile.agent_id)
+            if self._baseline_store is not None:
+                stored = self._baseline_store.load(profile.agent_id)
+                if stored is not None:
+                    self._baseline = stored
+            if self._baseline is None:
+                self._baseline = BehavioralBaseline(agent_id=profile.agent_id)
 
         # Evaluate each dimension
         reasoning = self._validate_reasoning(profile, ctx)
@@ -489,6 +509,13 @@ class CorticalLayer:
         Update the behavioral baseline with a new observation.
         Call this during normal (non-adversarial) operation to
         establish what 'normal' looks like.
+
+        When the layer was constructed with a ``baseline_store=``, the
+        updated baseline is written through to the store so it
+        survives a process restart. Write-through failures are
+        intentionally not silenced — a misconfigured store should
+        surface immediately rather than masquerade as a working
+        persistence layer.
         """
         self._observation_buffer.append(observation)
 
@@ -502,6 +529,15 @@ class CorticalLayer:
         if action:
             dist = self._baseline.action_distribution
             dist[action] = dist.get(action, 0) + 1
+
+        # Update tool usage distribution
+        tool = observation.get("tool")
+        if tool:
+            tool_dist = self._baseline.tool_usage_patterns
+            tool_dist[tool] = tool_dist.get(tool, 0) + 1
+
+        if self._baseline_store is not None:
+            self._baseline_store.save(self._baseline)
 
     def __repr__(self) -> str:
         return (

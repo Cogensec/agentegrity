@@ -5,7 +5,7 @@ Agentegrity defines what it means for an autonomous AI agent to be whole:
 adversarially coherent, environmentally portable, and verifiably assured.
 """
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"
 
 from agentegrity.adapters.base import FrameworkEvent, SessionExporter
 from agentegrity.claude import hooks as claude_hooks
@@ -23,13 +23,17 @@ from agentegrity.langchain import instrument_graph as langchain_instrument_graph
 from agentegrity.langchain import report as langchain_report
 from agentegrity.layers import (
     AdversarialLayer,
+    BaselineStore,
     Checkpoint,
     CheckpointSnapshot,
     CorticalLayer,
+    FileBaselineStore,
     FileCheckpoint,
     GovernanceLayer,
+    InMemoryBaselineStore,
     InMemoryCheckpoint,
     RecoveryLayer,
+    SqliteBaselineStore,
     SqliteCheckpoint,
     default_layers,
 )
@@ -61,6 +65,10 @@ __all__ = [
     "InMemoryCheckpoint",
     "FileCheckpoint",
     "SqliteCheckpoint",
+    "BaselineStore",
+    "InMemoryBaselineStore",
+    "FileBaselineStore",
+    "SqliteBaselineStore",
     "claude_hooks",
     "claude_report",
     "langchain_instrument_chain",

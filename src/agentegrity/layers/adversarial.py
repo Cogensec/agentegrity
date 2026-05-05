@@ -535,6 +535,34 @@ class AdversarialLayer:
                 if isinstance(content, str) and content:
                     threats.extend(self._scan_text(content, channel="tool_responses"))
 
+        # 4. Retrieved documents (RAG output — prompt-injection attacks
+        #    smuggled in via a poisoned corpus). We scan the same content
+        #    or text field used by every adapter's RAG adapter.
+        for doc in context.get("retrieved_documents", []) or []:
+            if isinstance(doc, dict):
+                content = doc.get("content") or doc.get("text") or doc.get("body")
+                if isinstance(content, str) and content:
+                    threats.extend(
+                        self._scan_text(content, channel="retrieved_documents")
+                    )
+
+        # 5. Peer messages (multi-agent inputs — a compromised peer
+        #    agent injecting instructions into the current agent's
+        #    context). Every CrewAI / multi-agent framework with an
+        #    inter-agent message bus is vulnerable to this; scanning
+        #    the channel makes the attack visible to the layer.
+        for message in context.get("peer_messages", []) or []:
+            if isinstance(message, dict):
+                content = (
+                    message.get("content")
+                    or message.get("text")
+                    or message.get("message")
+                )
+                if isinstance(content, str) and content:
+                    threats.extend(
+                        self._scan_text(content, channel="peer_messages")
+                    )
+
         return threats
 
     def _scan_text(self, text: str, channel: str) -> list[ThreatAssessment]:

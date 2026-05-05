@@ -15,6 +15,12 @@ four layers.
 
 from agentegrity.core.evaluator import Layer
 from agentegrity.layers.adversarial import AdversarialLayer
+from agentegrity.layers.baseline_store import (
+    BaselineStore,
+    FileBaselineStore,
+    InMemoryBaselineStore,
+    SqliteBaselineStore,
+)
 from agentegrity.layers.checkpoint import (
     Checkpoint,
     CheckpointSnapshot,
@@ -53,10 +59,15 @@ __all__ = [
     "GovernanceLayer",
     "RecoveryLayer",
     "default_layers",
-    # Checkpoint API
+    # Checkpoint API (recovery)
     "Checkpoint",
     "CheckpointSnapshot",
     "InMemoryCheckpoint",
     "FileCheckpoint",
     "SqliteCheckpoint",
+    # BaselineStore API (cortical)
+    "BaselineStore",
+    "InMemoryBaselineStore",
+    "FileBaselineStore",
+    "SqliteBaselineStore",
 ]
