@@ -111,7 +111,7 @@ chain.
 | ~~Reference SessionExporter receiver~~ | ✅ | Shipped in `examples/exporter_receiver/`. FastAPI app implementing all three endpoints (`POST /sessions`, `POST /sessions/{id}/events`, `POST /sessions/{id}/end`); validates each payload against `schemas/exporter/*.json` via `jsonschema.Draft202012Validator`. 11 smoke tests cover happy-path (202) and validation errors (422). Not a production backend — in-memory store, no auth — but unblocks adoption of the exporter wire format without `agentegrity-pro`. |
 | JWS / COSE attestation serializations |   6   | Interop with generic verifiers; raw Ed25519 stays the default. |
 | Key rotation + KMS interface          |   6   | `KeyProvider` Protocol with file / env / AWS KMS impls. |
-| Threat model document                 |   6   | `spec/threat-model.md`. |
+| ~~Threat model document~~              | ✅ | Shipped at [`spec/threat-model.md`](spec/threat-model.md) — STRIDE on the framework itself, 14 mitigations cross-linked to the test suite, residual-risk discussion per category, open items for v0.7. Companion to `SECURITY.md`. |
 | Reference docs site (MkDocs / Docusaurus) | 7 | Auto-generated API reference + per-layer / per-adapter guides. |
 
 Phases reference the canonical dev plan; see `/root/.claude/plans/`
