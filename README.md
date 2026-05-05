@@ -8,7 +8,7 @@ Agentegrity (agent + integrity) is the discipline of building AI agents that can
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Library Version](https://img.shields.io/badge/library-v0.5.2-green.svg)](pyproject.toml)
+[![Library Version](https://img.shields.io/badge/library-v0.5.3-green.svg)](pyproject.toml)
 [![Spec Version](https://img.shields.io/badge/spec-v1.0--draft-blue.svg)](spec/SPECIFICATION.md)
 
 ---
@@ -33,16 +33,20 @@ A self-securing agent maintains three properties simultaneously. Each property i
 | **Self-Stability** | Monitors its own behavioral drift against an established baseline and detects internal state corruption | Slow-drift attacks, memory poisoning, gradual goal redirection, identity erosion |
 | **Self-Recovery** | Detects when its integrity has been compromised and restores itself to a known-good state | Persistent compromise, undetected lateral movement, state pollution across sessions |
 
-v0.5.2 ships verification for all three capabilities (self-defense via the adversarial layer, self-stability via the cortical layer with optional LLM-backed semantic checks, self-recovery via the recovery layer) across **eleven zero-config framework adapters** — five in Python (**Claude Agent SDK**, **LangChain / LangGraph**, **OpenAI Agents SDK**, **CrewAI**, **Google ADK**) and six in TypeScript (the same five, plus **Vercel AI SDK** which has no Python equivalent). All eleven share the `SessionExporter` extension point that lets any subscriber (including the commercial `agentegrity-pro` dashboard) receive live session data without touching the agent, and the same evaluator pipeline and attestation chain — a 2-3 line instrumentation on any of these frameworks produces the same signed audit trail.
+v0.5.3 ships verification for all three capabilities (self-defense via the adversarial layer, self-stability via the cortical layer with optional LLM-backed semantic checks, self-recovery via the recovery layer) across **eleven zero-config framework adapters** — five in Python (**Claude Agent SDK**, **LangChain / LangGraph**, **OpenAI Agents SDK**, **CrewAI**, **Google ADK**) and six in TypeScript (the same five, plus **Vercel AI SDK** which has no Python equivalent). All eleven share the `SessionExporter` extension point that lets any subscriber (including the commercial `agentegrity-pro` dashboard) receive live session data without touching the agent, and the same evaluator pipeline and attestation chain — a 2-3 line instrumentation on any of these frameworks produces the same signed audit trail.
 
 ---
 
-## The Three Layers
+## The Four Layers
 
-The framework implements verification through three architectural layers. Each layer addresses a different dimension of integrity. Together they form a complete envelope around the agent.
+The framework implements verification through four architectural layers. Each layer addresses a different dimension of integrity. Together they form a complete envelope around the agent.
 
 ```
 ┌─────────────────────────────────────────────┐
+│            RECOVERY LAYER                   │
+│   Compromise detection · Continuity ·       │
+│   Sustained-degradation tracking            │
+├─────────────────────────────────────────────┤
 │           GOVERNANCE LAYER                  │
 │   Policy enforcement · Human oversight ·    │
 │   Compliance mapping · Audit trails         │
@@ -57,7 +61,7 @@ The framework implements verification through three architectural layers. Each l
 └─────────────────────────────────────────────┘
 ```
 
-The **Adversarial Layer** verifies self-defense by mapping the agent's attack surface and detecting threats across input channels. The **Cortical Layer** verifies self-stability by monitoring reasoning consistency, memory integrity, and behavioral drift from baseline. The **Governance Layer** enforces organizational policy and produces audit trails so verification results have a place to live in compliance workflows.
+The **Adversarial Layer** verifies self-defense by mapping the agent's attack surface and detecting threats across input channels. The **Cortical Layer** verifies self-stability by monitoring reasoning consistency, memory integrity, and behavioral drift from baseline. The **Governance Layer** enforces organizational policy and produces audit trails so verification results have a place to live in compliance workflows. The **Recovery Layer** verifies self-recovery by tracking the attestation chain for continuity, watching score history for sustained degradation, and confirming the agent declares the recovery capabilities it claims (`state_restore`, `checkpoint`, `rollback`, `session_reset`).
 
 ---
 
@@ -65,9 +69,9 @@ The **Adversarial Layer** verifies self-defense by mapping the agent's attack su
 
 We believe in being explicit about what the library is and is not, because a security library that overpromises is worse than one that underdelivers.
 
-**What it does.** It provides a Python implementation of the three-layer verification architecture defined in the [Agentegrity Specification](spec/SPECIFICATION.md). It computes integrity scores from real evaluation runs, generates cryptographically signed attestation records, builds tamper-evident attestation chains, and produces structured audit logs for governance workflows. It runs locally with zero required dependencies and never makes network calls to Cogensec or any other service. It ships with extension points for custom threat detectors, custom policy rules, and custom validators.
+**What it does.** It provides a Python implementation of the four-layer verification architecture defined in the [Agentegrity Specification](spec/SPECIFICATION.md). It computes integrity scores from real evaluation runs, generates cryptographically signed attestation records, builds tamper-evident attestation chains, and produces structured audit logs for governance workflows. It runs locally with zero required dependencies and never makes network calls to Cogensec or any other service. It ships with extension points for custom threat detectors, custom policy rules, and custom validators.
 
-**What it does not do.** The cortical layer's default checks are pattern-based reference implementations — substring matching for prompt injection indicators, dictionary comparisons for action distribution drift, structural inspection of memory provenance. They will catch obvious cases and miss sophisticated paraphrased attacks. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.5.2 the library ships eleven framework adapters — five in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK) and six in TypeScript (the same five plus Vercel AI SDK). Adapters for Semantic Kernel, AutoGen, and AWS Bedrock Agents are on the post-0.5.x roadmap.
+**What it does not do.** The cortical layer's default checks are pattern-based reference implementations — substring matching for prompt injection indicators, dictionary comparisons for action distribution drift, structural inspection of memory provenance. They will catch obvious cases and miss sophisticated paraphrased attacks. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.5.3 the library ships eleven framework adapters — five in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK) and six in TypeScript (the same five plus Vercel AI SDK). Adapters for Semantic Kernel, AutoGen, and AWS Bedrock Agents are on the post-0.5.x roadmap.
 
 **What it deliberately is not.** It is not a guardrail. It does not block agent actions on its own — when an action is blocked, that is the result of explicit governance policy, not inferred risk. It is not a runtime enforcement layer trying to compete with WAF-style products. It is not a hosted service. It is a measurement and verification library, and everything it does is in service of producing evidence that an agent has (or lacks) the structural properties of a self-securing system.
 
@@ -337,7 +341,7 @@ agentegrity-framework/
 
 ## Roadmap
 
-**v0.1.0 — Initial release.** Three-layer architecture, pattern-based reference checks, cryptographic attestation, custom validator and policy extension points, three working examples.
+**v0.1.0 — Initial release.** Three-layer architecture (adversarial / cortical / governance), pattern-based reference checks, cryptographic attestation, custom validator and policy extension points, three working examples. The recovery layer joined as a default fourth layer in v0.5.3.
 
 **v0.2.0 — Claude Agent SDK, LLM-backed checks, and self-recovery.** First framework adapter targeting the Claude Agent SDK with five integration points (Harness, Tools, Sandbox, Session, Orchestration). Optional LLM-backed cortical checks using Claude for semantic analysis of reasoning chains, memory provenance, and behavioral drift. Recovery integrity layer for self-recovery verification. Async-first evaluator pipeline that runs independent layers in parallel.
 
@@ -347,7 +351,9 @@ agentegrity-framework/
 
 **v0.4.0 — Exporter hook + cross-language contract.** OSS-side `SessionExporter` protocol + `register_exporter()` on every adapter. Session data (session_start, every evaluated event, session_end) streams as JSON-ready dicts to any subscribed exporter, fail-open so a broken sink never breaks the agent. The wire format is published as **JSON Schema** (`schemas/exporter/`) and **OpenAPI 3.1** (`schemas/openapi.yaml`); a first-party **TypeScript client** in `clients/typescript/` (`@agentegrity/client`) lets Bun / Node agents emit the same event stream. The commercial dashboard ships separately as `agentegrity-pro`.
 
-**v0.5.2 — Six TypeScript framework adapters (current).** Mirror the five Python adapters (Claude Agent SDK, LangChain JS, OpenAI Agents SDK, CrewAI JS, Google ADK) as dedicated npm packages — `@agentegrity/claude-sdk`, `@agentegrity/langchain`, `@agentegrity/openai-agents`, `@agentegrity/crewai`, `@agentegrity/google-adk` — plus a TypeScript-native `@agentegrity/vercel-ai` adapter for the Vercel AI SDK via its OpenTelemetry tracer surface. Every package depends on a shared `createDefaultAdapter()` helper in `@agentegrity/client` and ships the same 2-3 line zero-config DX as Python. Release workflow publishes all seven packages in a matrix; `scripts/check-versions.ts` enforces version parity with `pyproject.toml`.
+**v0.5.0 — Six TypeScript framework adapters.** Mirror the five Python adapters (Claude Agent SDK, LangChain JS, OpenAI Agents SDK, CrewAI JS, Google ADK) as dedicated npm packages — `@agentegrity/claude-sdk`, `@agentegrity/langchain`, `@agentegrity/openai-agents`, `@agentegrity/crewai`, `@agentegrity/google-adk` — plus a TypeScript-native `@agentegrity/vercel-ai` adapter for the Vercel AI SDK via its OpenTelemetry tracer surface. Every package depends on a shared `createDefaultAdapter()` helper in `@agentegrity/client` and ships the same 2-3 line zero-config DX as Python. Release workflow publishes all seven packages in a matrix; `scripts/check-versions.ts` enforces version parity with `pyproject.toml`.
+
+**v0.5.3 — Release & build polish (current).** Concrete version pins on TypeScript workspace deps (replacing `workspace:*`) so published packages install cleanly off‑registry, GitHub Actions bumped to checkout@v5 / setup-python@v6 / setup-node@v5, scoped push triggers + concurrency cancellation in CI, repo moved to the `cogensec` org, and an `AGENTEGRITY_OFFLINE` env var so test runs work without a reporter. Adds a Python `scripts/check_versions.py` mirroring the TypeScript one to keep `pyproject.toml`, `src/agentegrity/__init__.py`, and the README badge / claim lines from drifting apart again.
 
 **v0.6.0 — More adapters and compliance output (next).** Adapters for Semantic Kernel, AutoGen, AWS Bedrock Agents. Compliance report generation for EU AI Act, NIST AI RMF, and ISO 42001. Observability exporters (OpenTelemetry, Datadog).
 
@@ -365,6 +371,7 @@ agentegrity-framework/
 | [Adversarial Layer](spec/layers/adversarial-layer.md) | Self-defense verification architecture |
 | [Cortical Layer](spec/layers/cortical-layer.md) | Self-stability verification architecture |
 | [Governance Layer](spec/layers/governance-layer.md) | Policy enforcement and audit architecture |
+| [Recovery Layer](spec/layers/recovery-layer.md) | Self-recovery verification architecture |
 
 ---
 

@@ -16,7 +16,12 @@ from agentegrity import (
     RiskTier,
 )
 from agentegrity.core.monitor import IntegrityViolationError, ViolationAction
-from agentegrity.layers import AdversarialLayer, CorticalLayer, GovernanceLayer
+from agentegrity.layers import (
+    AdversarialLayer,
+    CorticalLayer,
+    GovernanceLayer,
+    RecoveryLayer,
+)
 
 
 def on_violation(event):
@@ -41,6 +46,7 @@ def main():
             AdversarialLayer(coherence_threshold=0.75),
             CorticalLayer(drift_tolerance=0.12),
             GovernanceLayer(policy_set="enterprise-default"),
+            RecoveryLayer(),
         ]
     )
 

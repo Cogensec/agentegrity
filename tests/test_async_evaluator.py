@@ -125,6 +125,7 @@ class TestAsyncIntegrityEvaluator:
                 adversarial_coherence=0.50,
                 environmental_portability=0.20,
                 verifiable_assurance=0.30,
+                recovery_integrity=0.0,
             ),
         )
         result = await evaluator.evaluate(_make_profile())

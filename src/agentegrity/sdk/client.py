@@ -16,6 +16,7 @@ from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext,
 from agentegrity.layers.adversarial import AdversarialLayer
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.governance import GovernanceLayer
+from agentegrity.layers.recovery import RecoveryLayer
 
 
 class AgentegrityClient:
@@ -61,9 +62,10 @@ class AgentegrityClient:
         self._adversarial = AdversarialLayer(coherence_threshold=coherence_threshold)
         self._cortical = CorticalLayer(drift_tolerance=drift_tolerance)
         self._governance = GovernanceLayer(policy_set=policy_set)
+        self._recovery = RecoveryLayer()
 
         self._evaluator = IntegrityEvaluator(
-            layers=[self._adversarial, self._cortical, self._governance],
+            layers=[self._adversarial, self._cortical, self._governance, self._recovery],
             weights=weights,
         )
 
@@ -107,7 +109,7 @@ class AgentegrityClient:
         context: dict[str, Any] | None = None,
     ) -> IntegrityScore:
         """
-        Run a full integrity evaluation across all three layers.
+        Run a full integrity evaluation across all four layers.
 
         Parameters
         ----------

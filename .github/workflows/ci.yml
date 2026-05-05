@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev,crypto]"
 
+      - name: Verify Python version parity (pyproject ↔ __init__ ↔ README)
+        run: python scripts/check_versions.py
+
       - name: Lint
         run: python -m ruff check src/ tests/
 

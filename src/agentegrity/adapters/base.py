@@ -186,13 +186,9 @@ class _BaseAdapter:
         if evaluator is not None:
             self._evaluator = evaluator
         else:
-            from agentegrity.layers.adversarial import AdversarialLayer
-            from agentegrity.layers.cortical import CorticalLayer
-            from agentegrity.layers.governance import GovernanceLayer
+            from agentegrity.layers import default_layers
 
-            self._evaluator = IntegrityEvaluator(
-                layers=[AdversarialLayer(), CorticalLayer(), GovernanceLayer()]
-            )
+            self._evaluator = IntegrityEvaluator(layers=default_layers())
 
     @property
     def name(self) -> str:

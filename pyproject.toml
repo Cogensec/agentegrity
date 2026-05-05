@@ -98,3 +98,9 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "benchmark: detection benchmark suite (run with `pytest -m benchmark`); excluded from the default unit-test run via the addopts filter below.",
+]
+# Benchmarks are excluded from the default `pytest` invocation so unit
+# tests stay fast. Run them explicitly with `pytest -m benchmark`.
+addopts = "-m 'not benchmark'"

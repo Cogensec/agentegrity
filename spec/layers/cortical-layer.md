@@ -49,6 +49,8 @@ Maintains a behavioral baseline and detects drift — changes in the agent's act
 **Outputs:** DriftAssessment (drift_score, drifted_dimensions)
 **Latency target:** < 10ms p99
 
+**Drift metric.** A conforming implementation MUST use a symmetric, bounded distribution distance for drift scoring. The reference implementation uses Jensen-Shannon distance with Laplace (add-one) smoothing; the result lives in [0, 1] and `d(P, Q) == d(Q, P)`. Asymmetric forward-KL approximations are non-conforming because they make drift verdicts depend on which side of the comparison is treated as "current." A `min_drift_samples` guard (default 20) MUST be honoured: when either distribution has fewer total observations, the dimension is reported as `__insufficient_samples` rather than as drifted/clean.
+
 ### Conflict Detector
 
 Identifies contradictions between the agent's stated goals, active instructions, retrieved memory, and planned actions. This is the primary defense against goal hijacking attacks where adversarial instructions silently override the agent's objectives.

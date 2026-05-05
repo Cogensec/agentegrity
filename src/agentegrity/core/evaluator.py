@@ -112,15 +112,16 @@ class IntegrityScore:
 class PropertyWeights:
     """Configurable weights for compositing property scores.
 
-    The default weights sum to 1.0 across three dimensions (AC+EP+VA)
-    with recovery_integrity=0.0. To use four dimensions, set all four
-    weights explicitly so they sum to 1.0.
+    The default weights sum to 1.0 across all four dimensions
+    (AC+EP+VA+RI). RecoveryLayer is now part of the default pipeline so
+    recovery_integrity gets nonzero weight by default. Pass explicit
+    weights summing to 1.0 to customize the composite.
     """
 
-    adversarial_coherence: float = 0.40
-    environmental_portability: float = 0.25
-    verifiable_assurance: float = 0.35
-    recovery_integrity: float = 0.0
+    adversarial_coherence: float = 0.35
+    environmental_portability: float = 0.20
+    verifiable_assurance: float = 0.30
+    recovery_integrity: float = 0.15
 
     def __post_init__(self) -> None:
         total = (
@@ -165,14 +166,8 @@ class IntegrityEvaluator:
 
     Examples
     --------
-    >>> from agentegrity.layers import AdversarialLayer, CorticalLayer, GovernanceLayer
-    >>> evaluator = IntegrityEvaluator(
-    ...     layers=[
-    ...         AdversarialLayer(coherence_threshold=0.85),
-    ...         CorticalLayer(drift_tolerance=0.10),
-    ...         GovernanceLayer(policy_set="enterprise-default"),
-    ...     ]
-    ... )
+    >>> from agentegrity.layers import default_layers
+    >>> evaluator = IntegrityEvaluator(layers=default_layers())
     >>> result = evaluator.evaluate(profile)
     """
 

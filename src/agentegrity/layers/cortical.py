@@ -126,6 +126,11 @@ class CorticalLayer:
         Minimum reasoning consistency score. Default 0.75.
     baseline : BehavioralBaseline, optional
         Pre-established baseline. If None, a default baseline is used.
+    min_drift_samples : int
+        Minimum total observations required in *both* the baseline and
+        current distributions before drift is computed. Below this
+        threshold the drift signal is treated as ``insufficient``
+        (recorded in details, not factored into the score). Default 20.
     """
 
     def __init__(
@@ -134,11 +139,13 @@ class CorticalLayer:
         memory_integrity_threshold: float = 0.80,
         reasoning_consistency_threshold: float = 0.75,
         baseline: BehavioralBaseline | None = None,
+        min_drift_samples: int = 20,
     ):
         self.drift_tolerance = drift_tolerance
         self.memory_integrity_threshold = memory_integrity_threshold
         self.reasoning_consistency_threshold = reasoning_consistency_threshold
         self._baseline = baseline
+        self.min_drift_samples = min_drift_samples
         self._observation_buffer: list[dict[str, Any]] = []
 
     @property
@@ -344,75 +351,138 @@ class CorticalLayer:
     ) -> DriftAssessment:
         """
         Detect behavioral drift from established baseline.
+
+        For each tracked dimension (action distribution, tool-usage
+        distribution) the layer computes the Jensen-Shannon distance
+        between the baseline and the current observation. JS distance is
+        symmetric, bounded in [0, 1], and properly defined under Laplace
+        smoothing — fixes for three real bugs in the previous
+        ``_kl_divergence_approx``: (a) asymmetry meant
+        baseline-vs-current and current-vs-baseline gave different
+        scores, (b) the additive epsilon broke the probability simplex,
+        and (c) there was no minimum-sample guard so a 1-vs-1 comparison
+        could produce a "drifted" verdict.
         """
+        insufficient: list[str] = []
+
         if self._baseline is None or self._baseline.sample_count == 0:
             return DriftAssessment(drift_score=0.0)
 
         dimensions: dict[str, float] = {}
         drifted: list[str] = []
 
-        # Compare current behavior to baseline
         current_actions = context.get("action_distribution", {})
         if current_actions and self._baseline.action_distribution:
-            action_drift = self._kl_divergence_approx(
+            score, ok = self._distribution_distance(
                 self._baseline.action_distribution, current_actions
             )
-            dimensions["action_distribution"] = action_drift
-            if action_drift > self.drift_tolerance:
-                drifted.append("action_distribution")
+            if ok:
+                dimensions["action_distribution"] = score
+                if score > self.drift_tolerance:
+                    drifted.append("action_distribution")
+            else:
+                insufficient.append("action_distribution")
 
         current_tool_usage = context.get("tool_usage", {})
         if current_tool_usage and self._baseline.tool_usage_patterns:
-            tool_drift = self._kl_divergence_approx(
+            score, ok = self._distribution_distance(
                 self._baseline.tool_usage_patterns, current_tool_usage
             )
-            dimensions["tool_usage"] = tool_drift
-            if tool_drift > self.drift_tolerance:
-                drifted.append("tool_usage")
+            if ok:
+                dimensions["tool_usage"] = score
+                if score > self.drift_tolerance:
+                    drifted.append("tool_usage")
+            else:
+                insufficient.append("tool_usage")
 
-        # Composite drift score
         if dimensions:
             drift_score = sum(dimensions.values()) / len(dimensions)
         else:
             drift_score = 0.0
 
-        # Baseline age
         age_hours = (
             datetime.now(timezone.utc) - self._baseline.created_at
         ).total_seconds() / 3600
 
-        return DriftAssessment(
+        assessment = DriftAssessment(
             drift_score=round(min(1.0, drift_score), 4),
             dimensions=dimensions,
             drifted_dimensions=drifted,
             baseline_age_hours=round(age_hours, 2),
         )
+        if insufficient:
+            # Surface as part of dimensions so downstream telemetry sees
+            # the dimension was checked but skipped.
+            for dim in insufficient:
+                assessment.dimensions[f"{dim}__insufficient_samples"] = 0.0
+        return assessment
 
+    def _distribution_distance(
+        self,
+        baseline: dict[str, float],
+        current: dict[str, float],
+    ) -> tuple[float, bool]:
+        """Jensen-Shannon distance between two count/probability dicts.
+
+        Returns ``(distance, ok)`` where ``distance`` is in [0, 1] and
+        ``ok`` is False if either side has fewer than
+        :attr:`min_drift_samples` total observations (in which case the
+        caller should treat the dimension as inconclusive rather than
+        clean).
+
+        Implementation notes:
+
+        * Inputs are interpreted as un-normalized counts; this method
+          renormalises both sides to probability distributions over the
+          same support set.
+        * Laplace (add-one) smoothing is applied so unseen keys on
+          either side don't blow up the log term and the result remains
+          a valid probability distribution.
+        * The JS distance is the square root of JS divergence with log
+          base 2, which yields a metric bounded in [0, 1].
+        """
+        all_keys = sorted(set(baseline.keys()) | set(current.keys()))
+        if not all_keys:
+            return 0.0, True
+
+        total_b = sum(baseline.values())
+        total_c = sum(current.values())
+
+        if total_b < self.min_drift_samples or total_c < self.min_drift_samples:
+            return 0.0, False
+
+        # Laplace smoothing across the union support.
+        k = len(all_keys)
+        denom_b = total_b + k
+        denom_c = total_c + k
+        p = [(baseline.get(key, 0) + 1) / denom_b for key in all_keys]
+        q = [(current.get(key, 0) + 1) / denom_c for key in all_keys]
+
+        # Mixture distribution.
+        m = [(pi + qi) / 2 for pi, qi in zip(p, q)]
+
+        def _kl(a: list[float], b: list[float]) -> float:
+            return sum(
+                ai * math.log2(ai / bi) for ai, bi in zip(a, b) if ai > 0 and bi > 0
+            )
+
+        js_divergence = (_kl(p, m) + _kl(q, m)) / 2
+        # JS divergence is bounded in [0, 1] under log_2; clamp for
+        # numerical safety and take the square root for the metric form.
+        js_divergence = max(0.0, min(1.0, js_divergence))
+        distance = math.sqrt(js_divergence)
+        return round(distance, 4), True
+
+    # Backwards-compatible private alias retained for any callers in the
+    # wild that monkey-patched the old name. New code should use
+    # _distribution_distance.
     def _kl_divergence_approx(
         self,
         baseline: dict[str, float],
         current: dict[str, float],
     ) -> float:
-        """
-        Approximate KL divergence between two distributions.
-        Returns a normalized score in [0, 1].
-        """
-        all_keys = set(baseline.keys()) | set(current.keys())
-        if not all_keys:
-            return 0.0
-
-        epsilon = 1e-10
-        total_b = sum(baseline.values()) or 1.0
-        total_c = sum(current.values()) or 1.0
-
-        kl = 0.0
-        for key in all_keys:
-            p = (baseline.get(key, 0) / total_b) + epsilon
-            q = (current.get(key, 0) / total_c) + epsilon
-            kl += p * math.log(p / q)
-
-        # Normalize to [0, 1] with a sigmoid-like function
-        return min(1.0, kl / (1.0 + kl))
+        score, _ = self._distribution_distance(baseline, current)
+        return score
 
     def update_baseline(self, observation: dict[str, Any]) -> None:
         """

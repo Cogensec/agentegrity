@@ -166,6 +166,42 @@ class AttestationRecord:
             "public_key": self.public_key.hex() if self.public_key else None,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttestationRecord":
+        """Rebuild an :class:`AttestationRecord` from its ``to_dict``
+        representation.
+
+        ``content_hash`` in the input is ignored — it's a derived value
+        recomputed from the canonical payload on demand.
+
+        Used by checkpoint backends to round-trip a chain across
+        process boundaries (file, sqlite, etc.) without losing
+        signatures.
+        """
+        evidence = [
+            Evidence(
+                evidence_type=e["evidence_type"],
+                source=e["source"],
+                content_hash=e["content_hash"],
+                summary=e["summary"],
+                timestamp=datetime.fromisoformat(e["timestamp"]),
+            )
+            for e in data.get("evidence", [])
+        ]
+        signature = data.get("signature")
+        public_key = data.get("public_key")
+        return cls(
+            agent_id=data["agent_id"],
+            integrity_score=data["integrity_score"],
+            layer_states=data.get("layer_states", {}),
+            evidence=evidence,
+            record_id=data["record_id"],
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            chain_previous=data.get("chain_previous"),
+            signature=bytes.fromhex(signature) if signature else None,
+            public_key=bytes.fromhex(public_key) if public_key else None,
+        )
+
     def __repr__(self) -> str:
         signed = "signed" if self.signature else "unsigned"
         score = self.integrity_score.get("composite", "?")
@@ -219,6 +255,27 @@ class AttestationChain:
     @property
     def latest(self) -> AttestationRecord | None:
         return self._records[-1] if self._records else None
+
+    def to_records_dict(self) -> list[dict[str, Any]]:
+        """Serialize every record in the chain via :meth:`AttestationRecord.to_dict`."""
+        return [r.to_dict() for r in self._records]
+
+    @classmethod
+    def from_records(cls, records: list[AttestationRecord]) -> "AttestationChain":
+        """Rebuild a chain from a list of :class:`AttestationRecord` objects.
+
+        The records' existing ``chain_previous`` values are preserved
+        verbatim — this is a *restore* operation, not a fresh-append, so
+        link hashes from the original chain are kept intact.
+        """
+        chain = cls()
+        chain._records = list(records)
+        return chain
+
+    @classmethod
+    def from_dict_list(cls, dicts: list[dict[str, Any]]) -> "AttestationChain":
+        """Rebuild a chain from a list of ``AttestationRecord.to_dict`` dicts."""
+        return cls.from_records([AttestationRecord.from_dict(d) for d in dicts])
 
     def __len__(self) -> int:
         return len(self._records)

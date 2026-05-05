@@ -31,7 +31,7 @@ This specification does not cover:
 | Level | Name | Requirements |
 |---|---|---|
 | **Level 1** | Aware | Agent profile defined; adversarial layer active; integrity scoring operational |
-| **Level 2** | Managed | All three layers active; continuous monitoring; policy enforcement |
+| **Level 2** | Managed | All four layers active (adversarial / cortical / governance / recovery); continuous monitoring; policy enforcement |
 | **Level 3** | Verified | Cryptographic attestation; formal property verification; automated red teaming |
 | **Level 4** | Autonomous | Self-healing integrity; adaptive policy; cross-environment portability proven |
 
@@ -281,7 +281,7 @@ See [Governance Layer spec](layers/governance-layer.md) for full detail.
 
 ## 5. Integrity Evaluation Flow
 
-The standard evaluation flow processes an agent action through all three layers:
+The standard evaluation flow processes an agent action through all four layers:
 
 ```
 Agent Action Initiated
@@ -319,6 +319,18 @@ Agent Action Initiated
 └──────────┬───────────────┘
            │ PASS
            ▼
+┌─── Recovery Layer ───────┐
+│ 12. Baseline continuity  │
+│ 13. Sustained-degradation│
+│     watch                │
+│ 14. Recovery capability  │
+│ 15. Chain integrity      │
+│                          │
+│ → ESCALATE if attestation│
+│   chain is tampered      │
+└──────────┬───────────────┘
+           │ PASS
+           ▼
    Action Executed
            │
            ▼
@@ -344,11 +356,11 @@ The organization has adopted agentegrity vocabulary and tooling. Agents are prof
 
 ### Level 2: Managed
 
-All three layers are active. Continuous monitoring is operational. Policies are enforced.
+All four layers are active. Continuous monitoring is operational. Policies are enforced.
 
 | Requirement | Controls |
 |---|---|
-| All three layers deployed | All layer interfaces implemented |
+| All four layers deployed | All layer interfaces implemented |
 | Continuous integrity monitoring | Runtime evaluation on every action |
 | Policy-as-code enforcement | Governance layer policies defined and active |
 | Human escalation paths defined | Escalation Manager configured |

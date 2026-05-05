@@ -17,6 +17,10 @@ from typing import Any
 from agentegrity.core.attestation import AttestationChain
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile
+from agentegrity.layers.checkpoint import (
+    Checkpoint,
+    CheckpointSnapshot,
+)
 
 logger = logging.getLogger("agentegrity.recovery")
 
@@ -36,6 +40,8 @@ class RecoveryAssessment:
     degradation_trend: list[float] = field(default_factory=list)
     recovery_capable: bool = False
     recovery_capabilities_present: list[str] = field(default_factory=list)
+    checkpoint_count: int = 0
+    last_checkpoint_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +54,8 @@ class RecoveryAssessment:
             "degradation_trend": self.degradation_trend,
             "recovery_capable": self.recovery_capable,
             "recovery_capabilities_present": self.recovery_capabilities_present,
+            "checkpoint_count": self.checkpoint_count,
+            "last_checkpoint_id": self.last_checkpoint_id,
         }
 
 
@@ -71,6 +79,12 @@ class RecoveryLayer:
         Attestation chain to verify for continuity.
     score_history : list[float], optional
         Recent composite scores for degradation analysis.
+    checkpoint : Checkpoint, optional
+        A persistence backend (in-memory / file / sqlite / custom) that
+        :meth:`snapshot` writes to and :meth:`restore_to` reads from.
+        When supplied, the layer reports ``checkpoint_count`` and
+        ``last_checkpoint_id`` in its result details and treats
+        attached-checkpoint as a recovery capability signal.
     """
 
     def __init__(
@@ -79,11 +93,14 @@ class RecoveryLayer:
         degradation_threshold: float = 0.15,
         chain: AttestationChain | None = None,
         score_history: list[float] | None = None,
+        checkpoint: Checkpoint | None = None,
     ) -> None:
         self._degradation_window = degradation_window
         self._degradation_threshold = degradation_threshold
         self._chain = chain
         self._score_history: list[float] = score_history or []
+        self._checkpoint = checkpoint
+        self._last_checkpoint_id: str | None = None
 
     @property
     def name(self) -> str:
@@ -156,6 +173,10 @@ class RecoveryLayer:
 
         composite = sum(scores) / len(scores) if scores else 0.0
 
+        checkpoint_count = (
+            len(self._checkpoint.list_ids()) if self._checkpoint is not None else 0
+        )
+
         return RecoveryAssessment(
             recovery_score=round(composite, 4),
             has_baseline=has_baseline,
@@ -166,6 +187,8 @@ class RecoveryLayer:
             degradation_trend=trend,
             recovery_capable=capable,
             recovery_capabilities_present=caps,
+            checkpoint_count=checkpoint_count,
+            last_checkpoint_id=self._last_checkpoint_id,
         )
 
     def _check_baseline(
@@ -238,10 +261,18 @@ class RecoveryLayer:
     def _check_capabilities(
         self, profile: AgentProfile
     ) -> tuple[float, bool, list[str]]:
-        """Check if agent profile indicates recovery mechanisms."""
+        """Check if agent profile indicates recovery mechanisms.
+
+        An attached :class:`Checkpoint` backend is treated as a synthetic
+        ``checkpoint`` capability for scoring purposes — restorable
+        baselines are the operational meaning of the declared capability,
+        so wiring up a real backend should not be undercounted.
+        """
         present = [
             cap for cap in profile.capabilities if cap in RECOVERY_CAPABILITIES
         ]
+        if self._checkpoint is not None and "checkpoint" not in present:
+            present = [*present, "checkpoint"]
         capable = len(present) > 0
 
         if len(present) >= 3:
@@ -270,3 +301,80 @@ class RecoveryLayer:
             return 0.5, True, 0
 
         return 1.0, True, chain_len
+
+    # ------------------------------------------------------------------
+    # Checkpoint API: snapshot the layer's restorable state and roll back
+    # to a previous snapshot.
+    # ------------------------------------------------------------------
+
+    def snapshot(
+        self,
+        agent_id: str,
+        baseline: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Persist the layer's restorable state to the configured checkpoint.
+
+        Captures the current attestation chain (full record dicts),
+        score history, optional behavioural baseline, and arbitrary
+        ``metadata``. Returns the canonical id assigned by the backend.
+
+        Raises
+        ------
+        RuntimeError
+            If no ``checkpoint=`` backend was supplied at construction.
+        """
+        if self._checkpoint is None:
+            raise RuntimeError(
+                "RecoveryLayer was constructed without a checkpoint backend; "
+                "pass checkpoint=Checkpoint(...) to enable snapshot()/restore_to()."
+            )
+        snap = CheckpointSnapshot(
+            agent_id=agent_id,
+            score_history=list(self._score_history),
+            chain_records=(
+                self._chain.to_records_dict() if self._chain is not None else []
+            ),
+            baseline=baseline,
+            metadata=metadata or {},
+        )
+        cid = self._checkpoint.save(snap)
+        self._last_checkpoint_id = cid
+        return cid
+
+    def restore_to(self, checkpoint_id: str) -> CheckpointSnapshot:
+        """Roll the layer back to the named checkpoint.
+
+        Replaces ``_score_history`` with the snapshot's history and
+        rebuilds the :class:`AttestationChain` from the snapshot's
+        record dicts (preserving original link hashes so
+        ``verify_chain()`` returns True post-restore).
+
+        If the layer was constructed without a chain object the
+        snapshot's chain records are loaded into a freshly-created chain
+        on the layer.
+
+        Raises
+        ------
+        RuntimeError
+            If no checkpoint backend is configured.
+        KeyError
+            If the snapshot cannot be loaded.
+        """
+        if self._checkpoint is None:
+            raise RuntimeError(
+                "RecoveryLayer was constructed without a checkpoint backend; "
+                "restore_to() is unavailable."
+            )
+        snap = self._checkpoint.load(checkpoint_id)
+        if snap is None:
+            raise KeyError(f"checkpoint not found: {checkpoint_id!r}")
+
+        self._score_history = list(snap.score_history)
+        if snap.chain_records:
+            self._chain = AttestationChain.from_dict_list(snap.chain_records)
+        elif self._chain is not None:
+            # Snapshot had an empty chain; reflect that.
+            self._chain = AttestationChain()
+        self._last_checkpoint_id = snap.checkpoint_id
+        return snap

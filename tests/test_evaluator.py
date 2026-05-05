@@ -1,12 +1,14 @@
-"""Tests for IntegrityEvaluator and the three layers."""
+"""Tests for IntegrityEvaluator and the four default layers."""
 
 import pytest
 
 from agentegrity.core.evaluator import IntegrityEvaluator, PropertyWeights
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.layers import default_layers
 from agentegrity.layers.adversarial import AdversarialLayer
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.governance import GovernanceLayer, PolicyDecision, PolicyRule
+from agentegrity.layers.recovery import RecoveryLayer
 
 
 def make_profile(**overrides):
@@ -178,14 +180,43 @@ class TestIntegrityEvaluator:
                 AdversarialLayer(coherence_threshold=0.70),
                 CorticalLayer(drift_tolerance=0.15),
                 GovernanceLayer(policy_set="enterprise-default"),
+                RecoveryLayer(),
             ]
         )
         profile = make_profile(risk_tier=RiskTier.LOW)
         result = evaluator.evaluate(profile, {"action": {"type": "respond"}})
         assert result.composite > 0
         assert result.composite <= 1.0
-        assert len(result.layer_results) == 3
+        assert len(result.layer_results) == 4
         assert result.total_latency_ms > 0
+        layer_names = [r.layer_name for r in result.layer_results]
+        assert layer_names == ["adversarial", "cortical", "governance", "recovery"]
+
+    def test_default_layers_factory(self):
+        """default_layers() builds the four-layer canonical pipeline."""
+        layers = default_layers()
+        assert [layer.name for layer in layers] == [
+            "adversarial",
+            "cortical",
+            "governance",
+            "recovery",
+        ]
+        evaluator = IntegrityEvaluator(layers=layers)
+        result = evaluator.evaluate(make_profile(risk_tier=RiskTier.LOW))
+        assert len(result.layer_results) == 4
+
+    def test_default_property_weights_sum_to_one(self):
+        """Default weights distribute across all four properties."""
+        w = PropertyWeights()
+        total = (
+            w.adversarial_coherence
+            + w.environmental_portability
+            + w.verifiable_assurance
+            + w.recovery_integrity
+        )
+        assert abs(total - 1.0) < 0.001
+        # Recovery must be a non-trivial part of the composite now
+        assert w.recovery_integrity > 0.0
 
     def test_fail_fast_stops_on_block(self):
         evaluator = IntegrityEvaluator(
@@ -213,10 +244,13 @@ class TestIntegrityEvaluator:
         assert result.action == "block"
 
     def test_custom_weights(self):
+        # Custom three-property weighting: caller must zero out recovery
+        # explicitly because it's now a default >0 dimension.
         weights = PropertyWeights(
             adversarial_coherence=0.50,
             environmental_portability=0.25,
             verifiable_assurance=0.25,
+            recovery_integrity=0.0,
         )
         evaluator = IntegrityEvaluator(
             layers=[

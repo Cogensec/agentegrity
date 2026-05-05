@@ -35,7 +35,15 @@ Enumerates all input channels and interfaces through which adversarial content c
 
 ### Threat Detector
 
-Real-time detection of adversarial inputs across all channels. The reference implementation provides basic pattern-based detection. Production deployments should register custom detectors with ML-based or embedding-based detection.
+Real-time detection of adversarial inputs across all channels. The reference implementation ships a regex-pattern taxonomy of 21 default patterns organised into six attack families (`prompt_injection`, `jailbreak`, `role_confusion`, `system_prompt_extraction`, `data_exfiltration`, `prompt_obfuscation`). Each pattern carries a calibrated `severity` and `confidence`; matches are aggregated into one `ThreatAssessment` per (channel, threat_type) pair, with `indicators` listing every pattern that fired. Patterns scan direct input *plus* `memory_reads[*].content` *plus* `tool_outputs[*].content` so model-context and model-in-the-middle attacks are visible to the layer.
+
+Patterns are extensible:
+
+- `AdversarialLayer(extra_patterns=[...])` — append to the default taxonomy.
+- `AdversarialLayer(patterns=[...])` — replace the taxonomy wholesale (use `default_detector_patterns()` as a starting point).
+- `AdversarialLayer(threat_detectors=[fn])` — register imperative detector callables that receive `(profile, context)` and return `list[ThreatAssessment]`.
+
+Production deployments should layer in domain-specific patterns and, when available, an embedding-similarity classifier or LLM-backed semantic detector (planned for v0.6.0).
 
 **Inputs:** Input data, channel identifier, AgentProfile
 **Outputs:** ThreatAssessment (channel, threat_type, severity, confidence, indicators)
