@@ -109,3 +109,7 @@ jobs:
       - name: Test all packages
         run: bun run test
         working-directory: clients/typescript
+
+      - name: TypeScript coverage gate (lines ≥ 80, functions ≥ 70)
+        run: bun run check-coverage
+        working-directory: clients/typescript
