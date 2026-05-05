@@ -108,7 +108,7 @@ chain.
 | Semantic Kernel adapter (Python + TS) |   4   | `pip install agentegrity[semantic-kernel]` + `@agentegrity/semantic-kernel`. |
 | AutoGen adapter (Python)              |   4   | `pip install agentegrity[autogen]`. |
 | AWS Bedrock Agents adapter (Python)   |   4   | `pip install agentegrity[bedrock]`. |
-| Reference SessionExporter receiver    |   4   | Self-hostable FastAPI app under `examples/exporter_receiver/`. |
+| ~~Reference SessionExporter receiver~~ | ✅ | Shipped in `examples/exporter_receiver/`. FastAPI app implementing all three endpoints (`POST /sessions`, `POST /sessions/{id}/events`, `POST /sessions/{id}/end`); validates each payload against `schemas/exporter/*.json` via `jsonschema.Draft202012Validator`. 11 smoke tests cover happy-path (202) and validation errors (422). Not a production backend — in-memory store, no auth — but unblocks adoption of the exporter wire format without `agentegrity-pro`. |
 | JWS / COSE attestation serializations |   6   | Interop with generic verifiers; raw Ed25519 stays the default. |
 | Key rotation + KMS interface          |   6   | `KeyProvider` Protocol with file / env / AWS KMS impls. |
 | Threat model document                 |   6   | `spec/threat-model.md`. |

@@ -1,0 +1,9 @@
+# Reference SessionExporter HTTP receiver — example app, not a runtime
+# dependency of agentegrity itself. Pin minimum versions; updates are
+# fine as long as the public APIs we use here don't break.
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+jsonschema>=4.21
+referencing>=0.34
+httpx>=0.25         # for the smoke test below; FastAPI TestClient depends on it
