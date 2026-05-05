@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentegrity.layers.cortical import (
+    CorticalLayer,
     DriftAssessment,
     MemoryAssessment,
     ReasoningAssessment,
@@ -91,7 +92,7 @@ async def _call_claude_json(
         return None
 
     try:
-        import anthropic  # type: ignore[import-not-found]
+        import anthropic
     except ImportError:
         logger.warning(
             "anthropic package not installed; LLM checks fail-open. "
@@ -108,9 +109,14 @@ async def _call_claude_json(
             messages=[{"role": "user", "content": user}],
             timeout=config.timeout,
         )
-        # Concatenate text blocks
+        # Concatenate text blocks. The anthropic 0.40+ content union
+        # has many block types; only TextBlock has .text. Filter on
+        # type then access via getattr to keep mypy happy across SDK
+        # version bumps.
         text = "".join(
-            block.text for block in response.content if getattr(block, "type", "") == "text"
+            getattr(block, "text", "")
+            for block in response.content
+            if getattr(block, "type", "") == "text"
         )
         text = text.strip()
         if text.startswith("```"):
@@ -296,8 +302,130 @@ class SemanticDriftDetector:
             return _neutral_drift()
 
 
+class CorticalLLMLayer(CorticalLayer):
+    """CorticalLayer that augments pattern-based checks with LLM-backed
+    semantic analysis on the async evaluation path.
+
+    What this changes vs the base layer:
+
+    * ``aevaluate(profile, context)`` runs the pattern-based checks AND
+      then calls Claude to second-opinion the reasoning, memory, and
+      drift dimensions. Final per-dimension scores are the **minimum**
+      of the two — so the LLM can only make verdicts more conservative,
+      not less. A passing pattern-based check that the LLM also passes
+      stays passing; a passing pattern-based check that the LLM flags
+      becomes failing.
+
+    * ``evaluate(profile, context)`` (synchronous) **remains
+      pattern-based only** so callers that haven't opted into the
+      async pipeline don't suddenly pay LLM latency or API spend.
+      The framework's ``IntegrityEvaluator`` is sync; the
+      ``AsyncIntegrityEvaluator`` and every adapter's async event-loop
+      path is what picks up the LLM checks.
+
+    * Fail-open semantics inherit from the underlying checkers — every
+      LLM call returns a neutral assessment on network error / missing
+      key / malformed response, so an outage downgrades back to the
+      pattern-based path automatically.
+
+    Use via :func:`agentegrity.layers.default_layers` with
+    ``prefer_llm=True`` (which auto-detects ``anthropic`` and
+    ``ANTHROPIC_API_KEY``) or by constructing it directly::
+
+        from agentegrity.layers.cortical_llm import CorticalLLMLayer
+
+        layer = CorticalLLMLayer(api_key=os.environ["ANTHROPIC_API_KEY"])
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str = DEFAULT_MODEL,
+        **base_kwargs: Any,
+    ) -> None:
+        super().__init__(**base_kwargs)
+        self._reasoning_llm = SemanticReasoningValidator(api_key=api_key, model=model)
+        self._memory_llm = SemanticMemoryProvenanceChecker(api_key=api_key, model=model)
+        self._drift_llm = SemanticDriftDetector(api_key=api_key, model=model)
+
+    async def aevaluate(
+        self,
+        profile: Any,
+        context: dict[str, Any] | None = None,
+    ) -> Any:
+        """Async path = pattern-based + LLM second opinion (min of two)."""
+        ctx = context or {}
+        # Run the sync pattern-based path first — fast, deterministic,
+        # serves as the floor below which the LLM cannot raise the
+        # composite.
+        base_result = self.evaluate(profile, ctx)
+
+        # LLM second opinions for each dimension. Each fails open on
+        # network/parsing errors and returns a "neutral" assessment.
+        llm_reasoning = await self._reasoning_llm.analyze(
+            reasoning_chain=ctx.get("reasoning_chain", []),
+            goals=ctx.get("goals"),
+            instructions=ctx.get("instructions"),
+        )
+        llm_memory = await self._memory_llm.analyze(
+            memory_reads=ctx.get("memory_reads", []),
+        )
+        baseline_desc = ctx.get("baseline_description") or ""
+        current_desc = ctx.get("current_description") or ""
+        llm_drift = await self._drift_llm.analyze(
+            baseline_description=str(baseline_desc),
+            current_description=str(current_desc),
+        )
+
+        base_details = base_result.details
+
+        # Take minimum across the two evaluators per dimension. The LLM
+        # can only make things look worse — that's the conservative
+        # composition we want when the LLM call succeeded.
+        merged_reasoning = min(
+            base_details.get("reasoning", {}).get("consistency_score", 0.0),
+            llm_reasoning.consistency_score,
+        )
+        merged_memory = min(
+            base_details.get("memory", {}).get("integrity_score", 0.0),
+            llm_memory.integrity_score,
+        )
+        # For drift the LLM produces drift_score (higher = worse).
+        # We take the MAX of the two and convert via 1 - drift to keep
+        # the "min over per-dimension scores" invariant.
+        base_drift_score = base_details.get("drift", {}).get("drift_score", 0.0)
+        merged_drift = max(base_drift_score, llm_drift.drift_score)
+
+        composite = round(
+            merged_reasoning * 0.35
+            + merged_memory * 0.35
+            + (1.0 - merged_drift) * 0.30,
+            4,
+        )
+
+        # Update result in place — keep the same LayerResult shape so
+        # downstream consumers don't see a different object.
+        base_result.score = composite
+        base_result.details["llm"] = {
+            "reasoning": llm_reasoning.to_dict(),
+            "memory": llm_memory.to_dict(),
+            "drift": llm_drift.to_dict(),
+        }
+        # Tighten action: if the LLM made the composite drop below the
+        # passing threshold, surface it.
+        if (
+            base_result.action == "pass"
+            and composite < base_details.get("portability_score", composite)
+        ):
+            base_result.action = "alert"
+            base_result.passed = False
+        return base_result
+
+
 __all__ = [
     "DEFAULT_MODEL",
+    "CorticalLLMLayer",
     "SemanticDriftDetector",
     "SemanticMemoryProvenanceChecker",
     "SemanticReasoningValidator",
