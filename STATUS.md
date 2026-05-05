@@ -37,11 +37,12 @@ this document is the operational version of it.
 
 | Layer              | Default? | Status | Detection Quality |
 |--------------------|:--------:|:------:|-------------------|
-| `AdversarialLayer` |   ✅     |   ✅   | Regex-pattern taxonomy across six families (prompt_injection, jailbreak, role_confusion, system_prompt_extraction, data_exfiltration, prompt_obfuscation). 21 default patterns scan direct input + memory reads + tool outputs; per-pattern severity/confidence; aggregation collapses multiple matches per (channel, threat_type). Custom patterns plug in via `extra_patterns=`. Embedding-similarity + LLM-backed semantic classifier still on the post-0.5.x roadmap. |
-| `CorticalLayer`    |   ✅     |   ✅   | Reasoning conflict detection still rule-based (🟡). Memory provenance still structural (🟡). **Drift: Jensen-Shannon distance with Laplace smoothing**, symmetric and bounded, with a `min_drift_samples` guard so small distributions don't produce noisy verdicts. The legacy `_kl_divergence_approx` is retained as an alias. Semantic reasoning checks via `cortical_llm` are opt-in. |
-| `CorticalLLMLayer` (`cortical_llm.py`) | opt-in | 🧪 | Anthropic-API-backed semantic checks; fail-open on API error. Requires `pip install agentegrity[llm]`. |
+| `AdversarialLayer` |   ✅     |   ✅   | Regex-pattern taxonomy across six families. 21 default patterns scan direct input + memory_reads + tool_outputs + retrieved_documents + peer_messages; per-pattern severity/confidence; aggregation collapses multiple matches per (channel, threat_type). Custom patterns plug in via `extra_patterns=`. **`EmbeddingSimilarityDetector` (zero-dep n-gram fallback + pluggable embed_fn for Voyage / OpenAI / sentence-transformers)** is the layer-2 defence; **`AdversarialLLMLayer` (Claude-backed semantic classifier, opt-in via `[llm]`)** is the layer-3 defence — composes regex + LLM verdicts conservatively, fail-open on API error. |
+| `CorticalLayer`    |   ✅     |   ✅   | Reasoning conflict detection rule-based (🟡). Memory provenance structural (🟡). **Drift: Jensen-Shannon distance with Laplace smoothing** (default) **or 1D Wasserstein behind `[stats]`** — chosen via `metric="js"\|"wasserstein"`. Both symmetric, both bounded in [0, 1], both gated by `min_drift_samples`. |
+| `CorticalLLMLayer` (`cortical_llm.py`) | opt-in via `default_layers(prefer_llm=True)` | ✅ | Anthropic-API-backed semantic checks for reasoning + memory + drift. Sync `evaluate()` stays pattern-based — only `aevaluate()` calls Claude — so opting in doesn't penalise sync callers. Fail-open on API error / missing key. Requires `pip install agentegrity[llm]`. |
+| `AdversarialLLMLayer` (`adversarial_llm.py`) | opt-in | ✅ | Claude-backed semantic classifier for the adversarial layer. Composes with the regex taxonomy via union (LLM-detected attacks add ThreatAssessments; LLM agreeing with regex deduplicates). Same opt-in pattern as `CorticalLLMLayer`. Requires `pip install agentegrity[llm]`. |
 | `GovernanceLayer`  |   ✅     |   ✅   | Real policy engine, `enterprise-default` rule set, custom rule support, audit log with SHA-256 content hash. |
-| `RecoveryLayer`    |   ✅     |   ✅   | Capability declaration check, sustained-degradation detection on score history, attestation-chain continuity, **and a real `Checkpoint` Protocol with `InMemoryCheckpoint` / `FileCheckpoint` (atomic write) / `SqliteCheckpoint` (idempotent schema) reference backends**. `RecoveryLayer.snapshot()` persists chain + score history + baseline + metadata; `restore_to(checkpoint_id)` rebuilds the chain (preserving original link hashes so `verify_chain()` returns True post-restore). External backends (S3, Redis, KMS-wrapped) are pluggable by satisfying the four-method Protocol. |
+| `RecoveryLayer`    |   ✅     |   ✅   | Capability declaration check, sustained-degradation detection, attestation-chain continuity, **`Checkpoint` Protocol with InMemory / File (atomic write) / Sqlite (idempotent schema) / KMSCheckpoint (envelope encryption + AWS KMS wrapped data keys, `[kms]` extra) reference backends**. `RecoveryLayer.snapshot()` + `restore_to()` round-trip preserve chain link hashes so post-restore `verify_chain()` still passes. KMSCheckpoint binds at-rest secrecy to a KMS-managed CMK and verifies KMS encryption-context at load time so a compromised inner backend can't roll the agent back to attacker-chosen state. |
 
 ## Python Adapters (`src/agentegrity/<framework>.py`)
 
@@ -174,6 +175,6 @@ picks the same env var up from repository variables.
 
 ---
 
-**Last reviewed:** v0.6.0 + Phase 3 finisher (2026-05-06). This file
-is the source of truth for "what's done." Update it in the same commit
-that ships a status change.
+**Last reviewed:** v0.6.0 + Phase 3 finisher + Phase 2 detection-depth
+finisher (2026-05-07). This file is the source of truth for "what's
+done." Update it in the same commit that ships a status change.
