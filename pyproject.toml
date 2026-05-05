@@ -45,6 +45,8 @@ openai-agents = ["openai-agents>=0.1.0"]
 crewai = ["crewai>=0.70.0"]
 google-adk = ["google-adk>=0.3.0"]
 llm = ["anthropic>=0.40.0"]
+stats = ["scipy>=1.10"]
+kms = ["boto3>=1.34"]
 all = [
     "cryptography>=41.0",
     "claude-agent-sdk>=0.1.0",

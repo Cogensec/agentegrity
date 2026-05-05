@@ -38,16 +38,54 @@ def default_layers(
     coherence_threshold: float = 0.70,
     drift_tolerance: float = 0.15,
     policy_set: str = "enterprise-default",
+    prefer_llm: bool = False,
+    api_key: str | None = None,
 ) -> list[Layer]:
     """Build the default four-layer integrity pipeline.
 
     Parameters mirror the keyword arguments accepted by the underlying
     layer constructors. Returned as ``list[Layer]`` so it can be passed
     straight into :class:`IntegrityEvaluator`.
+
+    Parameters
+    ----------
+    prefer_llm : bool
+        When True, swap the pattern-based :class:`CorticalLayer` for
+        :class:`CorticalLLMLayer` — the LLM-backed sibling that adds
+        Claude-driven semantic checks on the async evaluation path.
+        Requires ``pip install agentegrity[llm]``; raises
+        :class:`ImportError` if ``anthropic`` isn't installed. Default
+        ``False`` so callers don't accidentally pay LLM latency / API
+        spend on every evaluation.
+    api_key : str, optional
+        Anthropic API key for the LLM checkers. When omitted, the
+        underlying checkers fall back to ``ANTHROPIC_API_KEY`` from the
+        environment and fail open if it's also unset.
     """
+    cortical: Layer
+    if prefer_llm:
+        # cortical_llm imports anthropic lazily on the first LLM call,
+        # so a missing dependency wouldn't surface here without a
+        # second check. Probe for anthropic directly so the operator
+        # gets a clear error at construction time rather than a
+        # confusing runtime failure on the first evaluate().
+        try:
+            import anthropic  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "default_layers(prefer_llm=True) requires the 'anthropic' "
+                "package. Install with: pip install agentegrity[llm]"
+            ) from exc
+        from agentegrity.layers.cortical_llm import CorticalLLMLayer
+        cortical = CorticalLLMLayer(
+            drift_tolerance=drift_tolerance, api_key=api_key
+        )
+    else:
+        cortical = CorticalLayer(drift_tolerance=drift_tolerance)
+
     return [
         AdversarialLayer(coherence_threshold=coherence_threshold),
-        CorticalLayer(drift_tolerance=drift_tolerance),
+        cortical,
         GovernanceLayer(policy_set=policy_set),
         RecoveryLayer(),
     ]
