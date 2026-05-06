@@ -55,6 +55,8 @@ all = [
     "crewai>=0.70.0",
     "google-adk>=0.3.0",
     "anthropic>=0.40.0",
+    "scipy>=1.10",
+    "boto3>=1.34",
 ]
 dev = [
     "pytest>=7.0",
@@ -109,7 +111,16 @@ strict = true
 # Without this block the strict CI step fails with import-not-found
 # the moment we add a feature module that gates on an optional dep.
 [[tool.mypy.overrides]]
-module = ["anthropic", "anthropic.*", "boto3", "boto3.*", "botocore.*", "scipy", "scipy.*"]
+module = [
+    "anthropic", "anthropic.*",
+    "boto3", "boto3.*", "botocore.*",
+    "scipy", "scipy.*",
+    "langchain_core", "langchain_core.*",
+    "agents", "agents.*",
+    "claude_agent_sdk", "claude_agent_sdk.*",
+    "crewai", "crewai.*",
+    "google.adk", "google.adk.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

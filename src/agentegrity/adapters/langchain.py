@@ -69,7 +69,7 @@ class LangChainAdapter(_BaseAdapter):
         can be imported without ``langchain-core`` installed.
         """
         try:
-            from langchain_core.callbacks import (  # type: ignore[import-not-found]
+            from langchain_core.callbacks import (
                 BaseCallbackHandler,
             )
         except ImportError:
@@ -80,7 +80,7 @@ class LangChainAdapter(_BaseAdapter):
 
         adapter = self
 
-        class _AgentegrityCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]
+        class _AgentegrityCallbackHandler(BaseCallbackHandler):  # type: ignore[misc, unused-ignore]
             """LangChain callback handler forwarding to the adapter."""
 
             def on_chain_start(

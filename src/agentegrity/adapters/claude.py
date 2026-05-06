@@ -54,7 +54,7 @@ class ClaudeAdapter(_BaseAdapter):
         can be imported without the ``claude-agent-sdk`` dependency.
         """
         try:
-            from claude_agent_sdk import HookMatcher  # type: ignore[import-not-found]
+            from claude_agent_sdk import HookMatcher
         except ImportError:
             raise ImportError(
                 "claude-agent-sdk is required for the Claude adapter. "

@@ -57,7 +57,7 @@ class CrewAIAdapter(_BaseAdapter):
         instance.
         """
         try:
-            from crewai.utilities.events import (  # type: ignore[import-not-found]
+            from crewai.utilities.events import (
                 CrewKickoffCompletedEvent,
                 CrewKickoffStartedEvent,
                 TaskStartedEvent,

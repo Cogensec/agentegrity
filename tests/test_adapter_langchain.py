@@ -91,8 +91,14 @@ def test_instrument_graph_uses_with_config(stub_langchain: None) -> None:
     assert len(calls) == 1 and "callbacks" in calls[0]
 
 
-def test_create_callback_handler_requires_langchain_core() -> None:
+def test_create_callback_handler_requires_langchain_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Force the import to fail even when langchain-core is installed
+    # (the coverage CI job installs [all,dev]). Setting the module
+    # entry to None makes Python raise ModuleNotFoundError on import.
+    monkeypatch.setitem(sys.modules, "langchain_core", None)
+    monkeypatch.setitem(sys.modules, "langchain_core.callbacks", None)
     ad = LangChainAdapter(profile=AgentProfile.default())
-    # Without stub_langchain fixture and without the real dep:
     with pytest.raises(ImportError, match="langchain-core"):
         ad.create_callback_handler()

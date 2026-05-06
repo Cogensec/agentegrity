@@ -65,7 +65,12 @@ async def test_run_hooks_forwards_to_on_event(stub_agents: None) -> None:
     assert ad.evaluation_count >= 3
 
 
-def test_create_run_hooks_requires_agents_package() -> None:
+def test_create_run_hooks_requires_agents_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Force import failure even when openai-agents is installed
+    # (the coverage CI job installs [all,dev]).
+    monkeypatch.setitem(sys.modules, "agents", None)
     ad = OpenAIAgentsAdapter(profile=AgentProfile.default())
     with pytest.raises(ImportError, match="openai-agents"):
         ad.create_run_hooks()

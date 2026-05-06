@@ -43,7 +43,7 @@ class OpenAIAgentsAdapter(_BaseAdapter):
         imported without the ``openai-agents`` package installed.
         """
         try:
-            from agents import RunHooks  # type: ignore[import-not-found]
+            from agents import RunHooks
         except ImportError:
             raise ImportError(
                 "openai-agents is required for the OpenAI Agents adapter. "
@@ -52,7 +52,7 @@ class OpenAIAgentsAdapter(_BaseAdapter):
 
         adapter = self
 
-        class _AgentegrityRunHooks(RunHooks):  # type: ignore[misc]
+        class _AgentegrityRunHooks(RunHooks):  # type: ignore[misc, unused-ignore]
             async def on_agent_start(
                 self, context: Any, agent: Any
             ) -> None:

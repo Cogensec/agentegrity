@@ -42,6 +42,12 @@ jobs:
     # Separate job so the unit-test matrix above stays fast. Runs once
     # against the latest supported Python; the threshold lives in
     # pyproject.toml [tool.coverage.report].fail_under.
+    #
+    # Installs [all,dev] (not just [dev,crypto]) so the optional-dep
+    # modules (cortical_llm, adversarial_llm, kms_checkpoint) get
+    # exercised by their test suites instead of being imported-but-
+    # untested — those skipped tests would otherwise pull coverage
+    # below the 85% gate.
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -52,7 +58,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[dev,crypto]"
+        run: pip install -e ".[all,dev]"
 
       - name: Run tests with branch coverage
         run: |
