@@ -1,13 +1,14 @@
 <p align="center">
   <img src="assets/logo.png" alt="Agentegrity" height="120"/>
 </p>
-<p align="center">
 
+<p align="center">
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Library Version](https://img.shields.io/badge/library-v0.6.0-green.svg)](pyproject.toml)
 [![Spec Version](https://img.shields.io/badge/spec-v1.0--draft-blue.svg)](spec/SPECIFICATION.md)
 </p>
+---
 # Agentegrity Framework
 
 **Building AI agents capable of securing themselves.**
