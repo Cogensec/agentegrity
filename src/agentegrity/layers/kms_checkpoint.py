@@ -76,7 +76,7 @@ except ImportError:
     _HAS_CRYPTO = False
 
 try:
-    import boto3  # type: ignore[import-untyped]
+    import boto3
     _HAS_BOTO3 = True
 except ImportError:
     _HAS_BOTO3 = False

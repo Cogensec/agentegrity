@@ -30,7 +30,7 @@ def _resolve_wasserstein() -> Any:
     same process.
     """
     try:
-        from scipy.stats import wasserstein_distance  # type: ignore[import-untyped]
+        from scipy.stats import wasserstein_distance
         return wasserstein_distance
     except ImportError:
         return None
