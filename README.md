@@ -2,15 +2,16 @@
   <img src="assets/logo.png" alt="Agentegrity" height="120"/>
 </p>
 
-# Agentegrity Framework
+# Agentegrity Framework https://www.npmjs.com/package/@agentegrity/client
 <p align="center">
-<a href="https://npmjs.com/package/agentegrity"><img src="https://img.shields.io/npm/v/agentegrity" alt="npm"></a>
-<a href="https://npmjs.com/package/agentegrity"><img src="https://img.shields.io/npm/dm/agentegrity" alt="npm"></a>
+<a href="https://npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/v/@agentegrity/client" alt="npm"></a>
+<a href="https://npmjs.com/package/agentegrity/client"><img src="https://img.shields.io/npm/dm/agentegrity/client" alt="npm"></a>
+ </p> 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Library Version](https://img.shields.io/badge/library-v0.6.0-green.svg)](pyproject.toml)
 [![Spec Version](https://img.shields.io/badge/spec-v1.0--draft-blue.svg)](spec/SPECIFICATION.md)
-</p>
+
 **Building AI agents capable of securing themselves.**
 
 Every existing AI security tool builds protection that humans apply to agents from the outside. Guardrails filter inputs. Runtime monitors watch outputs. Policy engines enforce rules. These are necessary, and Agentegrity does not replace them. Agentegrity addresses a different question: how do you measure whether the agent itself has the structural integrity to remain coherent when those external controls cannot reach inside its decision process?
