@@ -100,6 +100,18 @@ select = ["E", "F", "I", "W"]
 python_version = "3.10"
 strict = true
 
+# Optional dependencies — they live behind extras (`[llm]`, `[stats]`,
+# `[kms]`) so the modules importing them MUST type-check whether or
+# not the runtime is installed. `ignore_missing_imports = true` here
+# suppresses both `import-not-found` (when the package is absent in
+# CI's `pip install -e .[dev,crypto]` step) and `import-untyped`
+# (when the package is present but ships no stubs / no `py.typed`).
+# Without this block the strict CI step fails with import-not-found
+# the moment we add a feature module that gates on an optional dep.
+[[tool.mypy.overrides]]
+module = ["anthropic", "anthropic.*", "boto3", "boto3.*", "botocore.*", "scipy", "scipy.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
