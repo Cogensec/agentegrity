@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Agentegrity" height="120"/>
+</p>
+
 # Agentegrity Framework
 
 **Building AI agents capable of securing themselves.**
