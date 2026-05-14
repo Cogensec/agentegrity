@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo-dark.png" alt="Agentegrity" height="120"/>
+  <img src="assets/logo-dark.png" alt="Agentegrity" />
 </p>
 
 <p align="center">
