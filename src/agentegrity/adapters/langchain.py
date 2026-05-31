@@ -28,39 +28,16 @@ Usage (LangGraph):
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import Any
 from uuid import UUID
 
 from agentegrity.adapters.base import _BaseAdapter
-
-logger = logging.getLogger("agentegrity.adapters.langchain")
 
 
 class LangChainAdapter(_BaseAdapter):
     """Instruments a LangChain chain or LangGraph graph with agentegrity."""
 
     _name = "langchain"
-
-    def _dispatch(self, event_type: str, data: dict[str, Any]) -> None:
-        """Dispatch an event synchronously from the callback thread.
-
-        LangChain's ``BaseCallbackHandler`` supports both sync and async
-        callbacks. We use the sync entry points and run the async
-        ``on_event`` handler on the current (or a new) event loop.
-        """
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.on_event(event_type, data))
-                return
-        except RuntimeError:
-            pass
-        try:
-            asyncio.run(self.on_event(event_type, data))
-        except Exception as exc:
-            logger.warning("langchain dispatch %s failed: %s", event_type, exc)
 
     def create_callback_handler(self) -> Any:
         """Return a ``BaseCallbackHandler`` subclass instance bound to this adapter.

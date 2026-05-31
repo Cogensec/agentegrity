@@ -31,7 +31,9 @@ def _default_adapter() -> OpenAIAgentsAdapter:
     global _default
     if _default is None:
         client = AgentegrityClient()
-        _default = client.create_openai_agents_adapter(profile=AgentProfile.default())
+        _default = client.create_adapter(
+            "openai_agents", profile=AgentProfile.default()
+        )
     return _default
 
 
@@ -50,8 +52,11 @@ def run_hooks(
     if profile is not None or client is not None or enforce or api_key is not None:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
-        ad: OpenAIAgentsAdapter = effective_client.create_openai_agents_adapter(
-            profile=effective_profile, enforce=enforce, api_key=api_key
+        ad: OpenAIAgentsAdapter = effective_client.create_adapter(
+            "openai_agents",
+            profile=effective_profile,
+            enforce=enforce,
+            api_key=api_key,
         )
     else:
         ad = _default_adapter()

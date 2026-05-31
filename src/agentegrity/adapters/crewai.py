@@ -22,32 +22,15 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import Any
 
 from agentegrity.adapters.base import _BaseAdapter
-
-logger = logging.getLogger("agentegrity.adapters.crewai")
 
 
 class CrewAIAdapter(_BaseAdapter):
     """Instruments a CrewAI crew with agentegrity evaluation."""
 
     _name = "crewai"
-
-    def _dispatch(self, event_type: str, data: dict[str, Any]) -> None:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.on_event(event_type, data))
-                return
-        except RuntimeError:
-            pass
-        try:
-            asyncio.run(self.on_event(event_type, data))
-        except Exception as exc:
-            logger.warning("crewai dispatch %s failed: %s", event_type, exc)
 
     def subscribe(self, crew: Any | None = None) -> None:
         """Subscribe to the CrewAI event bus.

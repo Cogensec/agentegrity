@@ -10,8 +10,31 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
-_Nothing yet. v0.6.0 was just cut — open issues for the next batch of
-work as they come in._
+### Changed
+- **`AgentegrityClient` adapter factory consolidated.** The five
+  per-framework methods (`create_claude_adapter`,
+  `create_langchain_adapter`, `create_openai_agents_adapter`,
+  `create_crewai_adapter`, `create_google_adk_adapter`) are replaced
+  by a single `create_adapter(name, profile, *, enforce=False,
+  api_key=None)` driven by a name → class registry. Adding a new
+  adapter is now one line in `_ADAPTER_REGISTRY` instead of a 14-line
+  factory method. Migrate call sites from
+  `client.create_claude_adapter(profile=p)` to
+  `client.create_adapter("claude", profile=p)`. The high-level
+  zero-config entry points (`agentegrity.claude.hooks()`,
+  `agentegrity.crewai.instrument()`, etc.) are unaffected.
+- **Sync→async dispatch shim lifted to `_BaseAdapter`.** Three
+  adapters (`CrewAIAdapter`, `LangChainAdapter`, `GoogleADKAdapter`)
+  each carried their own near-identical asyncio bridge from sync
+  framework callbacks into the async `on_event` handler. All three
+  are removed; the bridge now lives once on `_BaseAdapter` as
+  `_dispatch(event_type, data)`. Google ADK's
+  `_dispatch_sync` rename folds in here too — call sites use
+  `_dispatch` regardless of framework.
+- **`[all]` extra is now self-referential.** Adding a new optional
+  framework no longer requires editing two places — register the
+  extra under `[project.optional-dependencies]` and it flows into
+  `[all]` automatically.
 
 ## [0.6.0] - 2026-05-05
 

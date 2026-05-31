@@ -96,6 +96,8 @@ def test_module_hooks_equivalent_to_low_level(stub_sdk: None) -> None:
     from agentegrity import AgentegrityClient
 
     client = AgentegrityClient()
-    low_level = client.create_claude_adapter(profile=AgentProfile.default()).create_hooks()
+    low_level = client.create_adapter(
+        "claude", profile=AgentProfile.default()
+    ).create_hooks()
     high_level = ac.hooks()
     assert set(high_level.keys()) == set(low_level.keys())

@@ -25,7 +25,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -38,19 +37,6 @@ class GoogleADKAdapter(_BaseAdapter):
     """Instruments a Google ADK agent with agentegrity evaluation."""
 
     _name = "google_adk"
-
-    def _dispatch_sync(self, event_type: str, data: dict[str, Any]) -> None:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.on_event(event_type, data))
-                return
-        except RuntimeError:
-            pass
-        try:
-            asyncio.run(self.on_event(event_type, data))
-        except Exception as exc:
-            logger.warning("google_adk dispatch %s failed: %s", event_type, exc)
 
     def instrument(self, agent: Any) -> Any:
         """Attach agentegrity callbacks to a Google ADK agent.
@@ -79,9 +65,9 @@ class GoogleADKAdapter(_BaseAdapter):
             parent = getattr(callback_context, "parent", None)
             if parent is None:
                 prompt = str(getattr(callback_context, "user_content", "") or "")
-                adapter._dispatch_sync("user_prompt_submit", {"prompt": prompt})
+                adapter._dispatch("user_prompt_submit", {"prompt": prompt})
             else:
-                adapter._dispatch_sync(
+                adapter._dispatch(
                     "subagent_start",
                     {"agent_id": getattr(callback_context, "agent_name", "") or ""},
                 )
@@ -89,18 +75,18 @@ class GoogleADKAdapter(_BaseAdapter):
         def _after_agent(callback_context: Any) -> None:
             parent = getattr(callback_context, "parent", None)
             if parent is None:
-                adapter._dispatch_sync("stop", {})
+                adapter._dispatch("stop", {})
 
         def _before_tool(tool: Any, args: Any, tool_context: Any) -> None:
             tool_name = getattr(tool, "name", str(tool))
-            adapter._dispatch_sync(
+            adapter._dispatch(
                 "pre_tool_use",
                 {"tool_name": tool_name, "tool_input": dict(args) if args else {}},
             )
 
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
             tool_name = getattr(tool, "name", str(tool))
-            adapter._dispatch_sync(
+            adapter._dispatch(
                 "post_tool_use",
                 {"tool_name": tool_name, "tool_response": str(tool_response)},
             )

@@ -3,8 +3,8 @@ Advanced example: Explicit-config Claude Agent SDK instrumentation.
 
 For the zero-config happy path, see examples/claude_adapter.py. This
 file shows the full AgentegrityClient + create_profile +
-create_claude_adapter flow for users who need to customize the
-profile, the evaluator, or enforcement mode.
+create_adapter flow for users who need to customize the profile,
+the evaluator, or enforcement mode.
 
 Registers agentegrity hooks at the Claude Agent SDK's extension points
 so every tool call, user prompt, and stop event is evaluated for
@@ -35,7 +35,7 @@ async def main() -> None:
     )
 
     # Measure-only mode: hooks observe but never block tool calls.
-    adapter = client.create_claude_adapter(profile=profile, enforce=False)
+    adapter = client.create_adapter("claude", profile=profile, enforce=False)
 
     # To wire into an SDK session:
     #

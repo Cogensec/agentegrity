@@ -265,6 +265,27 @@ class _BaseAdapter:
                     exc,
                 )
 
+    def _dispatch(self, event_type: str, data: dict[str, Any]) -> None:
+        """Run ``on_event(event_type, data)`` from a synchronous caller.
+
+        Many framework hook surfaces fire from synchronous contexts but
+        ``on_event`` is async. This shim schedules the coroutine on the
+        running loop if there is one, otherwise runs it via
+        ``asyncio.run``. Failures are logged and swallowed so a hook
+        error never breaks the instrumented agent.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(self.on_event(event_type, data))
+                return
+        except RuntimeError:
+            pass
+        try:
+            asyncio.run(self.on_event(event_type, data))
+        except Exception as exc:
+            logger.warning("%s dispatch %s failed: %s", self.name, event_type, exc)
+
     def _maybe_start_session(self) -> None:
         if self._session_started or not self._exporters:
             self._session_started = True
