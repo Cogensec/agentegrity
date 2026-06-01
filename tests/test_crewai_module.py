@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 import agentegrity.crewai as ac
@@ -27,12 +29,16 @@ def test_adapter_lazy_construction() -> None:
     assert first is second
 
 
-def test_instrument_requires_crewai() -> None:
+def test_instrument_requires_crewai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "crewai.events", None)
     with pytest.raises(ImportError, match="crewai"):
         ac.instrument()
 
 
-def test_instrument_with_explicit_profile_isolates_global() -> None:
+def test_instrument_with_explicit_profile_isolates_global(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "crewai.events", None)
     with pytest.raises(ImportError):
         ac.instrument(profile=AgentProfile.default(name="explicit"))
     assert ac._default is None
