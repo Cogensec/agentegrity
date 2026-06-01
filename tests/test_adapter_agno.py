@@ -149,9 +149,46 @@ def test_tool_hook_failure_maps_to_post_tool_use_failure() -> None:
     assert "kaboom" in failure.data["error"]
 
 
-def test_enforce_true_emits_warning() -> None:
-    with pytest.warns(UserWarning, match="observation-only"):
+def test_enforce_true_does_not_warn() -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # Agno enforces natively now; construction must not warn.
         AgnoAdapter(profile=_profile(), enforce=True)
+
+
+def test_tool_hook_enforce_block_raises_stop_agent_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deny decision halts the run by raising StopAgentRun before the
+    tool executes; FunctionCall.execute re-raises it (it's an
+    AgentRunException subclass), so the run stops rather than continuing
+    with a swallowed failure result."""
+    from agno.exceptions import StopAgentRun
+
+    adapter = AgnoAdapter(profile=_profile(), enforce=True)
+    target = _HookTarget("solo")
+    _instrument_target(adapter, target, member=False)
+
+    deny = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "integrity 0.123 triggered block action",
+        }
+    }
+    monkeypatch.setattr(adapter, "_evaluate_sync", lambda event, data: deny)
+
+    ran = {"tool": False}
+
+    def add(a: int, b: int) -> int:
+        ran["tool"] = True
+        return a + b
+
+    with pytest.raises(StopAgentRun, match="triggered block action"):
+        _run_tool(adapter, target, add, {"a": 1, "b": 2})
+    assert ran["tool"] is False
 
 
 def test_instrument_team_marks_members_as_subagents() -> None:

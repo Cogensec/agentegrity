@@ -13,6 +13,12 @@ the six callback hooks ADK exposes on ``Agent``:
 Sub-agent handoffs through ``AgentTool`` fire ``before_agent_callback``
 with a non-root invocation context; we map those to ``subagent_start``.
 
+Limitation: this adapter is fundamentally observation-only. ADK's
+``before_*`` callbacks expose no return-value or exception-signaling
+mechanism the runtime acts on to veto a tool call, so ``enforce=True``
+records block decisions in the attestation chain but cannot prevent
+the call. The adapter warns at construction when ``enforce=True``.
+
 Usage:
     from google.adk.agents import LlmAgent
     from agentegrity.google_adk import instrument, report
@@ -26,9 +32,12 @@ Usage:
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
 
 from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.core.evaluator import IntegrityEvaluator
+from agentegrity.core.profile import AgentProfile
 
 logger = logging.getLogger("agentegrity.adapters.google_adk")
 
@@ -37,6 +46,25 @@ class GoogleADKAdapter(_BaseAdapter):
     """Instruments a Google ADK agent with agentegrity evaluation."""
 
     _name = "google_adk"
+
+    def __init__(
+        self,
+        profile: AgentProfile,
+        evaluator: IntegrityEvaluator | None = None,
+        enforce: bool = False,
+        api_key: str | None = None,
+    ) -> None:
+        super().__init__(profile, evaluator, enforce, api_key)
+        if enforce:
+            warnings.warn(
+                "GoogleADKAdapter is observation-only: ADK before_* callbacks "
+                "expose no return-value or exception-signaling mechanism the "
+                "runtime acts on, so enforce=True records block decisions in "
+                "the attestation chain but cannot prevent tool calls. For "
+                "enforcement, use a framework with a blocking pre-tool hook.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def instrument(self, agent: Any) -> Any:
         """Attach agentegrity callbacks to a Google ADK agent.

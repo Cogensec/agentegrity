@@ -31,13 +31,15 @@ Notes on Agno 2.x specifics:
   hooks under both ``run()`` and ``arun()``; async hooks are skipped
   under sync ``run()``. Sync hooks are the portable choice.
 
-Limitation: ``enforce=True`` is observation-only on this adapter for
-now. Agno *can* block (a hook raising ``AgentRunException`` /
-``InputCheckError`` propagates and halts the run), but agentegrity's
-event dispatch is fire-and-forget and cannot return a block decision
-to the hook under ``arun()``. ``enforce=True`` records block decisions
-in the attestation chain and emits a warning; wiring real
-guardrail-based blocking is tracked as a follow-up.
+Enforcement: under ``enforce=True`` the ``tool_hook`` evaluates the
+``pre_tool_use`` event synchronously and, on a block decision, raises
+``agno.exceptions.StopAgentRun`` before the tool runs. ``StopAgentRun``
+is an ``AgentRunException`` subclass, the only exception family
+``FunctionCall.execute()`` re-raises (via ``exception_to_raise``) to
+halt the run; a plain ``Exception`` (or ``InputCheckError``, which
+extends ``Exception`` directly) would be swallowed into a
+``status="failure"`` result and the run would continue. Block
+decisions are still recorded in the attestation chain.
 
 Usage::
 
@@ -53,12 +55,9 @@ Usage::
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import TYPE_CHECKING, Any
 
 from agentegrity.adapters.base import _BaseAdapter
-from agentegrity.core.evaluator import IntegrityEvaluator
-from agentegrity.core.profile import AgentProfile
 
 if TYPE_CHECKING:
     from agno.agent import Agent
@@ -71,24 +70,6 @@ class AgnoAdapter(_BaseAdapter):
     """Instruments Agno agents and teams with agentegrity evaluation."""
 
     _name = "agno"
-
-    def __init__(
-        self,
-        profile: AgentProfile,
-        evaluator: IntegrityEvaluator | None = None,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> None:
-        super().__init__(profile, evaluator, enforce, api_key)
-        if enforce:
-            warnings.warn(
-                "AgnoAdapter is observation-only: enforce=True records block "
-                "decisions in the attestation chain but does not halt the run. "
-                "Native Agno blocking (guardrail InputCheckError) is a tracked "
-                "follow-up.",
-                UserWarning,
-                stacklevel=2,
-            )
 
     def instrument(self, agent: Agent) -> Agent:
         """Attach agentegrity hooks to a single Agno agent.
@@ -156,10 +137,23 @@ class AgnoAdapter(_BaseAdapter):
                 adapter._dispatch("stop", {"output": output})
 
         def _tool(name: str, func: Any, arguments: dict[str, Any]) -> Any:
-            adapter._dispatch(
+            decision = adapter._evaluate_sync(
                 "pre_tool_use",
                 {"tool_name": name, "tool_input": dict(arguments or {})},
             )
+            hook_output = decision.get("hookSpecificOutput", {})
+            if hook_output.get("permissionDecision") == "deny":
+                # StopAgentRun (an AgentRunException subclass) is the only
+                # exception FunctionCall.execute() re-raises to halt the run;
+                # a plain Exception or InputCheckError would be swallowed into
+                # a failure result. Imported lazily so the adapter stays
+                # importable without agno installed.
+                from agno.exceptions import StopAgentRun
+
+                raise StopAgentRun(
+                    hook_output.get("permissionDecisionReason")
+                    or "agentegrity blocked this tool call"
+                )
             try:
                 result = func(**arguments)
             except Exception as exc:

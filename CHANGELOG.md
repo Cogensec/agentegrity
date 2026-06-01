@@ -61,12 +61,17 @@ in beta until the v1.0 stability criteria documented in
   captured automatically — no construction-time wrapping or
   monkey-patching needed.
 
-  **Limitation:** observation-only. Agno *can* block (a hook raising
-  `AgentRunException` / `InputCheckError` halts the run), but
-  agentegrity's event dispatch is fire-and-forget and cannot return a
-  block decision to the hook under `arun()`. `enforce=True` records
-  block decisions in the attestation chain and warns at construction;
-  native guardrail-based blocking is a tracked follow-up.
+  **Enforcement.** Under `enforce=True` the `tool_hook` evaluates the
+  `pre_tool_use` event synchronously (via the base class's
+  `_evaluate_sync`) and, on a block decision, raises
+  `agno.exceptions.StopAgentRun` before the tool runs. `StopAgentRun`
+  is an `AgentRunException` subclass — the only exception family
+  `FunctionCall.execute()` re-raises (via `exception_to_raise`) to
+  halt the run. A plain `Exception` (including `InputCheckError`,
+  which extends `Exception` directly, not `AgentRunException`) would be
+  swallowed into a `status="failure"` result and the run would
+  continue, so `InputCheckError` is the wrong primitive for this
+  surface. Block decisions are still recorded in the attestation chain.
 
 - **AutoGen adapter (Python).** `pip install agentegrity[autogen]`.
   AutoGen has no callback-handler API; the only hook surface is
@@ -99,18 +104,43 @@ in beta until the v1.0 stability criteria documented in
   `client.create_adapter("claude", profile=p)`. The high-level
   zero-config entry points (`agentegrity.claude.hooks()`,
   `agentegrity.crewai.instrument()`, etc.) are unaffected.
-- **Sync→async dispatch shim lifted to `_BaseAdapter`.** Three
-  adapters (`CrewAIAdapter`, `LangChainAdapter`, `GoogleADKAdapter`)
-  each carried their own near-identical asyncio bridge from sync
-  framework callbacks into the async `on_event` handler. All three
-  are removed; the bridge now lives once on `_BaseAdapter` as
-  `_dispatch(event_type, data)`. Google ADK's
-  `_dispatch_sync` rename folds in here too — call sites use
-  `_dispatch` regardless of framework.
+- **Dispatch shim consolidated, then made genuinely synchronous.**
+  Three adapters (`CrewAIAdapter`, `LangChainAdapter`,
+  `GoogleADKAdapter`) each carried their own near-identical asyncio
+  bridge from sync framework callbacks into the async `on_event`
+  handler. All three are removed; the bridge now lives once on
+  `_BaseAdapter`. Going further: the eight `_handle_*` event handlers
+  do no I/O, so they are now plain `def` (not `async def`), and the
+  dispatch core is a synchronous `_evaluate_sync(event_type, data) ->
+  dict`. `on_event` stays `async` (the `FrameworkAdapter` Protocol is
+  unchanged, and Claude / OpenAI Agents / Bedrock-Strands still
+  `await on_event(...)`), but it now just delegates to
+  `_evaluate_sync`. `_dispatch` calls `_evaluate_sync` inline instead
+  of scheduling a fire-and-forget coroutine, so dispatched evaluations
+  complete before the hook returns. This unlocks real enforcement on
+  synchronous hook surfaces (see Agno).
+- **Google ADK adapter warns on `enforce=True`.** ADK's `before_*`
+  callbacks expose no return-value or exception-signaling mechanism the
+  runtime acts on, so the adapter is fundamentally observation-only.
+  `enforce=True` now records block decisions in the attestation chain
+  and warns at construction, matching the AutoGen / boto3 pattern.
 - **`[all]` extra is now self-referential.** Adding a new optional
   framework no longer requires editing two places — register the
   extra under `[project.optional-dependencies]` and it flows into
   `[all]` automatically.
+
+### Fixed
+- **CrewAI adapter works on crewai ≥ 1.0.** crewai 1.0 relocated the
+  event classes from `crewai.utilities.events` to `crewai.events`
+  (canonical sources under `crewai.events.types.*`). The adapter still
+  imported the legacy path, so `subscribe()` raised `ImportError`
+  under every crewai 1.x — including the 1.14.6 that `[all]` installs.
+  The adapter now imports from `crewai.events`. It also registers the
+  `ToolUsageErrorEvent → post_tool_use_failure` handler its docstring
+  already advertised but never wired up. The previous "requires
+  crewai" tests passed for the wrong reason (matching the legacy
+  path's `ModuleNotFoundError`); they're replaced with a fake-bus
+  integration test that drives every registered handler.
 
 ## [0.6.0] - 2026-05-05
 
