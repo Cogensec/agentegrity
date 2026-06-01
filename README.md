@@ -12,7 +12,7 @@
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
 <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.6.0-green.svg" alt="Library Version"></a>
 <a href="spec/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v1.0--draft-blue.svg" alt="Spec Version"></a
-<a href="https://github.com/cogensec/agentegrity-framework"><img src="https://komarev.com/ghpvc/?username=cogensec&color=1E3A5F&style=flat-square&label=Profile+Views" alt="Repo Views" />
+<a href="https://github.com/cogensec/agentegrity-framework"><img src="https://komarev.com/ghpvc/?username=cogensec&color=1E3A5F&style=flat-square&label=Repo+Views" alt="Repo Views" />
 </a>
 
 </p>
