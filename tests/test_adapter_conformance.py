@@ -39,6 +39,7 @@ from typing import Any
 
 import pytest
 
+from agentegrity.adapters.autogen import AutoGenAdapter
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.adapters.claude import ClaudeAdapter
 from agentegrity.adapters.crewai import CrewAIAdapter
@@ -60,6 +61,7 @@ ADAPTER_CLASSES: list[tuple[str, type[_BaseAdapter]]] = [
     ("openai_agents", OpenAIAgentsAdapter),
     ("crewai", CrewAIAdapter),
     ("google_adk", GoogleADKAdapter),
+    ("autogen", AutoGenAdapter),
 ]
 
 
@@ -304,20 +306,24 @@ class TestAdapterConformance:
         assert len(adapter.attestation_chain.records) == 0
 
 
-class TestAdapterRegistryStable:
-    """Sanity: a maintainer adding/removing an adapter must update this
-    list deliberately."""
+_EXPECTED_ADAPTERS = {
+    "claude",
+    "langchain",
+    "openai_agents",
+    "crewai",
+    "google_adk",
+    "autogen",
+}
 
-    def test_five_default_adapters_shipped(self) -> None:
+
+class TestAdapterRegistryStable:
+    """Sanity: a maintainer adding/removing an adapter must update both
+    ``ADAPTER_CLASSES`` (the matrix above) and ``_EXPECTED_ADAPTERS``
+    deliberately."""
+
+    def test_default_adapters_shipped(self) -> None:
         # If this fails because you added a new adapter, also add a
         # row to ADAPTER_CLASSES at the top of this module so the
         # conformance matrix runs against your new adapter too.
-        assert len(ADAPTER_CLASSES) == 5
         names = {name for name, _ in ADAPTER_CLASSES}
-        assert names == {
-            "claude",
-            "langchain",
-            "openai_agents",
-            "crewai",
-            "google_adk",
-        }
+        assert names == _EXPECTED_ADAPTERS

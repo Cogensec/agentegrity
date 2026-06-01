@@ -10,6 +10,25 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+### Added
+- **AutoGen adapter (Python).** `pip install agentegrity[autogen]`.
+  AutoGen has no callback-handler API; the only hook surface is
+  OpenTelemetry. The adapter ships an OTel `SpanProcessor` that maps
+  AutoGen's GenAI semconv spans (`invoke_agent`, `execute_tool`) onto
+  canonical events: root `invoke_agent` → `user_prompt_submit`/`stop`,
+  nested → `subagent_start`/`subagent_stop`, `execute_tool` →
+  `pre_tool_use`/`post_tool_use` (or `post_tool_use_failure` on
+  ERROR status). Zero-config: `from agentegrity.autogen import
+  instrument; instrument()` installs the SpanProcessor on the global
+  `TracerProvider`. Power users can call `adapter.span_processor()`
+  and wire it into their own provider.
+
+  **Limitation:** observation-only. `enforce=True` records block
+  decisions in the attestation chain but cannot actually deny tool
+  calls — OTel spans observe post-hoc. The adapter emits a
+  `UserWarning` on construction if `enforce=True` is set, so this
+  contract is loud rather than silent.
+
 ### Changed
 - **`AgentegrityClient` adapter factory consolidated.** The five
   per-framework methods (`create_claude_adapter`,
