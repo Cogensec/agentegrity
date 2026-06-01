@@ -8,6 +8,9 @@ adversarially coherent, environmentally portable, and verifiably assured.
 __version__ = "0.6.0"
 
 from agentegrity.adapters.base import FrameworkEvent, SessionExporter
+from agentegrity.agno import instrument as agno_instrument
+from agentegrity.agno import instrument_team as agno_instrument_team
+from agentegrity.agno import report as agno_report
 from agentegrity.autogen import instrument as autogen_instrument
 from agentegrity.autogen import report as autogen_report
 from agentegrity.claude import hooks as claude_hooks
@@ -84,4 +87,7 @@ __all__ = [
     "google_adk_report",
     "autogen_instrument",
     "autogen_report",
+    "agno_instrument",
+    "agno_instrument_team",
+    "agno_report",
 ]

@@ -11,6 +11,29 @@ in beta until the v1.0 stability criteria documented in
 ## [Unreleased]
 
 ### Added
+- **Agno adapter (Python).** `pip install agentegrity[agno]`. Targets
+  Agno 2.x. Hooks into the three Agno hook surfaces on both `Agent`
+  and `Team`: `pre_hooks` → `user_prompt_submit`, `post_hooks` →
+  `stop`, and the `tool_hooks` middleware chain → `pre_tool_use` /
+  `post_tool_use` / `post_tool_use_failure`. `instrument_team()`
+  marks statically-listed members so they emit `subagent_start` /
+  `subagent_stop` while the leader emits the top-level prompt/stop
+  pair; all members share one adapter so the attestation chain is
+  unified. Zero-config: `from agentegrity.agno import instrument;
+  agent = instrument(agent)`.
+
+  Agno 2.x re-propagates `agent.tool_hooks` onto every tool at run
+  setup (not construction), so tools added after `instrument()` are
+  captured automatically — no construction-time wrapping or
+  monkey-patching needed.
+
+  **Limitation:** observation-only. Agno *can* block (a hook raising
+  `AgentRunException` / `InputCheckError` halts the run), but
+  agentegrity's event dispatch is fire-and-forget and cannot return a
+  block decision to the hook under `arun()`. `enforce=True` records
+  block decisions in the attestation chain and warns at construction;
+  native guardrail-based blocking is a tracked follow-up.
+
 - **AutoGen adapter (Python).** `pip install agentegrity[autogen]`.
   AutoGen has no callback-handler API; the only hook surface is
   OpenTelemetry. The adapter ships an OTel `SpanProcessor` that maps

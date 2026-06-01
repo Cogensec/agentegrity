@@ -49,11 +49,12 @@ autogen = [
     "autogen-core>=0.7.0",
     "opentelemetry-sdk>=1.20",
 ]
+agno = ["agno>=2.0"]
 llm = ["anthropic>=0.40.0"]
 stats = ["scipy>=1.10"]
 kms = ["boto3>=1.34"]
 all = [
-    "agentegrity[crypto,claude,langchain,openai-agents,crewai,google-adk,autogen,llm,stats,kms]",
+    "agentegrity[crypto,claude,langchain,openai-agents,crewai,google-adk,autogen,agno,llm,stats,kms]",
 ]
 dev = [
     "pytest>=7.0",
@@ -120,6 +121,7 @@ module = [
     "autogen_agentchat", "autogen_agentchat.*",
     "autogen_core", "autogen_core.*",
     "opentelemetry.*",
+    "agno", "agno.*",
 ]
 ignore_missing_imports = true
 

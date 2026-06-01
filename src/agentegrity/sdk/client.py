@@ -30,6 +30,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "crewai": ("agentegrity.adapters.crewai", "CrewAIAdapter"),
     "google_adk": ("agentegrity.adapters.google_adk", "GoogleADKAdapter"),
     "autogen": ("agentegrity.adapters.autogen", "AutoGenAdapter"),
+    "agno": ("agentegrity.adapters.agno", "AgnoAdapter"),
 }
 
 

@@ -39,6 +39,7 @@ from typing import Any
 
 import pytest
 
+from agentegrity.adapters.agno import AgnoAdapter
 from agentegrity.adapters.autogen import AutoGenAdapter
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.adapters.claude import ClaudeAdapter
@@ -62,6 +63,7 @@ ADAPTER_CLASSES: list[tuple[str, type[_BaseAdapter]]] = [
     ("crewai", CrewAIAdapter),
     ("google_adk", GoogleADKAdapter),
     ("autogen", AutoGenAdapter),
+    ("agno", AgnoAdapter),
 ]
 
 
@@ -313,6 +315,7 @@ _EXPECTED_ADAPTERS = {
     "crewai",
     "google_adk",
     "autogen",
+    "agno",
 }
 
 
