@@ -10,8 +10,137 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
-_Nothing yet. v0.6.0 was just cut — open issues for the next batch of
-work as they come in._
+### Added
+- **AWS Bedrock Agents adapter (Python).** `pip install
+  agentegrity[bedrock-agents]`. One adapter, two surfaces:
+
+  *Strands SDK* (`instrument_strands(agent)`). Registers a typed
+  `HookProvider` on a Strands `Agent`: `BeforeInvocationEvent` →
+  `user_prompt_submit`, `AfterInvocationEvent` → `stop`,
+  `BeforeToolCallEvent` → `pre_tool_use`, `AfterToolCallEvent` →
+  `post_tool_use` (or `post_tool_use_failure` when `event.exception is
+  not None`). Tool callbacks are registered as `async` so the adapter
+  can `await on_event(...)`, inspect the block decision the
+  `_handle_pre_tool_use` returns, and write `event.cancel_tool=reason`
+  — **real enforcement**, the first adapter in the v0.7 batch where
+  `enforce=True` actually denies a tool call rather than just
+  recording the decision.
+
+  *boto3* (`wrap_client(client)`). Patches `bedrock-agent-runtime`'s
+  `invoke_agent` to force `enableTrace=True` (override via
+  `force_trace=False`), then wraps the returned `EventStream`. TracePart
+  variants map onto canonical events:
+  `orchestrationTrace.invocationInput.actionGroupInvocationInput` →
+  `pre_tool_use`, `orchestrationTrace.observation.actionGroupInvocationOutput`
+  → `post_tool_use`, `agentCollaboratorInvocation{Input,Output}` →
+  `subagent_{start,stop}`, `failureTrace` → `post_tool_use_failure`.
+  The caller's `chunk` / `files` / `returnControl` / exception
+  variants pass through unchanged. Observation-only: trace events
+  arrive after the tool ran, so `enforce=True` on this surface records
+  the block decision but cannot prevent execution — the adapter
+  warns at `wrap_client` time when both are set.
+
+  Partial-stream safety: the wrapper's iterator runs in a generator's
+  `finally` block, so a caller bailing out mid-iteration still fires
+  `stop` (with `reason="stream_terminated_early"`) and closes the
+  session in the attestation chain.
+
+- **Agno adapter (Python).** `pip install agentegrity[agno]`. Targets
+  Agno 2.x. Hooks into the three Agno hook surfaces on both `Agent`
+  and `Team`: `pre_hooks` → `user_prompt_submit`, `post_hooks` →
+  `stop`, and the `tool_hooks` middleware chain → `pre_tool_use` /
+  `post_tool_use` / `post_tool_use_failure`. `instrument_team()`
+  marks statically-listed members so they emit `subagent_start` /
+  `subagent_stop` while the leader emits the top-level prompt/stop
+  pair; all members share one adapter so the attestation chain is
+  unified. Zero-config: `from agentegrity.agno import instrument;
+  agent = instrument(agent)`.
+
+  Agno 2.x re-propagates `agent.tool_hooks` onto every tool at run
+  setup (not construction), so tools added after `instrument()` are
+  captured automatically — no construction-time wrapping or
+  monkey-patching needed.
+
+  **Enforcement.** Under `enforce=True` the `tool_hook` evaluates the
+  `pre_tool_use` event synchronously (via the base class's
+  `_evaluate_sync`) and, on a block decision, raises
+  `agno.exceptions.StopAgentRun` before the tool runs. `StopAgentRun`
+  is an `AgentRunException` subclass — the only exception family
+  `FunctionCall.execute()` re-raises (via `exception_to_raise`) to
+  halt the run. A plain `Exception` (including `InputCheckError`,
+  which extends `Exception` directly, not `AgentRunException`) would be
+  swallowed into a `status="failure"` result and the run would
+  continue, so `InputCheckError` is the wrong primitive for this
+  surface. Block decisions are still recorded in the attestation chain.
+
+- **AutoGen adapter (Python).** `pip install agentegrity[autogen]`.
+  AutoGen has no callback-handler API; the only hook surface is
+  OpenTelemetry. The adapter ships an OTel `SpanProcessor` that maps
+  AutoGen's GenAI semconv spans (`invoke_agent`, `execute_tool`) onto
+  canonical events: root `invoke_agent` → `user_prompt_submit`/`stop`,
+  nested → `subagent_start`/`subagent_stop`, `execute_tool` →
+  `pre_tool_use`/`post_tool_use` (or `post_tool_use_failure` on
+  ERROR status). Zero-config: `from agentegrity.autogen import
+  instrument; instrument()` installs the SpanProcessor on the global
+  `TracerProvider`. Power users can call `adapter.span_processor()`
+  and wire it into their own provider.
+
+  **Limitation:** observation-only. `enforce=True` records block
+  decisions in the attestation chain but cannot actually deny tool
+  calls — OTel spans observe post-hoc. The adapter emits a
+  `UserWarning` on construction if `enforce=True` is set, so this
+  contract is loud rather than silent.
+
+### Changed
+- **`AgentegrityClient` adapter factory consolidated.** The five
+  per-framework methods (`create_claude_adapter`,
+  `create_langchain_adapter`, `create_openai_agents_adapter`,
+  `create_crewai_adapter`, `create_google_adk_adapter`) are replaced
+  by a single `create_adapter(name, profile, *, enforce=False,
+  api_key=None)` driven by a name → class registry. Adding a new
+  adapter is now one line in `_ADAPTER_REGISTRY` instead of a 14-line
+  factory method. Migrate call sites from
+  `client.create_claude_adapter(profile=p)` to
+  `client.create_adapter("claude", profile=p)`. The high-level
+  zero-config entry points (`agentegrity.claude.hooks()`,
+  `agentegrity.crewai.instrument()`, etc.) are unaffected.
+- **Dispatch shim consolidated, then made genuinely synchronous.**
+  Three adapters (`CrewAIAdapter`, `LangChainAdapter`,
+  `GoogleADKAdapter`) each carried their own near-identical asyncio
+  bridge from sync framework callbacks into the async `on_event`
+  handler. All three are removed; the bridge now lives once on
+  `_BaseAdapter`. Going further: the eight `_handle_*` event handlers
+  do no I/O, so they are now plain `def` (not `async def`), and the
+  dispatch core is a synchronous `_evaluate_sync(event_type, data) ->
+  dict`. `on_event` stays `async` (the `FrameworkAdapter` Protocol is
+  unchanged, and Claude / OpenAI Agents / Bedrock-Strands still
+  `await on_event(...)`), but it now just delegates to
+  `_evaluate_sync`. `_dispatch` calls `_evaluate_sync` inline instead
+  of scheduling a fire-and-forget coroutine, so dispatched evaluations
+  complete before the hook returns. This unlocks real enforcement on
+  synchronous hook surfaces (see Agno).
+- **Google ADK adapter warns on `enforce=True`.** ADK's `before_*`
+  callbacks expose no return-value or exception-signaling mechanism the
+  runtime acts on, so the adapter is fundamentally observation-only.
+  `enforce=True` now records block decisions in the attestation chain
+  and warns at construction, matching the AutoGen / boto3 pattern.
+- **`[all]` extra is now self-referential.** Adding a new optional
+  framework no longer requires editing two places — register the
+  extra under `[project.optional-dependencies]` and it flows into
+  `[all]` automatically.
+
+### Fixed
+- **CrewAI adapter works on crewai ≥ 1.0.** crewai 1.0 relocated the
+  event classes from `crewai.utilities.events` to `crewai.events`
+  (canonical sources under `crewai.events.types.*`). The adapter still
+  imported the legacy path, so `subscribe()` raised `ImportError`
+  under every crewai 1.x — including the 1.14.6 that `[all]` installs.
+  The adapter now imports from `crewai.events`. It also registers the
+  `ToolUsageErrorEvent → post_tool_use_failure` handler its docstring
+  already advertised but never wired up. The previous "requires
+  crewai" tests passed for the wrong reason (matching the legacy
+  path's `ModuleNotFoundError`); they're replaced with a fake-bus
+  integration test that drives every registered handler.
 
 ## [0.6.0] - 2026-05-05
 

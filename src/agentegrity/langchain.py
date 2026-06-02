@@ -45,7 +45,7 @@ def _default_adapter() -> LangChainAdapter:
     global _default
     if _default is None:
         client = AgentegrityClient()
-        _default = client.create_langchain_adapter(profile=AgentProfile.default())
+        _default = client.create_adapter("langchain", profile=AgentProfile.default())
     return _default
 
 
@@ -62,8 +62,11 @@ def _resolve(
     if profile is not None or client is not None or enforce or api_key is not None:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
-        ad: LangChainAdapter = effective_client.create_langchain_adapter(
-            profile=effective_profile, enforce=enforce, api_key=api_key
+        ad: LangChainAdapter = effective_client.create_adapter(
+            "langchain",
+            profile=effective_profile,
+            enforce=enforce,
+            api_key=api_key,
         )
         return ad
     return _default_adapter()

@@ -7,6 +7,7 @@ This is the recommended entry point for most users.
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from agentegrity.core.attestation import AttestationRecord, Evidence
@@ -17,6 +18,21 @@ from agentegrity.layers.adversarial import AdversarialLayer
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.governance import GovernanceLayer
 from agentegrity.layers.recovery import RecoveryLayer
+
+# Maps adapter name → (module path, class name). Lazy: the framework
+# module is imported only when the adapter is actually requested, so
+# users who never call create_adapter("crewai", ...) never pay the
+# crewai import cost. New adapters: add one line here.
+_ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
+    "claude": ("agentegrity.adapters.claude", "ClaudeAdapter"),
+    "langchain": ("agentegrity.adapters.langchain", "LangChainAdapter"),
+    "openai_agents": ("agentegrity.adapters.openai_agents", "OpenAIAgentsAdapter"),
+    "crewai": ("agentegrity.adapters.crewai", "CrewAIAdapter"),
+    "google_adk": ("agentegrity.adapters.google_adk", "GoogleADKAdapter"),
+    "autogen": ("agentegrity.adapters.autogen", "AutoGenAdapter"),
+    "agno": ("agentegrity.adapters.agno", "AgnoAdapter"),
+    "bedrock_agents": ("agentegrity.adapters.bedrock_agents", "BedrockAgentsAdapter"),
+}
 
 
 class AgentegrityClient:
@@ -191,80 +207,42 @@ class AgentegrityClient:
             ],
         )
 
-    def create_claude_adapter(
+    def create_adapter(
         self,
+        name: str,
         profile: AgentProfile,
+        *,
         enforce: bool = False,
         api_key: str | None = None,
     ) -> Any:
-        """Create a ClaudeAdapter wired to this client's evaluator."""
-        from agentegrity.adapters.claude import ClaudeAdapter
+        """Create a framework adapter wired to this client's evaluator.
 
-        return ClaudeAdapter(
-            profile=profile,
-            evaluator=self._evaluator,
-            enforce=enforce,
-            api_key=api_key,
-        )
-
-    def create_langchain_adapter(
-        self,
-        profile: AgentProfile,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> Any:
-        """Create a LangChainAdapter (also covers LangGraph) wired to this evaluator."""
-        from agentegrity.adapters.langchain import LangChainAdapter
-
-        return LangChainAdapter(
-            profile=profile,
-            evaluator=self._evaluator,
-            enforce=enforce,
-            api_key=api_key,
-        )
-
-    def create_openai_agents_adapter(
-        self,
-        profile: AgentProfile,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> Any:
-        """Create an OpenAIAgentsAdapter wired to this evaluator."""
-        from agentegrity.adapters.openai_agents import OpenAIAgentsAdapter
-
-        return OpenAIAgentsAdapter(
-            profile=profile,
-            evaluator=self._evaluator,
-            enforce=enforce,
-            api_key=api_key,
-        )
-
-    def create_crewai_adapter(
-        self,
-        profile: AgentProfile,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> Any:
-        """Create a CrewAIAdapter wired to this evaluator."""
-        from agentegrity.adapters.crewai import CrewAIAdapter
-
-        return CrewAIAdapter(
-            profile=profile,
-            evaluator=self._evaluator,
-            enforce=enforce,
-            api_key=api_key,
-        )
-
-    def create_google_adk_adapter(
-        self,
-        profile: AgentProfile,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> Any:
-        """Create a GoogleADKAdapter wired to this evaluator."""
-        from agentegrity.adapters.google_adk import GoogleADKAdapter
-
-        return GoogleADKAdapter(
+        Parameters
+        ----------
+        name : str
+            Adapter name. One of ``_ADAPTER_REGISTRY``'s keys (e.g.
+            ``"claude"``, ``"langchain"``, ``"openai_agents"``,
+            ``"crewai"``, ``"google_adk"``).
+        profile : AgentProfile
+            The agent profile the adapter will evaluate.
+        enforce : bool
+            If True, adapters that support enforcement will block tool
+            calls when the integrity score's action is ``"block"``.
+            Observation-only adapters (OTel-based) log this flag but
+            cannot enforce; they will emit a runtime warning.
+        api_key : str, optional
+            Forwarded to the adapter for framework-specific auth needs.
+        """
+        try:
+            module_path, class_name = _ADAPTER_REGISTRY[name]
+        except KeyError:
+            valid = ", ".join(sorted(_ADAPTER_REGISTRY))
+            raise ValueError(
+                f"Unknown adapter '{name}'. Valid: {valid}"
+            ) from None
+        module = importlib.import_module(module_path)
+        adapter_cls = getattr(module, class_name)
+        return adapter_cls(
             profile=profile,
             evaluator=self._evaluator,
             enforce=enforce,

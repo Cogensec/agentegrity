@@ -51,8 +51,8 @@ this document is the operational version of it.
 | `agentegrity.claude` (Claude Agent SDK) | ✅ | Five hook points: Harness, Tools, Sandbox, Session, Orchestration. |
 | `agentegrity.langchain` (LangChain + LangGraph) | ✅ | Single adapter covers both via callback-handler propagation. |
 | `agentegrity.openai_agents` | ✅ | Hooks via the official `openai-agents` Python SDK. |
-| `agentegrity.crewai` | ✅ | Event-bus subscription. |
-| `agentegrity.google_adk` | ✅ | Google Agent Development Kit. |
+| `agentegrity.crewai` | ✅ | Event-bus subscription (crewai 1.x; subscribes via `crewai.events`). |
+| `agentegrity.google_adk` | ✅ | Google Agent Development Kit. Observation-only: ADK `before_*` callbacks expose no veto mechanism, so `enforce=True` records block decisions but cannot prevent tool calls (warns at construction). |
 
 All five inherit from `_BaseAdapter` (`adapters/base.py`), share the
 seven canonical event types, and feed the same evaluator + attestation
@@ -94,7 +94,7 @@ chain.
 | CI matrix (Python 3.10/3.12, Node 18/20/22) | ✅ | `.github/workflows/ci.yml`. |
 | Version-parity gate                  |   ✅   | `scripts/check_versions.py` (Python) + `scripts/check-versions.ts` (TS) wired into CI. |
 | Release workflow                     |   ✅   | `.github/workflows/release.yml` publishes Python wheel + npm matrix. |
-| Conformance test suite (Python adapters) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (51 tests; 9 invariants × 5 adapters + registry sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
+| Conformance test suite (Python adapters) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (81 tests; 10 invariants × 8 adapters + registry sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
 | Conformance test suite (TS packages)   | ✅ | `clients/typescript/test/cross-package-conformance.test.ts` is the TS mirror — 49 tests across 6 packages (claude-sdk / langchain / openai-agents / crewai / google-adk / vercel-ai), driving the same shared-core seam (`adapter()`) through the same canonical event stream and pinning the same parity invariants. The new suite caught two real bugs in `@agentegrity/client` on first run: missing `adapterName` field, no `registerExporter` deduplication. Both fixed in the same commit. |
 | Performance budget                     | ✅ | `tests/test_perf_budget.py` (run via `pytest -m benchmark`) measures 200-iteration p95 latency for each layer in isolation and the full default pipeline. Calibrated ceilings: 50 ms per-layer, 100 ms full-pipeline. Currently measured: per-layer p95 0.01-0.20 ms, pipeline p95 0.23 ms (250-5000x cushion before LLM-backed paths land). Per-layer + pipeline budgets pinned in metadata-sentinel tests so a maintainer can't silently raise them. |
 | Detection benchmark suite            |   ✅   | `pytest -m benchmark` runs the in-repo synthetic suite (~30 attacks + ~30 benign across 6 attack families) with calibrated thresholds (TPR ≥ 0.95, FPR ≤ 0.05, F1 ≥ 0.95, plus per-family floor: every family must register at least one TP). Loader stubs for PINT / AgentDojo / InjecAgent auto-skip when their `AGENTEGRITY_BENCH_*` env var is unset, so cron can plug in real datasets without touching CI defaults. `scripts/run_benchmarks.py [--all]` prints a markdown report and exits non-zero on regression. **Real-world numbers published below.** |
@@ -106,9 +106,10 @@ chain.
 
 | Item                                  | Phase | Notes |
 |---------------------------------------|:-----:|-------|
-| Semantic Kernel adapter (Python + TS) |   4   | `pip install agentegrity[semantic-kernel]` + `@agentegrity/semantic-kernel`. |
-| AutoGen adapter (Python)              |   4   | `pip install agentegrity[autogen]`. |
-| AWS Bedrock Agents adapter (Python)   |   4   | `pip install agentegrity[bedrock]`. |
+| ~~Semantic Kernel adapter (Python + TS)~~ | 4 | Deferred pending Microsoft Agent Framework GA (Q2 2026). MAF absorbs SK; one MAF adapter will cover both. |
+| ~~AutoGen adapter (Python)~~          |   4   | Shipped. `pip install agentegrity[autogen]`. OTel SpanProcessor consumes AutoGen's GenAI semconv spans (`invoke_agent`, `execute_tool`). Observation-only: `enforce=True` records block decisions but cannot prevent tool calls (warns at construction). |
+| ~~AWS Bedrock Agents adapter (Python)~~ | 4 | Shipped. `pip install agentegrity[bedrock-agents]`. Two surfaces, one adapter: `instrument_strands(agent)` registers typed hooks (`BeforeInvocationEvent` / `BeforeToolCallEvent` / `AfterToolCallEvent` / `AfterInvocationEvent`) on a Strands `Agent`, with real enforcement via `event.cancel_tool` when `enforce=True` blocks a tool; `wrap_client(boto3_client)` patches `bedrock-agent-runtime.invoke_agent` to force `enableTrace=True` and stream-map TracePart variants (action group / collaborator / failure) onto canonical events. boto3 path is observation-only (trace is post-hoc, warns on `enforce=True`). |
+| ~~Agno adapter (Python)~~             |   4   | Shipped. `pip install agentegrity[agno]`. Hooks into Agno 2.x `pre_hooks`/`post_hooks`/`tool_hooks` on `Agent` and `Team`; `instrument_team()` emits `subagent_*` for members. `tool_hooks` middleware captures every tool call, including ones added after instrumentation. Real enforcement: under `enforce=True` the `tool_hook` evaluates `pre_tool_use` synchronously and raises `StopAgentRun` (an `AgentRunException` subclass, the only family `FunctionCall.execute()` re-raises to halt) before the tool runs. |
 | ~~Reference SessionExporter receiver~~ | ✅ | Shipped in `examples/exporter_receiver/`. FastAPI app implementing all three endpoints (`POST /sessions`, `POST /sessions/{id}/events`, `POST /sessions/{id}/end`); validates each payload against `schemas/exporter/*.json` via `jsonschema.Draft202012Validator`. 11 smoke tests cover happy-path (202) and validation errors (422). Not a production backend — in-memory store, no auth — but unblocks adoption of the exporter wire format without `agentegrity-pro`. |
 | JWS / COSE attestation serializations |   6   | Interop with generic verifiers; raw Ed25519 stays the default. |
 | Key rotation + KMS interface          |   6   | `KeyProvider` Protocol with file / env / AWS KMS impls. |

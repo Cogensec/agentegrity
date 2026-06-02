@@ -2,8 +2,11 @@
 CrewAI adapter for agentegrity.
 
 Instruments CrewAI crews by subscribing to the global event bus
-(``crewai.utilities.events.crewai_event_bus``) and forwarding each
-event to the shared ``_BaseAdapter`` dispatcher.
+(``crewai.events.crewai_event_bus``) and forwarding each event to the
+shared ``_BaseAdapter`` dispatcher. Compatible with crewai 1.x; the
+1.0 release relocated event classes from ``crewai.utilities.events``
+to ``crewai.events`` (which re-exports the canonical ``types.*``
+submodules).
 
 Event mapping:
     CrewKickoffStartedEvent    -> user_prompt_submit
@@ -22,32 +25,15 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import Any
 
 from agentegrity.adapters.base import _BaseAdapter
-
-logger = logging.getLogger("agentegrity.adapters.crewai")
 
 
 class CrewAIAdapter(_BaseAdapter):
     """Instruments a CrewAI crew with agentegrity evaluation."""
 
     _name = "crewai"
-
-    def _dispatch(self, event_type: str, data: dict[str, Any]) -> None:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.on_event(event_type, data))
-                return
-        except RuntimeError:
-            pass
-        try:
-            asyncio.run(self.on_event(event_type, data))
-        except Exception as exc:
-            logger.warning("crewai dispatch %s failed: %s", event_type, exc)
 
     def subscribe(self, crew: Any | None = None) -> None:
         """Subscribe to the CrewAI event bus.
@@ -57,10 +43,11 @@ class CrewAIAdapter(_BaseAdapter):
         instance.
         """
         try:
-            from crewai.utilities.events import (
+            from crewai.events import (
                 CrewKickoffCompletedEvent,
                 CrewKickoffStartedEvent,
                 TaskStartedEvent,
+                ToolUsageErrorEvent,
                 ToolUsageFinishedEvent,
                 ToolUsageStartedEvent,
                 crewai_event_bus,
@@ -101,6 +88,15 @@ class CrewAIAdapter(_BaseAdapter):
                 },
             )
 
+        def _on_tool_error(source_: Any, event: Any) -> None:
+            adapter._dispatch(
+                "post_tool_use_failure",
+                {
+                    "tool_name": getattr(event, "tool_name", ""),
+                    "error": str(getattr(event, "error", "")),
+                },
+            )
+
         def _on_task_start(source_: Any, event: Any) -> None:
             adapter._dispatch(
                 "subagent_start",
@@ -111,4 +107,5 @@ class CrewAIAdapter(_BaseAdapter):
         crewai_event_bus.on(CrewKickoffCompletedEvent)(_on_kickoff_end)
         crewai_event_bus.on(ToolUsageStartedEvent)(_on_tool_start)
         crewai_event_bus.on(ToolUsageFinishedEvent)(_on_tool_end)
+        crewai_event_bus.on(ToolUsageErrorEvent)(_on_tool_error)
         crewai_event_bus.on(TaskStartedEvent)(_on_task_start)

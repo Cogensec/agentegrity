@@ -8,6 +8,14 @@ adversarially coherent, environmentally portable, and verifiably assured.
 __version__ = "0.6.0"
 
 from agentegrity.adapters.base import FrameworkEvent, SessionExporter
+from agentegrity.agno import instrument as agno_instrument
+from agentegrity.agno import instrument_team as agno_instrument_team
+from agentegrity.agno import report as agno_report
+from agentegrity.autogen import instrument as autogen_instrument
+from agentegrity.autogen import report as autogen_report
+from agentegrity.bedrock_agents import instrument_strands as bedrock_agents_instrument_strands
+from agentegrity.bedrock_agents import report as bedrock_agents_report
+from agentegrity.bedrock_agents import wrap_client as bedrock_agents_wrap_client
 from agentegrity.claude import hooks as claude_hooks
 from agentegrity.claude import report as claude_report
 from agentegrity.core.attestation import AttestationChain, AttestationRecord
@@ -80,4 +88,12 @@ __all__ = [
     "crewai_report",
     "google_adk_instrument",
     "google_adk_report",
+    "autogen_instrument",
+    "autogen_report",
+    "agno_instrument",
+    "agno_instrument_team",
+    "agno_report",
+    "bedrock_agents_instrument_strands",
+    "bedrock_agents_wrap_client",
+    "bedrock_agents_report",
 ]

@@ -265,6 +265,20 @@ class _BaseAdapter:
                     exc,
                 )
 
+    def _dispatch(self, event_type: str, data: dict[str, Any]) -> None:
+        """Evaluate an event from a synchronous, fire-and-forget caller.
+
+        Observation-only hook surfaces fire from synchronous contexts
+        and don't act on the decision. They call this shim, which runs
+        the synchronous evaluation inline and discards the result.
+        Failures are logged and swallowed so a hook error never breaks
+        the instrumented agent.
+        """
+        try:
+            self._evaluate_sync(event_type, data)
+        except Exception as exc:
+            logger.warning("%s dispatch %s failed: %s", self.name, event_type, exc)
+
     def _maybe_start_session(self) -> None:
         if self._session_started or not self._exporters:
             self._session_started = True
@@ -348,6 +362,25 @@ class _BaseAdapter:
     async def on_event(
         self, event_type: str, event_data: dict[str, Any]
     ) -> dict[str, Any]:
+        """Async entry point required by the ``FrameworkAdapter`` Protocol.
+
+        The handlers do no I/O, so the real work is synchronous. This
+        is a thin wrapper over ``_evaluate_sync`` so async callbacks can
+        ``await on_event(...)`` while sync callbacks call
+        ``_evaluate_sync(...)`` directly.
+        """
+        return self._evaluate_sync(event_type, event_data)
+
+    def _evaluate_sync(
+        self, event_type: str, event_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Evaluate an event synchronously and return the decision dict.
+
+        Returns the same shape as ``_handle_pre_tool_use``'s deny path
+        (``{"hookSpecificOutput": {...}}``) when enforcement blocks, or
+        an empty dict otherwise. Sync hook surfaces that can enforce
+        (raise to halt the run) call this and act on the result.
+        """
         handlers = {
             "pre_tool_use": self._handle_pre_tool_use,
             "post_tool_use": self._handle_post_tool_use,
@@ -361,7 +394,7 @@ class _BaseAdapter:
         handler = handlers.get(event_type)
         if handler:
             try:
-                return await handler(event_data)
+                return handler(event_data)
             except Exception as exc:
                 logger.warning(
                     "%s handler %s failed: %s",
@@ -374,7 +407,7 @@ class _BaseAdapter:
 
     # --- Framework-agnostic event handlers ---
 
-    async def _handle_pre_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _handle_pre_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_name = data.get("tool_name", "")
         tool_input = data.get("tool_input", {})
 
@@ -400,7 +433,7 @@ class _BaseAdapter:
             }
         return {}
 
-    async def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_response = data.get("tool_response", "")
         self._buffer.tool_outputs.append(
             {"tool": data.get("tool_name", ""), "output": tool_response}
@@ -409,7 +442,7 @@ class _BaseAdapter:
         self._emit_event("post_tool_use", data, score)
         return {}
 
-    async def _handle_post_tool_use_failure(
+    def _handle_post_tool_use_failure(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
         self._buffer.tool_failures.append(
@@ -418,7 +451,7 @@ class _BaseAdapter:
         self._emit_event("post_tool_use_failure", data)
         return {}
 
-    async def _handle_user_prompt_submit(
+    def _handle_user_prompt_submit(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
         prompt = data.get("prompt", data.get("user_message", ""))
@@ -430,12 +463,12 @@ class _BaseAdapter:
         self._emit_event("user_prompt_submit", data, score)
         return {}
 
-    async def _handle_stop(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _handle_stop(self, data: dict[str, Any]) -> dict[str, Any]:
         score = self._run_evaluation()
         self._emit_event("stop", data, score)
         return {}
 
-    async def _handle_subagent_start(
+    def _handle_subagent_start(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
         self._buffer.subagents.append(
@@ -447,7 +480,7 @@ class _BaseAdapter:
         self._emit_event("subagent_start", data)
         return {}
 
-    async def _handle_subagent_stop(
+    def _handle_subagent_stop(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
         self._buffer.subagents.append(
@@ -460,7 +493,7 @@ class _BaseAdapter:
         self._emit_event("subagent_stop", data)
         return {}
 
-    async def _handle_pre_compact(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _handle_pre_compact(self, data: dict[str, Any]) -> dict[str, Any]:
         self._emit_event(
             "pre_compact",
             {

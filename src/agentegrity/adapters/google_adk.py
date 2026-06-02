@@ -13,6 +13,12 @@ the six callback hooks ADK exposes on ``Agent``:
 Sub-agent handoffs through ``AgentTool`` fire ``before_agent_callback``
 with a non-root invocation context; we map those to ``subagent_start``.
 
+Limitation: this adapter is fundamentally observation-only. ADK's
+``before_*`` callbacks expose no return-value or exception-signaling
+mechanism the runtime acts on to veto a tool call, so ``enforce=True``
+records block decisions in the attestation chain but cannot prevent
+the call. The adapter warns at construction when ``enforce=True``.
+
 Usage:
     from google.adk.agents import LlmAgent
     from agentegrity.google_adk import instrument, report
@@ -25,11 +31,13 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import warnings
 from typing import Any
 
 from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.core.evaluator import IntegrityEvaluator
+from agentegrity.core.profile import AgentProfile
 
 logger = logging.getLogger("agentegrity.adapters.google_adk")
 
@@ -39,18 +47,24 @@ class GoogleADKAdapter(_BaseAdapter):
 
     _name = "google_adk"
 
-    def _dispatch_sync(self, event_type: str, data: dict[str, Any]) -> None:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.on_event(event_type, data))
-                return
-        except RuntimeError:
-            pass
-        try:
-            asyncio.run(self.on_event(event_type, data))
-        except Exception as exc:
-            logger.warning("google_adk dispatch %s failed: %s", event_type, exc)
+    def __init__(
+        self,
+        profile: AgentProfile,
+        evaluator: IntegrityEvaluator | None = None,
+        enforce: bool = False,
+        api_key: str | None = None,
+    ) -> None:
+        super().__init__(profile, evaluator, enforce, api_key)
+        if enforce:
+            warnings.warn(
+                "GoogleADKAdapter is observation-only: ADK before_* callbacks "
+                "expose no return-value or exception-signaling mechanism the "
+                "runtime acts on, so enforce=True records block decisions in "
+                "the attestation chain but cannot prevent tool calls. For "
+                "enforcement, use a framework with a blocking pre-tool hook.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def instrument(self, agent: Any) -> Any:
         """Attach agentegrity callbacks to a Google ADK agent.
@@ -79,9 +93,9 @@ class GoogleADKAdapter(_BaseAdapter):
             parent = getattr(callback_context, "parent", None)
             if parent is None:
                 prompt = str(getattr(callback_context, "user_content", "") or "")
-                adapter._dispatch_sync("user_prompt_submit", {"prompt": prompt})
+                adapter._dispatch("user_prompt_submit", {"prompt": prompt})
             else:
-                adapter._dispatch_sync(
+                adapter._dispatch(
                     "subagent_start",
                     {"agent_id": getattr(callback_context, "agent_name", "") or ""},
                 )
@@ -89,18 +103,18 @@ class GoogleADKAdapter(_BaseAdapter):
         def _after_agent(callback_context: Any) -> None:
             parent = getattr(callback_context, "parent", None)
             if parent is None:
-                adapter._dispatch_sync("stop", {})
+                adapter._dispatch("stop", {})
 
         def _before_tool(tool: Any, args: Any, tool_context: Any) -> None:
             tool_name = getattr(tool, "name", str(tool))
-            adapter._dispatch_sync(
+            adapter._dispatch(
                 "pre_tool_use",
                 {"tool_name": tool_name, "tool_input": dict(args) if args else {}},
             )
 
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
             tool_name = getattr(tool, "name", str(tool))
-            adapter._dispatch_sync(
+            adapter._dispatch(
                 "post_tool_use",
                 {"tool_name": tool_name, "tool_response": str(tool_response)},
             )

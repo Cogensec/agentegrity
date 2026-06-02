@@ -44,19 +44,21 @@ langchain = ["langchain-core>=0.3.0"]
 openai-agents = ["openai-agents>=0.1.0"]
 crewai = ["crewai>=0.70.0"]
 google-adk = ["google-adk>=0.3.0"]
+autogen = [
+    "autogen-agentchat>=0.7.0",
+    "autogen-core>=0.7.0",
+    "opentelemetry-sdk>=1.20",
+]
+agno = ["agno>=2.0"]
+bedrock-agents = [
+    "boto3>=1.34",
+    "strands-agents>=1.0",
+]
 llm = ["anthropic>=0.40.0"]
 stats = ["scipy>=1.10"]
 kms = ["boto3>=1.34"]
 all = [
-    "cryptography>=41.0",
-    "claude-agent-sdk>=0.1.0",
-    "langchain-core>=0.3.0",
-    "openai-agents>=0.1.0",
-    "crewai>=0.70.0",
-    "google-adk>=0.3.0",
-    "anthropic>=0.40.0",
-    "scipy>=1.10",
-    "boto3>=1.34",
+    "agentegrity[crypto,claude,langchain,openai-agents,crewai,google-adk,autogen,agno,bedrock-agents,llm,stats,kms]",
 ]
 dev = [
     "pytest>=7.0",
@@ -120,6 +122,11 @@ module = [
     "claude_agent_sdk", "claude_agent_sdk.*",
     "crewai", "crewai.*",
     "google.adk", "google.adk.*",
+    "autogen_agentchat", "autogen_agentchat.*",
+    "autogen_core", "autogen_core.*",
+    "opentelemetry.*",
+    "agno", "agno.*",
+    "strands", "strands.*",
 ]
 ignore_missing_imports = true
 

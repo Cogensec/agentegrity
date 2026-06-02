@@ -22,6 +22,11 @@ def test_adapter_name() -> None:
     assert ad.name == "google_adk"
 
 
+def test_enforce_true_warns_observation_only() -> None:
+    with pytest.warns(UserWarning, match="observation-only"):
+        GoogleADKAdapter(profile=AgentProfile.default(), enforce=True)
+
+
 @pytest.mark.asyncio
 async def test_on_event_user_prompt() -> None:
     ad = GoogleADKAdapter(profile=AgentProfile.default())

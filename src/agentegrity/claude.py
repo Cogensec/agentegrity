@@ -53,7 +53,7 @@ def _default_adapter() -> ClaudeAdapter:
     global _default
     if _default is None:
         client = AgentegrityClient()
-        _default = client.create_claude_adapter(profile=AgentProfile.default())
+        _default = client.create_adapter("claude", profile=AgentProfile.default())
     return _default
 
 
@@ -103,7 +103,8 @@ def hooks(
     if profile is not None or client is not None or enforce or api_key is not None:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
-        ad: ClaudeAdapter = effective_client.create_claude_adapter(
+        ad: ClaudeAdapter = effective_client.create_adapter(
+            "claude",
             profile=effective_profile,
             enforce=enforce,
             api_key=api_key,
