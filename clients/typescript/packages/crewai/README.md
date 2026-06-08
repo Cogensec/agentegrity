@@ -1,6 +1,6 @@
 # @agentegrity/crewai
 
-Zero-config [agentegrity](https://github.com/cogensec/agentegrity-framework) adapter for **CrewAI JS**. Mirrors the Python `agentegrity.crewai` module 1:1.
+Zero-config [agentegrity](https://github.com/cogensec/agentegrity) adapter for **CrewAI JS**. Mirrors the Python `agentegrity.crewai` module 1:1.
 
 > **Note:** CrewAI JS is pre-1.0 and its event API has been evolving. This package accepts any of the three patterns below; if you're using a version that emits differently, wire events manually via `bridge.onEvent(name, payload)`.
 

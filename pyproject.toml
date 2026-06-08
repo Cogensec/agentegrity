@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentegrity"
-version = "0.6.0"
+version = "0.7.0"
 description = "The open standard for AI agent integrity. Evaluate, enforce, and prove that autonomous agents are adversarially coherent, environmentally portable, and verifiably assured."
 readme = "README.md"
 license = "Apache-2.0"
@@ -71,10 +71,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cogensec/agentegrity-framework"
-Documentation = "https://github.com/cogensec/agentegrity-framework/tree/main/spec"
-Repository = "https://github.com/cogensec/agentegrity-framework"
-Issues = "https://github.com/cogensec/agentegrity-framework/issues"
+Homepage = "https://github.com/cogensec/agentegrity"
+Documentation = "https://github.com/cogensec/agentegrity/tree/main/spec"
+Repository = "https://github.com/cogensec/agentegrity"
+Issues = "https://github.com/cogensec/agentegrity/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentegrity"]

@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/crewai",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Zero-config agentegrity adapter for CrewAI JS. Mirrors the Python agentegrity.crewai module.",
   "license": "Apache-2.0",
   "type": "module",
@@ -17,7 +17,7 @@
   },
   "keywords": ["agentegrity", "crewai", "agent", "security", "observability"],
   "dependencies": {
-    "@agentegrity/client": "0.6.0"
+    "@agentegrity/client": "0.7.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
@@ -25,11 +25,11 @@
     "@types/node": "^20.0.0"
   },
   "engines": { "node": ">=18" },
-  "homepage": "https://github.com/cogensec/agentegrity-framework/tree/main/clients/typescript/packages/crewai",
+  "homepage": "https://github.com/cogensec/agentegrity/tree/main/clients/typescript/packages/crewai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cogensec/agentegrity-framework.git",
+    "url": "git+https://github.com/cogensec/agentegrity.git",
     "directory": "clients/typescript/packages/crewai"
   },
-  "bugs": { "url": "https://github.com/cogensec/agentegrity-framework/issues" }
+  "bugs": { "url": "https://github.com/cogensec/agentegrity/issues" }
 }

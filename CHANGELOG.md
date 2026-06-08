@@ -8,9 +8,42 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
-## [Unreleased]
+## [0.7.0] - 2026-06-08
 
 ### Added
+- **Decision provenance: signed `DecisionRecord` at every decision
+  boundary.** New `agentegrity.core.decision` module with
+  `DecisionRecord`, `CaptureTier`, `DecisionInput`, and
+  `RejectedAlternative` types. The `_BaseAdapter` (and
+  `IntegrityMonitor`) gains a `record_decision(...)` method and an
+  optional `signing_key=` constructor argument. The three decision
+  boundaries (`pre_tool_use`, `stop`, `subagent_start`) now append a
+  signed, hash-chained decision record to the same `AttestationChain`
+  that holds attestations, captured **before** the action executes so
+  a downstream verifier can prove the rationale was bound at decision
+  time and not retrofitted. Each subsequent `AttestationRecord`
+  carries `Evidence(evidence_type="decision", ...)` entries pointing
+  at the decisions that preceded it; `AttestationChain.verify_decision_links()`
+  validates the round-trip. **Capture tier today is C (Minimal) on every
+  shipped adapter** — the schema supports Tier B (Partial: reasoning
+  chain) and Tier A (Full: rejected alternatives), but no adapter
+  populates those fields in production yet. Honest framing: capture
+  fails open; on exception we log + emit a structured
+  `capture_failure` `FrameworkEvent` so monitoring can see the gap.
+  Spec at `spec/properties/decision-provenance.md`.
+- **`AttestationChain` is now heterogeneous.** Holds both
+  `AttestationRecord` and `DecisionRecord` via a new structural
+  `ChainedRecord` Protocol. New `to_json()` / `from_json()`
+  convenience methods. New `verify_chain_detailed() -> (bool,
+  broken_idx, broken_kind)` for callers that want the broken
+  record's position. `verify_chain() -> bool` is unchanged.
+- **`python -m agentegrity verify-decisions <chain.json>` CLI verb.**
+  Loads a serialized chain, runs `verify_chain()` +
+  `verify_decision_links()`, prints a per-record table (kind /
+  boundary / tier / signed / verified), exits non-zero on any
+  failure.
+- **Glossary entries:** Decision Record, Capture Tier, Decision
+  Boundary.
 - **AWS Bedrock Agents adapter (Python).** `pip install
   agentegrity[bedrock-agents]`. One adapter, two surfaces:
 
@@ -92,6 +125,18 @@ in beta until the v1.0 stability criteria documented in
   contract is loud rather than silent.
 
 ### Changed
+- **`AttestationRecord` canonical payload now includes `record_kind`.**
+  Required so the heterogeneous chain can distinguish attestation
+  records from decision records under signature (otherwise a tamperer
+  could flip a decision into an attestation post-signing). **Backward-
+  incompatible:** chains serialized before v0.7 fail `verify_chain()`
+  after upgrade — signed or not — because the in-memory recomputed
+  `content_hash` (now over the new canonical bytes) doesn't match the
+  stored `chain_previous` references in subsequent records. Loading
+  still works; verification doesn't. No rescue migration script:
+  operators must either re-build the chain from a fresh root with
+  the new code or pin to v0.6 for legacy verification. Same break
+  applies to the Evidence-hash fix below; both land in this release.
 - **`AgentegrityClient` adapter factory consolidated.** The five
   per-framework methods (`create_claude_adapter`,
   `create_langchain_adapter`, `create_openai_agents_adapter`,
@@ -130,6 +175,16 @@ in beta until the v1.0 stability criteria documented in
   `[all]` automatically.
 
 ### Fixed
+- **`Evidence.content_hash` is now a real, deterministic SHA-256** of
+  the canonical JSON of the layer-result dict. Was previously
+  `str(hash(str(r.to_dict())))` using Python's process-salted string
+  hash — non-deterministic across processes and non-portable, which
+  silently broke any attempt at tamper-evident verification across
+  process boundaries. The three triplicated record-build paths
+  (adapter base, monitor, SDK client) now share one
+  `build_attestation_record(...)` helper. **Backward-incompatible**:
+  re-builds the canonical payload of every newly-created attestation,
+  so old chains fail verification post-upgrade (see Changed above).
 - **CrewAI adapter works on crewai ≥ 1.0.** crewai 1.0 relocated the
   event classes from `crewai.utilities.events` to `crewai.events`
   (canonical sources under `crewai.events.types.*`). The adapter still
@@ -383,12 +438,13 @@ in beta until the v1.0 stability criteria documented in
 - Three working examples (`basic_evaluation.py`,
   `runtime_monitoring.py`, `custom_validator.py`).
 
-[Unreleased]: https://github.com/cogensec/agentegrity-framework/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.6.0
-[0.5.3]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.5.3
-[0.5.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.5.0
-[0.4.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.4.0
-[0.3.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.3.0
-[0.2.1]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.2.1
-[0.2.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.2.0
-[0.1.0]: https://github.com/cogensec/agentegrity-framework/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.7.0
+[0.6.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.6.0
+[0.5.3]: https://github.com/cogensec/agentegrity/releases/tag/v0.5.3
+[0.5.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.5.0
+[0.4.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.4.0
+[0.3.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.3.0
+[0.2.1]: https://github.com/cogensec/agentegrity/releases/tag/v0.2.1
+[0.2.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.2.0
+[0.1.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.1.0

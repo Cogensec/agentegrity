@@ -10,7 +10,7 @@ what we commit to, and which versions are supported.
 
 **Use GitHub Security Advisories — not the public issue tracker.**
 [Open a private advisory at
-github.com/cogensec/agentegrity-framework/security/advisories/new](https://github.com/cogensec/agentegrity-framework/security/advisories/new).
+github.com/cogensec/agentegrity/security/advisories/new](https://github.com/cogensec/agentegrity/security/advisories/new).
 
 If GitHub is unavailable to you, email **security@cogensec.com**. Use
 PGP if the report contains exploit code or sensitive context — our key

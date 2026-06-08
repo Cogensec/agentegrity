@@ -28,9 +28,11 @@ this document is the operational version of it.
 |--------------------------------------------|:------:|-------|
 | `evaluator.IntegrityEvaluator`             |   ✅   | Sync four-layer pipeline; composite scoring with configurable `PropertyWeights`; fail-fast on `block`. |
 | `evaluator.AsyncIntegrityEvaluator`        |   ✅   | Runs independent layers via `asyncio.gather` when `fail_fast=False`. Wraps sync layers via `asyncio.to_thread`. |
-| `attestation.AttestationRecord`            |   ✅   | Ed25519 signing via `cryptography`, deterministic JSON canonicalization, SHA-256 content hash. |
-| `attestation.AttestationChain`             |   ✅   | Hash-chained tamper-evident history; `verify_chain()` covers all linked records. |
-| `monitor.IntegrityMonitor`                 |   ✅   | `@guard` decorator, violation callbacks, four `ViolationAction` modes. |
+| `attestation.AttestationRecord`            |   ✅   | Ed25519 signing via `cryptography`, deterministic JSON canonicalization, real SHA-256 content hash (was process-salted Python `hash()` pre-v0.7). Carries `record_kind` discriminator so the same chain can hold both attestations and decision records. |
+| `attestation.AttestationChain`             |   ✅   | Heterogeneous chain holding both `AttestationRecord` and `DecisionRecord`; `verify_chain()` covers hash linkage; `verify_chain_detailed()` reports broken index + kind; `to_json()`/`from_json()` round-trip; `verify_decision_links()` validates attestation→decision Evidence pointers. |
+| `attestation.ChainedRecord`                |   ✅   | Structural Protocol both record kinds satisfy; chain operations are kind-agnostic. |
+| `decision.DecisionRecord`                  |   ✅   | Signed, hash-chained record of one decision the agent made at a boundary. Mirrors `AttestationRecord` shape so both kinds live in one chain. `CaptureTier` enum quantifies how much rationale was captured (Tier C in production today; A/B unlock as adapter-specific deliberation surfaces ship). |
+| `monitor.IntegrityMonitor`                 |   ✅   | `@guard` decorator, violation callbacks, four `ViolationAction` modes. Optional `signing_key=` signs every attestation; `record_decision()` mirrors the adapter-side capture API for non-framework agents. |
 | `profile.AgentProfile`                     |   ✅   | Type-safe enums for `AgentType` / `DeploymentContext` / `RiskTier`; `default()` factory. |
 
 ## Layers (`src/agentegrity/layers/`)
@@ -79,7 +81,8 @@ chain.
 | `spec/layers/cortical-layer.md`      |   ✅   | Normative. |
 | `spec/layers/governance-layer.md`    |   ✅   | Normative. |
 | `spec/layers/recovery-layer.md`      |   🧪   | Newly added in v0.5.3-Unreleased; conformance section subject to revision. |
-| `spec/properties/*.md`               |   ✅   | Per-property normative docs (AC / EP / VA). |
+| `spec/properties/*.md`               |   ✅   | Per-property normative docs (AC / EP / VA / decision-provenance). |
+| `spec/properties/decision-provenance.md` | 🟡  | Introduced in v0.7. Schema + verification path are normative; Tier B/A capture is reserved for future adapter-specific deliberation surfaces (Claude reasoning streams, OpenAI Responses reasoning content). |
 | `schemas/exporter/*.json`            |   ✅   | JSON Schema for `event`, `session_start`, `session_end`, `common`. |
 | `schemas/openapi.yaml`               |   ✅   | OpenAPI 3.1 description of the exporter wire format. |
 
@@ -176,6 +179,12 @@ picks the same env var up from repository variables.
 
 ---
 
-**Last reviewed:** v0.6.0 + Phase 3 finisher + Phase 2 detection-depth
-finisher (2026-05-07). This file is the source of truth for "what's
-done." Update it in the same commit that ships a status change.
+**Last reviewed:** v0.7.0 (2026-06-08). v0.7 ships the adapter batch
+(Bedrock Agents, Agno, AutoGen, CrewAI 1.x compat) plus
+**decision-provenance**: signed, hash-chained `DecisionRecord`s
+captured at the three decision boundaries (`pre_tool_use` / `stop` /
+`subagent_start`), Evidence-linked back from each subsequent
+`AttestationRecord`, verifiable via `python -m agentegrity
+verify-decisions <chain.json>`. This file is the source of truth for
+"what's done." Update it in the same commit that ships a status
+change.

@@ -5,7 +5,7 @@ Agentegrity defines what it means for an autonomous AI agent to be whole:
 adversarially coherent, environmentally portable, and verifiably assured.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from agentegrity.adapters.base import FrameworkEvent, SessionExporter
 from agentegrity.agno import instrument as agno_instrument
@@ -18,7 +18,18 @@ from agentegrity.bedrock_agents import report as bedrock_agents_report
 from agentegrity.bedrock_agents import wrap_client as bedrock_agents_wrap_client
 from agentegrity.claude import hooks as claude_hooks
 from agentegrity.claude import report as claude_report
-from agentegrity.core.attestation import AttestationChain, AttestationRecord
+from agentegrity.core.attestation import (
+    AttestationChain,
+    AttestationRecord,
+    ChainedRecord,
+    Evidence,
+)
+from agentegrity.core.decision import (
+    CaptureTier,
+    DecisionInput,
+    DecisionRecord,
+    RejectedAlternative,
+)
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.monitor import IntegrityMonitor
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
@@ -59,6 +70,12 @@ __all__ = [
     "PropertyWeights",
     "AttestationRecord",
     "AttestationChain",
+    "ChainedRecord",
+    "Evidence",
+    "DecisionRecord",
+    "DecisionInput",
+    "RejectedAlternative",
+    "CaptureTier",
     "IntegrityMonitor",
     "AgentegrityClient",
     "FrameworkEvent",

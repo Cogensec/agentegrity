@@ -1,6 +1,6 @@
 # @agentegrity/vercel-ai
 
-Zero-config [agentegrity](https://github.com/cogensec/agentegrity-framework) adapter for the **Vercel AI SDK** (`ai`).
+Zero-config [agentegrity](https://github.com/cogensec/agentegrity) adapter for the **Vercel AI SDK** (`ai`).
 
 TypeScript-native — there is no Python equivalent.
 

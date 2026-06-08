@@ -1,6 +1,6 @@
 # `@agentegrity/client`
 
-TypeScript client for [agentegrity](https://github.com/cogensec/agentegrity-framework). Emit agent events from a **Node / Bun / browser** agent to any backend that implements the [Agentegrity Exporter HTTP API](../../schemas/openapi.yaml).
+TypeScript client for [agentegrity](https://github.com/cogensec/agentegrity). Emit agent events from a **Node / Bun / browser** agent to any backend that implements the [Agentegrity Exporter HTTP API](../../schemas/openapi.yaml).
 
 The Python OSS library ships the scoring evaluator, attestation chain, and 5 framework adapters. This client lets non-Python agents emit the same event stream those adapters produce, targeted at the same HTTP contract the commercial `agentegrity-pro` dashboard listens on.
 
