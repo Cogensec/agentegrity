@@ -1,8 +1,8 @@
 # Agentegrity Framework — Threat Model
 
 **Status:** Normative
-**Version:** 0.6.0
-**Last reviewed:** 2026-05-06
+**Version:** 0.7.0
+**Last reviewed:** 2026-06-08
 
 ---
 

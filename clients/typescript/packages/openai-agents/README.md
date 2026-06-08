@@ -1,6 +1,6 @@
 # @agentegrity/openai-agents
 
-Zero-config [agentegrity](https://github.com/cogensec/agentegrity-framework) adapter for the **OpenAI Agents JS SDK** (`@openai/agents`). Mirrors the Python `agentegrity.openai_agents` module 1:1.
+Zero-config [agentegrity](https://github.com/cogensec/agentegrity) adapter for the **OpenAI Agents JS SDK** (`@openai/agents`). Mirrors the Python `agentegrity.openai_agents` module 1:1.
 
 ## Install
 

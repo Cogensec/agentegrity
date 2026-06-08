@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/openai-agents",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Zero-config agentegrity adapter for the OpenAI Agents JS SDK (@openai/agents). Mirrors the Python agentegrity.openai_agents module.",
   "license": "Apache-2.0",
   "type": "module",
@@ -17,7 +17,7 @@
   },
   "keywords": ["agentegrity", "openai", "openai-agents", "agent", "security", "observability"],
   "dependencies": {
-    "@agentegrity/client": "0.6.0"
+    "@agentegrity/client": "0.7.0"
   },
   "peerDependencies": {
     "@openai/agents": ">=0.0.1"
@@ -31,11 +31,11 @@
     "@types/node": "^20.0.0"
   },
   "engines": { "node": ">=18" },
-  "homepage": "https://github.com/cogensec/agentegrity-framework/tree/main/clients/typescript/packages/openai-agents",
+  "homepage": "https://github.com/cogensec/agentegrity/tree/main/clients/typescript/packages/openai-agents",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cogensec/agentegrity-framework.git",
+    "url": "git+https://github.com/cogensec/agentegrity.git",
     "directory": "clients/typescript/packages/openai-agents"
   },
-  "bugs": { "url": "https://github.com/cogensec/agentegrity-framework/issues" }
+  "bugs": { "url": "https://github.com/cogensec/agentegrity/issues" }
 }

@@ -118,6 +118,15 @@ A purpose-built security model designed for embedding within an AI agent's decis
 **Security Reflex** †
 An automated, low-latency defensive response triggered by a cortical model when adversarial conditions are detected. Analogous to a biological reflex: it executes before conscious reasoning, preventing adversarial inputs from reaching the decision layer. Security reflexes are the fastest layer of intrinsic defense. Example: immediate rejection of an input that matches known injection patterns before the primary model processes it.
 
+**Decision Record** †
+A signed, hash-chained record of one decision the agent made at a `Decision Boundary`, capturing the candidate action, decision inputs, and (when available) reasoning chain or rejected alternatives. Built **before** the action executes so a downstream verifier can prove the rationale was bound at decision time and not retrofitted after the fact. Lives in the same `AttestationChain` as the `AttestationRecord`s the evaluator produces; the chain alternates between the two record kinds without dispatch.
+
+**Capture Tier** †
+A discriminator over how much rationale was actually captured in a `Decision Record`. Three values: **Tier C / Minimal** (candidate action + decision inputs only — what every shipped adapter produces today), **Tier B / Partial** (adds the agent's reasoning chain), **Tier A / Full** (adds rejected alternatives). The tier is inferred from which rationale fields the adapter populates, not asserted; an honest record describes only what was actually observed. Higher tiers unlock as adapter-specific deliberation surfaces are wired in.
+
+**Decision Boundary** †
+A point in the agent's execution where it commits to an externally-visible action. The Agentegrity adapter base captures three: **pre_tool_use** (the agent decided to invoke a tool), **stop** (the agent decided to return a final output), and **subagent_start** (a child agent began running; honest lifecycle attestation rather than a primary decision, because the parent's decision to delegate happened earlier). Capture is fail-open: a failure in the capture path emits a structured `capture_failure` event but does not halt the agent.
+
 ---
 
 ## Domain-Specific Concepts

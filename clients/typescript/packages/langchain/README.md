@@ -1,6 +1,6 @@
 # @agentegrity/langchain
 
-Zero-config [agentegrity](https://github.com/cogensec/agentegrity-framework) adapter for **LangChain JS** and **LangGraph JS**. Mirrors the Python `agentegrity.langchain` module 1:1.
+Zero-config [agentegrity](https://github.com/cogensec/agentegrity) adapter for **LangChain JS** and **LangGraph JS**. Mirrors the Python `agentegrity.langchain` module 1:1.
 
 ## Install
 

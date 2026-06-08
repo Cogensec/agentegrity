@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from agentegrity.core.attestation import AttestationRecord, Evidence
+from agentegrity.core.attestation import AttestationRecord, build_attestation_record
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.monitor import IntegrityMonitor, ViolationAction
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
@@ -192,20 +192,7 @@ class AgentegrityClient:
             An unsigned attestation record. Call .sign() with a
             private key to produce a verifiable attestation.
         """
-        return AttestationRecord(
-            agent_id=profile.agent_id,
-            integrity_score=score.to_dict(),
-            layer_states={r.layer_name: r.to_dict() for r in score.layer_results},
-            evidence=[
-                Evidence(
-                    evidence_type="layer_result",
-                    source=r.layer_name,
-                    content_hash=str(hash(str(r.to_dict()))),
-                    summary=f"{r.layer_name}: {r.score:.3f} ({r.action})",
-                )
-                for r in score.layer_results
-            ],
-        )
+        return build_attestation_record(profile, score)
 
     def create_adapter(
         self,

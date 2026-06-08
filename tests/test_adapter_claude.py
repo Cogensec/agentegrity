@@ -130,7 +130,14 @@ async def test_subagent_lifecycle(adapter: ClaudeAdapter) -> None:
 async def test_attestation_chain_builds(adapter: ClaudeAdapter) -> None:
     await adapter.on_event("user_prompt_submit", {"prompt": "hi"})
     await adapter.on_event("stop", {})
-    assert len(adapter.attestation_chain.records) == 2
+    # Two evaluations → two AttestationRecord entries. stop also
+    # captures a DecisionRecord (Phase 3 decision-provenance), so the
+    # chain has three records total but only two are attestations.
+    attestations = [
+        r for r in adapter.attestation_chain.records
+        if r.record_kind == "attestation"
+    ]
+    assert len(attestations) == 2
     assert adapter.attestation_chain.verify_chain()
 
 

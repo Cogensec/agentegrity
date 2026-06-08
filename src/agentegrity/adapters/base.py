@@ -27,6 +27,7 @@ because each one ultimately fires the same seven event types:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -34,7 +35,16 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
 
-from agentegrity.core.attestation import AttestationChain, AttestationRecord, Evidence
+from agentegrity.core.attestation import (
+    AttestationChain,
+    build_attestation_record,
+)
+from agentegrity.core.decision import (
+    DecisionInput,
+    DecisionRecord,
+    RejectedAlternative,
+    build_decision_record,
+)
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
 
@@ -170,10 +180,12 @@ class _BaseAdapter:
         evaluator: IntegrityEvaluator | None = None,
         enforce: bool = False,
         api_key: str | None = None,
+        signing_key: Any | None = None,
     ) -> None:
         self._profile = profile
         self._enforce = enforce
         self._api_key = api_key
+        self._signing_key = signing_key
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
         self._chain = AttestationChain()
@@ -342,22 +354,103 @@ class _BaseAdapter:
         score = self._evaluator.evaluate(self._profile, ctx)
         self._evaluation_count += 1
 
-        record = AttestationRecord(
-            agent_id=self._profile.agent_id,
-            integrity_score=score.to_dict(),
-            layer_states={r.layer_name: r.to_dict() for r in score.layer_results},
-            evidence=[
-                Evidence(
-                    evidence_type="layer_result",
-                    source=r.layer_name,
-                    content_hash=str(hash(str(r.to_dict()))),
-                    summary=f"{r.layer_name}: {r.score:.3f} ({r.action})",
-                )
-                for r in score.layer_results
-            ],
+        prev_hash = self._chain.latest.content_hash if self._chain.latest else None
+        record = build_attestation_record(
+            self._profile,
+            score,
+            previous_record_hash=prev_hash,
+            signing_key=self._signing_key,
+            recent_decisions=self._decisions_since_last_attestation(),
         )
         self._chain.append(record)
         return score
+
+    def _decisions_since_last_attestation(self) -> list[DecisionRecord]:
+        """Return the trailing run of :class:`DecisionRecord`\\s since
+        the most recent attestation (or since the start of the chain
+        if none yet)."""
+        recent: list[DecisionRecord] = []
+        for r in reversed(self._chain.records):
+            if r.record_kind == "attestation":
+                break
+            if isinstance(r, DecisionRecord):
+                recent.append(r)
+        recent.reverse()
+        return recent
+
+    def record_decision(
+        self,
+        decision_point: str,
+        candidate_action: dict[str, Any],
+        *,
+        reasoning_chain: list[str] | None = None,
+        rejected_alternatives: list[RejectedAlternative] | None = None,
+        decision_inputs: list[DecisionInput] | None = None,
+        goal_state: list[str] | None = None,
+    ) -> DecisionRecord | None:
+        """Build, sign (if a key is configured), and append a :class:`DecisionRecord`.
+
+        Fails open: on any exception the function logs a warning, emits
+        a structured ``capture_failure`` :class:`FrameworkEvent` so the
+        gap is queryable downstream, and returns ``None``. The handler
+        that called it continues normally — capture must never break
+        the instrumented agent.
+        """
+        try:
+            prev_hash = (
+                self._chain.latest.content_hash if self._chain.latest else None
+            )
+            record = build_decision_record(
+                agent_id=self._profile.agent_id,
+                decision_point=decision_point,
+                candidate_action=candidate_action,
+                reasoning_chain=reasoning_chain,
+                rejected_alternatives=rejected_alternatives,
+                decision_inputs=decision_inputs,
+                goal_state=goal_state,
+                previous_record_hash=prev_hash,
+                signing_key=self._signing_key,
+            )
+            self._chain.append(record)
+            return record
+        except Exception as exc:
+            logger.warning(
+                "%s decision capture failed at %s: %s",
+                self.name, decision_point, exc, exc_info=True,
+            )
+            self._emit_event(
+                "capture_failure",
+                {
+                    "decision_point": decision_point,
+                    "exception_class": type(exc).__name__,
+                    "summary": str(exc)[:200],
+                },
+            )
+            return None
+
+    def _collect_decision_inputs(self) -> list[DecisionInput]:
+        """Build :class:`DecisionInput` entries from the buffer's populated
+        channels. Today: latest user prompt + latest tool output. Other
+        channels (memory_reads, goals, instructions) are reserved for
+        adapters that populate them in the future.
+        """
+        inputs: list[DecisionInput] = []
+        if self._buffer.inputs:
+            latest = self._buffer.inputs[-1]
+            inputs.append(DecisionInput(
+                channel="user_prompt",
+                content_hash=hashlib.sha256(latest.encode()).hexdigest(),
+                summary=latest[:120],
+            ))
+        if self._buffer.tool_outputs:
+            latest_out = self._buffer.tool_outputs[-1]
+            output_str = str(latest_out.get("output", ""))
+            inputs.append(DecisionInput(
+                channel="tool_output",
+                content_hash=hashlib.sha256(output_str.encode()).hexdigest(),
+                summary=f"{latest_out.get('tool', '')}: {output_str[:80]}",
+            ))
+        return inputs
 
     async def on_event(
         self, event_type: str, event_data: dict[str, Any]
@@ -418,6 +511,15 @@ class _BaseAdapter:
         self._buffer.action_distribution["tool_call"] += 1
 
         score = self._run_evaluation()
+        self.record_decision(
+            decision_point="pre_tool_use",
+            candidate_action={
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "arguments": tool_input,
+            },
+            decision_inputs=self._collect_decision_inputs(),
+        )
         self._emit_event("pre_tool_use", data, score)
 
         if self._enforce and score.action == "block":
@@ -465,17 +567,50 @@ class _BaseAdapter:
 
     def _handle_stop(self, data: dict[str, Any]) -> dict[str, Any]:
         score = self._run_evaluation()
+        output = (
+            data.get("output")
+            or data.get("response")
+            or data.get("content")
+            or ""
+        )
+        if not isinstance(output, str):
+            output = str(output)
+        self.record_decision(
+            decision_point="stop",
+            candidate_action={
+                "type": "final_output",
+                "content_hash": hashlib.sha256(output.encode()).hexdigest(),
+                "summary": output[:120],
+            },
+            decision_inputs=self._collect_decision_inputs(),
+        )
         self._emit_event("stop", data, score)
         return {}
 
     def _handle_subagent_start(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
+        agent_id = data.get("agent_id", "")
         self._buffer.subagents.append(
             {
-                "agent_id": data.get("agent_id", ""),
+                "agent_id": agent_id,
                 "started": datetime.now(timezone.utc).isoformat(),
             }
+        )
+        # subagent_start fires when the child starts running. The parent's
+        # decision to delegate already happened earlier (often at the
+        # parent's pre_tool_use if the subagent is invoked as a tool). So
+        # this isn't strictly a "decision" — it's a lifecycle attestation
+        # the chain records for completeness. The candidate_action.type
+        # is honest about that so a downstream verifier can tell.
+        self.record_decision(
+            decision_point="subagent_start",
+            candidate_action={
+                "type": "subagent_dispatch_observed",
+                "agent_id": agent_id,
+                "boundary_category": "lifecycle_attestation",
+            },
+            decision_inputs=self._collect_decision_inputs(),
         )
         self._emit_event("subagent_start", data)
         return {}
@@ -504,12 +639,21 @@ class _BaseAdapter:
         return {}
 
     def get_summary(self) -> dict[str, Any]:
+        records = self._chain.records
+        attestation_count = sum(
+            1 for r in records if r.record_kind == "attestation"
+        )
+        decision_count = sum(
+            1 for r in records if r.record_kind == "decision"
+        )
         return {
             "adapter": self.name,
             "agent_id": self._profile.agent_id,
             "evaluations": self._evaluation_count,
             "events": len(self._events),
-            "attestation_records": len(self._chain.records),
+            "attestation_records": attestation_count,
+            "decision_records": decision_count,
+            "chain_records": len(records),
             "chain_valid": self._chain.verify_chain(),
             "enforce_mode": self._enforce,
         }

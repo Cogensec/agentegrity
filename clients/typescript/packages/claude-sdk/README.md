@@ -1,6 +1,6 @@
 # @agentegrity/claude-sdk
 
-Zero-config [agentegrity](https://github.com/cogensec/agentegrity-framework) adapter for the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`). Mirrors the Python `agentegrity.claude` module 1:1.
+Zero-config [agentegrity](https://github.com/cogensec/agentegrity) adapter for the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`). Mirrors the Python `agentegrity.claude` module 1:1.
 
 ## Install
 

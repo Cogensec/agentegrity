@@ -1,6 +1,6 @@
 # @agentegrity/google-adk
 
-Zero-config [agentegrity](https://github.com/cogensec/agentegrity-framework) adapter for the **Google Agent Development Kit (ADK)** JS. Mirrors the Python `agentegrity.google_adk` module 1:1.
+Zero-config [agentegrity](https://github.com/cogensec/agentegrity) adapter for the **Google Agent Development Kit (ADK)** JS. Mirrors the Python `agentegrity.google_adk` module 1:1.
 
 ## Install
 

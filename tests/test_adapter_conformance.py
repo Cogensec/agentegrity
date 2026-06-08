@@ -177,8 +177,34 @@ class TestAdapterConformance:
         n_evals = asyncio.run(_drive(adapter))
         assert n_evals > 0, f"{expected_name} produced no evaluations"
         assert adapter.evaluation_count == n_evals
-        assert len(adapter.attestation_chain.records) == n_evals
+        attestations = [
+            r for r in adapter.attestation_chain.records
+            if r.record_kind == "attestation"
+        ]
+        assert len(attestations) == n_evals
         assert adapter.attestation_chain.verify_chain()
+
+    def test_decision_capture_path(
+        self, expected_name: str, adapter_cls: type[_BaseAdapter]
+    ) -> None:
+        """Phase 3 invariant: pre_tool_use and stop each leave a
+        :class:`DecisionRecord` in the chain. subagent_start isn't in
+        the canonical stream; it's covered separately for team-aware
+        adapters below.
+        """
+        adapter = _build(adapter_cls)
+        asyncio.run(_drive(adapter))
+        decisions = [
+            r for r in adapter.attestation_chain.records
+            if r.record_kind == "decision"
+        ]
+        boundaries = {r.decision_point for r in decisions}
+        assert "pre_tool_use" in boundaries, (
+            f"{expected_name}: pre_tool_use decision missing"
+        )
+        assert "stop" in boundaries, (
+            f"{expected_name}: stop decision missing"
+        )
 
     def test_session_id_stable_across_events(
         self, expected_name: str, adapter_cls: type[_BaseAdapter]
@@ -277,8 +303,14 @@ class TestAdapterConformance:
         assert isinstance(summary["events"], int)
         assert summary["events"] == len(adapter.events)
         assert isinstance(summary["attestation_records"], int)
-        assert summary["attestation_records"] == len(
+        assert isinstance(summary["decision_records"], int)
+        assert isinstance(summary["chain_records"], int)
+        assert summary["chain_records"] == len(
             adapter.attestation_chain.records
+        )
+        assert (
+            summary["attestation_records"] + summary["decision_records"]
+            == summary["chain_records"]
         )
         assert summary["chain_valid"] is True
         assert summary["enforce_mode"] is False
@@ -333,3 +365,43 @@ class TestAdapterRegistryStable:
         # conformance matrix runs against your new adapter too.
         names = {name for name, _ in ADAPTER_CLASSES}
         assert names == _EXPECTED_ADAPTERS
+
+
+# Adapters that meaningfully expose subagent_start. The canonical event
+# stream above doesn't include subagent_start because not every
+# framework has a team/sub-agent concept. For the ones that do, this
+# test asserts that subagent_start produces a DecisionRecord with the
+# honest "lifecycle_attestation" framing (subagent_start fires when the
+# child starts; the parent's decision to delegate already happened
+# earlier).
+_TEAM_AWARE_ADAPTERS: list[tuple[str, type[_BaseAdapter]]] = [
+    ("agno", AgnoAdapter),
+    ("bedrock_agents", BedrockAgentsAdapter),
+]
+
+
+@pytest.mark.parametrize(
+    "expected_name,adapter_cls",
+    _TEAM_AWARE_ADAPTERS,
+    ids=[name for name, _ in _TEAM_AWARE_ADAPTERS],
+)
+def test_subagent_start_captures_lifecycle_decision(
+    expected_name: str, adapter_cls: type[_BaseAdapter]
+) -> None:
+    adapter = _build(adapter_cls)
+    asyncio.run(adapter.on_event(
+        "subagent_start", {"agent_id": f"child-of-{expected_name}"}
+    ))
+    decisions = [
+        r for r in adapter.attestation_chain.records
+        if r.record_kind == "decision"
+    ]
+    sub_decisions = [d for d in decisions if d.decision_point == "subagent_start"]
+    assert len(sub_decisions) == 1, (
+        f"{expected_name}: expected one subagent_start decision, "
+        f"got {len(sub_decisions)}"
+    )
+    d = sub_decisions[0]
+    assert d.candidate_action["type"] == "subagent_dispatch_observed"
+    assert d.candidate_action["boundary_category"] == "lifecycle_attestation"
+    assert d.candidate_action["agent_id"] == f"child-of-{expected_name}"

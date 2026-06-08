@@ -13,7 +13,16 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 
-from agentegrity.core.attestation import AttestationChain, AttestationRecord, Evidence
+from agentegrity.core.attestation import (
+    AttestationChain,
+    build_attestation_record,
+)
+from agentegrity.core.decision import (
+    DecisionInput,
+    DecisionRecord,
+    RejectedAlternative,
+    build_decision_record,
+)
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
 
@@ -96,6 +105,7 @@ class IntegrityMonitor:
         on_violation: ViolationAction = ViolationAction.ALERT,
         on_violation_callback: Callable[[ViolationEvent], None] | None = None,
         enable_attestation: bool = True,
+        signing_key: Any | None = None,
     ):
         self.profile = profile
         self.evaluator = evaluator
@@ -103,6 +113,7 @@ class IntegrityMonitor:
         self.on_violation = on_violation
         self.on_violation_callback = on_violation_callback
         self.enable_attestation = enable_attestation
+        self.signing_key = signing_key
 
         self._chain = AttestationChain()
         self._violations: list[ViolationEvent] = []
@@ -118,25 +129,26 @@ class IntegrityMonitor:
         score = self.evaluator.evaluate(self.profile, context)
         self._evaluation_count += 1
 
-        # Generate attestation record
         if self.enable_attestation:
-            record = AttestationRecord(
-                agent_id=self.profile.agent_id,
-                integrity_score=score.to_dict(),
-                layer_states={r.layer_name: r.to_dict() for r in score.layer_results},
-                evidence=[
-                    Evidence(
-                        evidence_type="layer_result",
-                        source=r.layer_name,
-                        content_hash=str(hash(str(r.to_dict()))),
-                        summary=f"{r.layer_name}: {r.score:.3f} ({r.action})",
-                    )
-                    for r in score.layer_results
-                ],
+            prev_hash = (
+                self._chain.latest.content_hash if self._chain.latest else None
+            )
+            recent: list[DecisionRecord] = []
+            for r in reversed(self._chain.records):
+                if r.record_kind == "attestation":
+                    break
+                if isinstance(r, DecisionRecord):
+                    recent.append(r)
+            recent.reverse()
+            record = build_attestation_record(
+                self.profile,
+                score,
+                previous_record_hash=prev_hash,
+                signing_key=self.signing_key,
+                recent_decisions=recent,
             )
             self._chain.append(record)
 
-        # Check for violations
         if score.composite < self.threshold or not score.passed:
             self._handle_violation(score, context)
 
@@ -221,6 +233,47 @@ class IntegrityMonitor:
         # Custom callback
         if self.on_violation_callback:
             self.on_violation_callback(event)
+
+    def record_decision(
+        self,
+        decision_point: str,
+        candidate_action: dict[str, Any],
+        *,
+        reasoning_chain: list[str] | None = None,
+        rejected_alternatives: list[RejectedAlternative] | None = None,
+        decision_inputs: list[DecisionInput] | None = None,
+        goal_state: list[str] | None = None,
+    ) -> DecisionRecord | None:
+        """Build, sign (if a key is configured), and append a
+        :class:`DecisionRecord` to this monitor's chain. Mirrors the
+        adapter-side method so the ``@guard`` decorator path can capture
+        decisions for non-framework agents.
+
+        Fails open: logs and returns ``None`` on any exception.
+        """
+        try:
+            prev_hash = (
+                self._chain.latest.content_hash if self._chain.latest else None
+            )
+            record = build_decision_record(
+                agent_id=self.profile.agent_id,
+                decision_point=decision_point,
+                candidate_action=candidate_action,
+                reasoning_chain=reasoning_chain,
+                rejected_alternatives=rejected_alternatives,
+                decision_inputs=decision_inputs,
+                goal_state=goal_state,
+                previous_record_hash=prev_hash,
+                signing_key=self.signing_key,
+            )
+            self._chain.append(record)
+            return record
+        except Exception as exc:
+            logger.warning(
+                "monitor decision capture failed at %s: %s",
+                decision_point, exc, exc_info=True,
+            )
+            return None
 
     @property
     def attestation_chain(self) -> AttestationChain:
