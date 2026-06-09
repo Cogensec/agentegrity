@@ -132,6 +132,76 @@ def _verify_decisions(path: str) -> int:
     return 1
 
 
+_NEMOTRON_DEFAULT_PROFILE = "benchmark_profiles/nemotron/benchmark.yaml"
+
+
+def _nemotron_benchmark(args: list[str]) -> int:
+    """Run the Nemotron benchmark profile and emit results.
+
+    Heavy lifting lives in :mod:`agentegrity.nemotron`; this stays a thin
+    argument parser so the CLI module remains a parser (it is excluded from
+    coverage).
+    """
+    from agentegrity.nemotron import run_benchmark, to_json, to_markdown
+
+    mock = False
+    report_md = False
+    profile = _NEMOTRON_DEFAULT_PROFILE
+    output_dir = "./nemotron_report"
+    values: dict[str, str | None] = {"endpoint": None, "model": None, "api_key_env": None}
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--mock":
+            mock = True
+        elif arg == "--report":
+            report_md = True
+        elif arg in ("--endpoint", "--model", "--api-key-env", "--profile", "--output-dir"):
+            if i + 1 >= len(args):
+                print(f"error: {arg} requires a value", file=sys.stderr)
+                return 2
+            value = args[i + 1]
+            if arg == "--profile":
+                profile = value
+            elif arg == "--output-dir":
+                output_dir = value
+            else:
+                values[arg.lstrip("-").replace("-", "_")] = value
+            i += 1
+        else:
+            print(f"unknown option: {arg!r}", file=sys.stderr)
+            return 2
+        i += 1
+
+    try:
+        report = run_benchmark(
+            profile_path=profile,
+            mock=mock,
+            endpoint=values["endpoint"],
+            model=values["model"],
+            api_key_env=values["api_key_env"],
+        )
+    except (FileNotFoundError, ImportError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "results.json").write_text(to_json(report))
+    if report_md:
+        (out_dir / "report.md").write_text(to_markdown(report))
+
+    print(to_markdown(report))
+    print(f"Artifacts written to {out_dir}/")
+    # Non-zero exit if the chain is untrustworthy or a critical case failed.
+    if not report.evidence.get("chain_verified", False):
+        return 1
+    if report.readiness == "Not recommended":
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
@@ -144,14 +214,22 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 2
         return _verify_decisions(args[1])
+    if args[0] == "nemotron":
+        if len(args) < 2 or args[1] != "benchmark":
+            print("usage: agentegrity nemotron benchmark [options]", file=sys.stderr)
+            return 2
+        return _nemotron_benchmark(args[2:])
     if args[0] in ("-h", "--help", "help"):
-        print("usage: python -m agentegrity [doctor | verify-decisions <path>]")
+        print("usage: agentegrity [doctor | verify-decisions <path> | nemotron benchmark]")
         print()
         print("  (no args)                       print version + adapter availability")
         print("  doctor                          run an end-to-end self-check")
         print("  verify-decisions <chain.json>   verify a serialized chain")
+        print("  nemotron benchmark [options]    run the Nemotron benchmark profile")
+        print("    --mock --endpoint URL --model NAME --api-key-env VAR")
+        print("    --profile PATH --report --output-dir DIR")
         return 0
-    print(f"unknown command: {args[0]!r} (try 'python -m agentegrity help')", file=sys.stderr)
+    print(f"unknown command: {args[0]!r} (try 'agentegrity help')", file=sys.stderr)
     return 2
 
 
