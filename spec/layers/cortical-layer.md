@@ -90,6 +90,16 @@ Baseline dimensions:
 
 Baselines should be re-established after significant changes to the agent's model, system prompt, or tool set.
 
+### Per-role baselines (v0.8)
+
+When the agent participates in a declared multi-agent topology, baselines MAY be keyed by `(agent_id, role)` rather than `agent_id` alone. The `role` is read from `context["topology_context"]["role"]`, populated by team-aware adapters at `set_topology()` time. The `BaselineStore` Protocol's `save` / `load` / `delete` / `list_keys` methods all accept an optional `role: str | None = None` parameter.
+
+This addresses the **role-drift attack** described in [`spec/properties/multi-agent-extensions.md`](../properties/multi-agent-extensions.md) (T-ROLE-DRIFT in the threat model): a compromised member declared as one role (e.g., `data_extractor`) begins behaving like another (e.g., `task_planner`). With per-role baselines, the Cortical drift metric compares observed action distribution against the role-specific baseline rather than the agent's own — catching the divergence.
+
+Backward compatibility is normative: when `load(agent_id, role=X)` is called and no `(agent_id, X)` entry exists, implementations MUST fall back to `load(agent_id, role=None)` and return that. Pre-v0.8 baselines (saved without a role) continue to serve role-keyed lookups transparently until a role-specific entry is written.
+
+Single-agent deployments are unaffected: when the context lacks `topology_context`, the role is `None` and behavior matches v0.7 exactly.
+
 ## Composite Scoring
 
 The cortical layer score is a weighted composite of three dimensions:

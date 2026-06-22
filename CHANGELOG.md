@@ -11,6 +11,45 @@ in beta until the v1.0 stability criteria documented in
 ## [0.8.0] - 2026-06-08
 
 ### Added
+- **Per-role behavioural baselines in `CorticalLayer`.** Catches the
+  role-drift attack where a compromised member acting in one
+  declared role (e.g., `data_extractor`) starts behaving like
+  another (e.g., `task_planner`). `BaselineStore` Protocol grows an
+  optional `role: str | None = None` parameter on `save` / `load` /
+  `delete` plus a new `list_keys()` method returning
+  `list[tuple[agent_id, role|None]]`. `CorticalLayer.evaluate` reads
+  the role from `context["topology_context"]["role"]` (populated by
+  team-aware adapters via `set_topology`). Backward-compatible:
+  pre-v0.8 baselines (saved without a role) silently serve
+  role-keyed lookups via `BaselineStore`-side fallback until a
+  role-specific entry is written. SQLite backend migrates the
+  pre-v0.8 schema in place on first v0.8 open. T-ROLE-DRIFT
+  mitigation in the threat model.
+- **TypeScript multi-agent parity** with the Python adapter
+  surface. `@agentegrity/client` ships `AgentTopology` /
+  `AgentMember` / `AgentRole` / `TopologyKind` / `TopologyChange`
+  immutable types plus `Evidence` / `EvidenceType` mirroring the
+  Python core. `DefaultAdapter.setTopology(topology, myRole?)` is
+  the canonical entry point — first call emits `topology_declared`,
+  subsequent structurally-distinct calls emit `topology_change`
+  with a `TopologyChange` diff. Cross-runtime SHA-256
+  `contentHash()` matches Python byte-for-byte (validated via
+  subprocess test). Six new canonical events in the `EventType`
+  union: `topology_declared`, `topology_change`, `peer_message`,
+  `shared_memory_write`, `broadcast`, `task_started`. Plus
+  `subagent_orphan` (T-ORPHAN-LIFECYCLE event). Four framework
+  adapters declare topology at the right discovery point:
+  `@agentegrity/langchain` (`instrumentGraph(graph)` walks
+  `graph.getGraph().nodes`), `@agentegrity/openai-agents`
+  (`onAgentStart` seeds PEER_TO_PEER; `onHandoff` grows
+  incrementally), `@agentegrity/crewai` (`instrument({ crew })`
+  walks `crew.agents`), `@agentegrity/google-adk` (`instrument(agent)`
+  walks `agent.subAgents`). Claude SDK and Vercel AI SDK stay
+  single-agent by framework design (pinning tests assert no
+  topology declaration). TS conformance suite gains two
+  multi-agent invariants: single-agent adapters MUST NOT declare a
+  topology; multi-agent-capable adapters MUST expose `setTopology`.
+  Test count: 117 (52 cross-package conformance + 65 per-package).
 - **Multi-agent topology as a first-class type.** New
   `agentegrity.core.topology` module with `AgentTopology`,
   `AgentMember`, `AgentRole` (`LEADER` / `MEMBER` / `SUPERVISOR` /

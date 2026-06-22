@@ -41,7 +41,7 @@ this document is the operational version of it.
 | Layer              | Default? | Status | Detection Quality |
 |--------------------|:--------:|:------:|-------------------|
 | `AdversarialLayer` |   ✅     |   ✅   | Regex-pattern taxonomy across six families. 21 default patterns scan direct input + memory_reads + tool_outputs + retrieved_documents + peer_messages; per-pattern severity/confidence; aggregation collapses multiple matches per (channel, threat_type). Custom patterns plug in via `extra_patterns=`. **`EmbeddingSimilarityDetector` (zero-dep n-gram fallback + pluggable embed_fn for Voyage / OpenAI / sentence-transformers)** is the layer-2 defence; **`AdversarialLLMLayer` (Claude-backed semantic classifier, opt-in via `[llm]`)** is the layer-3 defence — composes regex + LLM verdicts conservatively, fail-open on API error. |
-| `CorticalLayer`    |   ✅     |   ✅   | Reasoning conflict detection rule-based (🟡). Memory provenance structural (🟡). **Drift: Jensen-Shannon distance with Laplace smoothing** (default) **or 1D Wasserstein behind `[stats]`** — chosen via `metric="js"\|"wasserstein"`. Both symmetric, both bounded in [0, 1], both gated by `min_drift_samples`. |
+| `CorticalLayer`    |   ✅     |   ✅   | Reasoning conflict detection rule-based (🟡). Memory provenance structural (🟡). **Drift: Jensen-Shannon distance with Laplace smoothing** (default) **or 1D Wasserstein behind `[stats]`** — chosen via `metric="js"\|"wasserstein"`. Both symmetric, both bounded in [0, 1], both gated by `min_drift_samples`. **v0.8: per-role baselines.** When the agent is in a declared multi-agent topology, drift uses a `(agent_id, role)`-keyed baseline from the `BaselineStore` (catches T-ROLE-DRIFT: a compromised member acting outside its declared role). Backward-compatible: pre-v0.8 baselines fall through to role-keyed lookups via store-side fallback. |
 | `CorticalLLMLayer` (`cortical_llm.py`) | opt-in via `default_layers(prefer_llm=True)` | ✅ | Anthropic-API-backed semantic checks for reasoning + memory + drift. Sync `evaluate()` stays pattern-based — only `aevaluate()` calls Claude — so opting in doesn't penalise sync callers. Fail-open on API error / missing key. Requires `pip install agentegrity[llm]`. |
 | `AdversarialLLMLayer` (`adversarial_llm.py`) | opt-in | ✅ | Claude-backed semantic classifier for the adversarial layer. Composes with the regex taxonomy via union (LLM-detected attacks add ThreatAssessments; LLM agreeing with regex deduplicates). Same opt-in pattern as `CorticalLLMLayer`. Requires `pip install agentegrity[llm]`. |
 | `GovernanceLayer`  |   ✅     |   ✅   | Real policy engine, `enterprise-default` rule set, custom rule support, audit log with SHA-256 content hash. |
@@ -69,15 +69,21 @@ single-agent at the framework level.
 
 ## TypeScript Packages (`clients/typescript/packages/`)
 
-| Package                    | Status | Notes |
-|----------------------------|:------:|-------|
-| `@agentegrity/client`      |   ✅   | Shared `createDefaultAdapter()`, `AgentegrityReporter`, types, `process.beforeExit` shutdown, exporter fan-out. |
-| `@agentegrity/claude-sdk`  |   ✅   | Mirrors the Python Claude adapter. |
-| `@agentegrity/langchain`   |   ✅   | LangChain JS callback handler. |
-| `@agentegrity/openai-agents` | ✅  | OpenAI Agents JS SDK. |
-| `@agentegrity/crewai`      |   ✅   | CrewAI JS event hooks. |
-| `@agentegrity/google-adk`  |   ✅   | Google ADK JS bindings. |
-| `@agentegrity/vercel-ai`   |   🧪   | TS-native; uses the AI SDK's OpenTelemetry tracer surface. No Python equivalent. |
+v0.8 ships multi-agent parity with the Python adapters: every TS
+package with a multi-agent-capable framework primitive declares an
+`AgentTopology` at the right discovery point and exposes the
+shared `setTopology()` API via `@agentegrity/client`. Claude SDK
+and Vercel AI SDK stay single-agent by framework design.
+
+| Package                    | Status | v0.8 Topology | Notes |
+|----------------------------|:------:|:-------------:|-------|
+| `@agentegrity/client`      |   ✅   | core types | Shared `createDefaultAdapter()`, `AgentegrityReporter`, types, `process.beforeExit` shutdown, exporter fan-out. v0.8: ships `AgentTopology` / `AgentMember` / `AgentRole` / `TopologyKind` / `TopologyChange` immutable types + `Evidence` / `EvidenceType` mirroring the Python core. `DefaultAdapter.setTopology(topology, myRole?)` is the canonical entry point; cross-runtime SHA-256 `contentHash()` matches Python byte-for-byte. |
+| `@agentegrity/claude-sdk`  |   ✅   | n/a | Single-agent by framework design. Pinning test asserts no topology is ever declared. Mirrors the Python Claude adapter. |
+| `@agentegrity/langchain`   |   ✅   | HIERARCHICAL_DAG / PEER_TO_PEER | LangChain JS callback handler. v0.8: new `instrumentGraph(graph)` walks `graph.getGraph().nodes` and declares topology — supervisor pattern (node named `supervisor`/`supervisor_agent`/`orchestrator`) → HIERARCHICAL_DAG; otherwise PEER_TO_PEER. Plain Runnables (single-agent) unchanged. |
+| `@agentegrity/openai-agents` | ✅ | PEER_TO_PEER (incremental) | OpenAI Agents JS SDK. v0.8: `onAgentStart` seeds PEER_TO_PEER; each `onHandoff` appends the target as a PEER via `setTopology` (emits `topology_change`). |
+| `@agentegrity/crewai`      |   ✅   | HUB_SPOKE / HIERARCHICAL_DAG | CrewAI JS event hooks. v0.8: `instrument({ crew })` walks `crew.agents` and declares topology — sequential process → HUB_SPOKE; hierarchical → HIERARCHICAL_DAG with SUPERVISOR/WORKER. |
+| `@agentegrity/google-adk`  |   ✅   | HIERARCHICAL_DAG | Google ADK JS bindings. v0.8: `instrument(agent)` walks `agent.subAgents` (or `sub_agents` — ADK JS naming varies). SequentialAgent / ParallelAgent / LoopAgent → HIERARCHICAL_DAG; plain Agent stays single-agent. |
+| `@agentegrity/vercel-ai`   |   🧪   | n/a | TS-native; uses the AI SDK's OpenTelemetry tracer surface. Single-agent by framework design (no multi-agent primitive in the AI SDK). Pinning test asserts no topology. |
 
 ## Spec & Schemas
 
@@ -100,13 +106,13 @@ single-agent at the framework level.
 |--------------------------------------|:------:|-------|
 | Lint (`ruff`)                        |   ✅   | Clean. |
 | Type check (`mypy --strict`)         |   ✅   | 40 source files, zero issues. |
-| Python tests                         |   ✅   | 581 tests, all green. |
+| Python tests                         |   ✅   | 606 tests, all green. |
 | TypeScript build / typecheck / test  |   ✅   | All 7 packages green via `bun run`. |
 | CI matrix (Python 3.10/3.12, Node 18/20/22) | ✅ | `.github/workflows/ci.yml`. |
 | Version-parity gate                  |   ✅   | `scripts/check_versions.py` (Python) + `scripts/check-versions.ts` (TS) wired into CI. |
 | Release workflow                     |   ✅   | `.github/workflows/release.yml` publishes Python wheel + npm matrix. |
 | Conformance test suite (Python adapters) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (91 tests; 12 invariants × 8 adapters + 2 non-parametrized multi-agent invariants: `test_topology_populated_when_multi_agent` for the seven multi-agent-capable adapters and `test_no_topology_for_single_agent_framework` pinning Claude SDK + registry sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
-| Conformance test suite (TS packages)   | ✅ | `clients/typescript/test/cross-package-conformance.test.ts` is the TS mirror — 49 tests across 6 packages (claude-sdk / langchain / openai-agents / crewai / google-adk / vercel-ai), driving the same shared-core seam (`adapter()`) through the same canonical event stream and pinning the same parity invariants. The new suite caught two real bugs in `@agentegrity/client` on first run: missing `adapterName` field, no `registerExporter` deduplication. Both fixed in the same commit. |
+| Conformance test suite (TS packages)   | ✅ | `clients/typescript/test/cross-package-conformance.test.ts` is the TS mirror — 52 tests across 6 packages (claude-sdk / langchain / openai-agents / crewai / google-adk / vercel-ai), driving the same shared-core seam (`adapter()`) through the same canonical event stream and pinning the same parity invariants. v0.8 adds two multi-agent invariants: single-agent adapters (claude-sdk, vercel-ai) MUST NOT declare a topology; multi-agent-capable adapters (langchain, openai_agents, crewai, google_adk) MUST expose the `setTopology` API. Per-package topology tests (4 new `src/topology.test.ts` files) cover the framework-primitive-to-topology mapping. Total TS test count: 117 (52 conformance + 65 per-package). |
 | Performance budget                     | ✅ | `tests/test_perf_budget.py` (run via `pytest -m benchmark`) measures 200-iteration p95 latency for each layer in isolation and the full default pipeline. Calibrated ceilings: 50 ms per-layer, 100 ms full-pipeline. Currently measured: per-layer p95 0.01-0.20 ms, pipeline p95 0.23 ms (250-5000x cushion before LLM-backed paths land). Per-layer + pipeline budgets pinned in metadata-sentinel tests so a maintainer can't silently raise them. |
 | Detection benchmark suite            |   ✅   | `pytest -m benchmark` runs the in-repo synthetic suite (~30 attacks + ~30 benign across 6 attack families) with calibrated thresholds (TPR ≥ 0.95, FPR ≤ 0.05, F1 ≥ 0.95, plus per-family floor: every family must register at least one TP). Loader stubs for PINT / AgentDojo / InjecAgent auto-skip when their `AGENTEGRITY_BENCH_*` env var is unset, so cron can plug in real datasets without touching CI defaults. `scripts/run_benchmarks.py [--all]` prints a markdown report and exits non-zero on regression. **Real-world numbers published below.** |
 | OpenTelemetry instrumentation        |   🛠   | Phase 5 plan. |
@@ -188,17 +194,24 @@ picks the same env var up from repository variables.
 ---
 
 **Last reviewed:** v0.8.0 (2026-06-08). v0.8 ships **multi-agent
-topology**: `AgentTopology` immutable snapshots declared by all 7
-multi-agent-capable adapters (Agno teams, CrewAI crews, Bedrock
-collaborators, AutoGen GroupChat, Google ADK workflow agents,
-LangGraph supervisor/swarm, OpenAI Agents handoffs); Claude Agent
-SDK stays single-agent by framework design. Topology surfaces on
-the chain as `Evidence(evidence_type="topology")` (no canonical-
-payload break). AC/RI/Governance layers gain multi-agent extensions:
-peer-authority + peer-coercion patterns + shared_memory/broadcast
-scanning (AC), cascade detection over peer_score_history + peer_quarantine
+topology** in Python + TypeScript parity: `AgentTopology` immutable
+snapshots declared by all 7 multi-agent-capable Python adapters
+(Agno teams, CrewAI crews, Bedrock collaborators, AutoGen GroupChat,
+Google ADK workflow agents, LangGraph supervisor/swarm, OpenAI
+Agents handoffs) and their 4 multi-agent-capable TypeScript
+counterparts (langchain, openai_agents, crewai, google_adk). Claude
+Agent SDK + Vercel AI SDK stay single-agent by framework design.
+Topology surfaces on the chain as `Evidence(evidence_type="topology")`
+with cross-runtime SHA-256 hash compatibility — TS and Python
+produce the same digest for structurally identical topologies.
+AC/RI/Governance layers gain multi-agent extensions: peer-authority
++ peer-coercion patterns + shared_memory/broadcast scanning (AC),
+cascade detection over peer_score_history + peer_quarantine
 capability (RI), GOV-004 finally gates on topology member count.
-CrewAI semantic fix: tasks ≠ subagents (legacy_task_mapping=True for
-one-cycle compat).
-This file is the source of truth for "what's done." Update it in the
-same commit that ships a status change.
+CorticalLayer gains per-role baselines via `BaselineStore` key
+extension: `(agent_id, role)` keying with backward-compat fallback
+to pre-v0.8 single-agent baselines (T-ROLE-DRIFT mitigation).
+CrewAI semantic fix: tasks ≠ subagents (legacy_task_mapping=True
+for one-cycle compat).
+This file is the source of truth for "what's done." Update it in
+the same commit that ships a status change.
