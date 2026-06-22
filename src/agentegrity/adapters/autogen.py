@@ -180,12 +180,22 @@ class AutoGenAdapter(_BaseAdapter):
         op = attrs.get(_GEN_AI_OPERATION_NAME)
         if op == _OP_INVOKE_AGENT:
             agent_name = str(attrs.get(_GEN_AI_AGENT_NAME, ""))
+            agent_id = str(attrs.get(_GEN_AI_AGENT_ID, "")) or agent_name
             if span.parent is None:
+                # Root invoke_agent: declare a single-member
+                # GROUP_CHAT topology. Subsequent nested
+                # invoke_agent spans grow it via topology_change.
+                self._seed_topology_for_root(agent_id, agent_name)
                 self._dispatch("user_prompt_submit", {"prompt": agent_name})
             else:
+                # Nested invoke_agent: ensure this agent is in the
+                # topology before dispatching subagent_start so the
+                # topology Evidence on the resulting attestation
+                # already includes the new member.
+                self._ensure_member(agent_id, agent_name)
                 self._dispatch(
                     "subagent_start",
-                    {"agent_id": str(attrs.get(_GEN_AI_AGENT_ID, "")) or agent_name},
+                    {"agent_id": agent_id},
                 )
         elif op == _OP_EXECUTE_TOOL:
             self._dispatch(
@@ -226,3 +236,80 @@ class AutoGenAdapter(_BaseAdapter):
                     "subagent_stop",
                     {"agent_id": str(attrs.get(_GEN_AI_AGENT_ID, "")) or agent_name},
                 )
+
+    # --- v0.8 multi-agent topology helpers ---
+
+    def _seed_topology_for_root(self, agent_id: str, name: str) -> None:
+        """Declare a single-member GROUP_CHAT topology at root span.
+
+        AutoGen GroupChat has no fixed leader (agents are peers),
+        so the root agent gets role PEER. Nested agents are appended
+        by ``_ensure_member`` as their invoke_agent spans arrive.
+        """
+        from agentegrity.core.topology import (
+            AgentMember,
+            AgentRole,
+            AgentTopology,
+            TopologyKind,
+        )
+
+        existing = self._buffer.topology
+        # If the topology is already seeded for this conversation,
+        # don't reset it. AutoGen can re-start spans within the same
+        # tracer-provider lifetime.
+        if existing is not None and existing.leader() is None:
+            for m in existing.members:
+                if m.agent_id == agent_id:
+                    return
+
+        root = AgentMember(
+            agent_id=agent_id,
+            name=name or agent_id,
+            role=AgentRole.PEER,
+            capabilities=("tool_use",),
+        )
+        topology = AgentTopology(
+            kind=TopologyKind.GROUP_CHAT,
+            members=(root,),
+            comm_channels=frozenset({"broadcast_channels"}),
+        )
+        self.set_topology(topology, my_role=AgentRole.PEER)
+
+    def _ensure_member(self, agent_id: str, name: str) -> None:
+        """Append an agent to the GROUP_CHAT topology if absent.
+
+        AutoGen samples spans independently, so a nested
+        invoke_agent may arrive before its root span fires. In that
+        case we lazily seed a GROUP_CHAT with this agent as the
+        first member; subsequent spans accumulate.
+        """
+        from agentegrity.core.topology import (
+            AgentMember,
+            AgentRole,
+            AgentTopology,
+            TopologyKind,
+        )
+
+        topology = self._buffer.topology
+        if topology is None:
+            # Root span dropped by sampling — start fresh here.
+            self._seed_topology_for_root(agent_id, name)
+            return
+        if topology.member(agent_id) is not None:
+            return
+        new_topology = topology.with_member(AgentMember(
+            agent_id=agent_id,
+            name=name or agent_id,
+            role=AgentRole.PEER,
+            capabilities=("tool_use",),
+        ))
+        # Preserve GROUP_CHAT kind even if existing was something else.
+        if new_topology.kind is not TopologyKind.GROUP_CHAT:
+            new_topology = AgentTopology(
+                kind=TopologyKind.GROUP_CHAT,
+                members=new_topology.members,
+                comm_channels=new_topology.comm_channels,
+                topology_id=new_topology.topology_id,
+                created_at=new_topology.created_at,
+            )
+        self.set_topology(new_topology, my_role=AgentRole.PEER)

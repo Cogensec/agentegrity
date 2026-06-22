@@ -76,10 +76,77 @@ class BedrockAgentsAdapter(_BaseAdapter):
     ) -> None:
         super().__init__(profile, evaluator, enforce, api_key)
 
+    # --- v0.8 multi-agent topology helpers ---
+
+    def _seed_topology_from_supervisor(self, supervisor_id: str) -> None:
+        """Declare a HUB_SPOKE topology seeded with the supervisor only.
+
+        Collaborators are appended incrementally as
+        ``agentCollaboratorInvocationInput`` trace parts arrive.
+        Called once at the start of each ``invoke_agent`` / Strands
+        run. If the supervisor matches the current topology's leader,
+        no-op (Bedrock doesn't reset across invocations).
+        """
+        from agentegrity.core.topology import (
+            AgentMember,
+            AgentRole,
+            AgentTopology,
+            TopologyKind,
+        )
+
+        current = self._buffer.topology
+        if current is not None and current.leader() is not None:
+            if current.leader().agent_id == supervisor_id:
+                return  # same supervisor, keep topology
+
+        supervisor = AgentMember(
+            agent_id=supervisor_id,
+            name=supervisor_id,
+            role=AgentRole.LEADER,
+            capabilities=("tool_use",),
+        )
+        topology = AgentTopology(
+            kind=TopologyKind.HUB_SPOKE,
+            members=(supervisor,),
+            comm_channels=frozenset({"peer_messages"}),
+        )
+        self.set_topology(topology, my_role=AgentRole.LEADER)
+
+    def _ensure_collaborator(self, collaborator_name: str) -> None:
+        """Append a collaborator to the current topology if absent.
+
+        Each Bedrock collaborator observed in the trace stream
+        becomes an ``AgentMember`` with role MEMBER under the
+        supervisor. Triggers a ``topology_change`` event so the
+        chain commits to the new member.
+        """
+        from agentegrity.core.topology import AgentMember, AgentRole
+
+        topology = self._buffer.topology
+        if topology is None or not collaborator_name:
+            return
+        if topology.member(collaborator_name) is not None:
+            return
+        leader = topology.leader()
+        parent_id = leader.agent_id if leader is not None else None
+        new_topology = topology.with_member(AgentMember(
+            agent_id=collaborator_name,
+            name=collaborator_name,
+            role=AgentRole.MEMBER,
+            parent_id=parent_id,
+            capabilities=("tool_use",),
+        ))
+        self.set_topology(new_topology, my_role=AgentRole.LEADER)
+
     # --- Strands SDK path ---
 
     def instrument_strands(self, agent: StrandsAgent) -> StrandsAgent:
         """Register agentegrity hooks on a Strands :class:`Agent`.
+
+        v0.8: also seeds a HUB_SPOKE topology with the Strands agent
+        as the supervisor; collaborators discovered through the trace
+        stream (when the Strands agent invokes one) grow the topology
+        incrementally via ``topology_change`` events.
 
         Subscribes to invocation + tool lifecycle events. Tool-call hooks
         run synchronously enough that ``enforce=True`` can deny a tool
@@ -92,6 +159,9 @@ class BedrockAgentsAdapter(_BaseAdapter):
                 "instrument_strands expected a strands.Agent with a .hooks "
                 f"HookRegistry; got {type(agent).__name__}: {exc}"
             ) from None
+        # v0.8: seed topology with the Strands agent as supervisor.
+        supervisor_id = str(getattr(agent, "name", None) or id(agent))
+        self._seed_topology_from_supervisor(supervisor_id)
         return agent
 
     # --- boto3 trace-stream path ---
@@ -142,6 +212,17 @@ class BedrockAgentsAdapter(_BaseAdapter):
                     "and enableTrace unset; no agentegrity events will fire "
                     "from this invocation."
                 )
+
+            # v0.8: declare an initial HUB_SPOKE topology with just the
+            # supervisor agent. Collaborators land via topology_change
+            # events as agentCollaboratorInvocationInput trace parts
+            # arrive (see _process_trace_part).
+            agent_id_arg = str(
+                kwargs.get("agentId")
+                or kwargs.get("agentAliasId")
+                or "bedrock-supervisor"
+            )
+            adapter._seed_topology_from_supervisor(agent_id_arg)
 
             adapter._dispatch(
                 "user_prompt_submit",
@@ -322,9 +403,14 @@ def _handle_stream_event(adapter: BedrockAgentsAdapter, raw_event: dict[str, Any
 
     collab_in = inv_in.get("agentCollaboratorInvocationInput")
     if collab_in:
+        collaborator_name = collab_in.get("agentCollaboratorName", "")
+        # v0.8: incrementally grow the topology so the chain commits
+        # to which collaborators participated under this supervisor.
+        if collaborator_name:
+            adapter._ensure_collaborator(collaborator_name)
         adapter._dispatch(
             "subagent_start",
-            {"agent_id": collab_in.get("agentCollaboratorName", "")},
+            {"agent_id": collaborator_name},
         )
         return
 
