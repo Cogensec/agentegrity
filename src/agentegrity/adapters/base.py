@@ -129,7 +129,15 @@ class FrameworkEvent:
 
 @dataclass
 class _ContextBuffer:
-    """Internal buffer accumulating runtime context from framework hooks."""
+    """Internal buffer accumulating runtime context from framework hooks.
+
+    Multi-agent fields (peer_messages, shared_memory, broadcast_messages,
+    topology, my_role, peer_attestations, peer_score_history,
+    subagent_starts_seen) are populated by team-aware adapters. They
+    flow into ``to_evaluation_context()`` under a ``topology_context``
+    key so the four existing layers can scan them under their own
+    properties.
+    """
 
     inputs: list[str] = field(default_factory=list)
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -139,9 +147,21 @@ class _ContextBuffer:
     action_distribution: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     reasoning_chain: list[str] = field(default_factory=list)
     subagents: list[dict[str, Any]] = field(default_factory=list)
+    # Multi-agent (v0.8) — set/populated by team-aware adapters.
+    topology: Any = None  # AgentTopology | None (Any to avoid the import cycle)
+    my_role: Any = None  # AgentRole | None
+    peer_messages: list[dict[str, Any]] = field(default_factory=list)
+    shared_memory: list[dict[str, Any]] = field(default_factory=list)
+    broadcast_messages: list[dict[str, Any]] = field(default_factory=list)
+    peer_attestations: list[dict[str, Any]] = field(default_factory=list)
+    peer_score_history: dict[str, list[float]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    subagent_starts_seen: set[str] = field(default_factory=set)
+    tasks: list[dict[str, Any]] = field(default_factory=list)
 
     def to_evaluation_context(self) -> dict[str, Any]:
-        return {
+        base: dict[str, Any] = {
             "input": self.inputs[-1] if self.inputs else "",
             "tool_outputs": self.tool_outputs,
             "reasoning_chain": self.reasoning_chain,
@@ -153,7 +173,30 @@ class _ContextBuffer:
             "action": (
                 self.tool_calls[-1] if self.tool_calls else {"type": "respond"}
             ),
+            "peer_messages": self.peer_messages,
         }
+        if (
+            self.topology is not None
+            or self.peer_messages
+            or self.shared_memory
+            or self.broadcast_messages
+        ):
+            base["topology_context"] = {
+                "topology": (
+                    self.topology.to_dict() if self.topology is not None else None
+                ),
+                "role": (
+                    self.my_role.value
+                    if self.my_role is not None
+                    else None
+                ),
+                "peer_messages": list(self.peer_messages),
+                "shared_memory": list(self.shared_memory),
+                "broadcast_messages": list(self.broadcast_messages),
+                "peer_attestations": list(self.peer_attestations),
+                "peer_score_history": dict(self.peer_score_history),
+            }
+        return base
 
 
 async def _safe_await(coro: Any, method_name: str) -> None:
@@ -194,6 +237,7 @@ class _BaseAdapter:
         self._exporters: list[SessionExporter] = []
         self._session_started = False
         self._session_ended = False
+        self._pending_topology_change: Any = None  # TopologyChange | None
 
         if evaluator is not None:
             self._evaluator = evaluator
@@ -355,15 +399,66 @@ class _BaseAdapter:
         self._evaluation_count += 1
 
         prev_hash = self._chain.latest.content_hash if self._chain.latest else None
+        # Consume the pending topology change (if any) so it lands on
+        # exactly one attestation. Topology itself stays sticky — every
+        # subsequent attestation carries the topology Evidence until
+        # the topology is replaced.
+        pending_change = self._pending_topology_change
+        self._pending_topology_change = None
         record = build_attestation_record(
             self._profile,
             score,
             previous_record_hash=prev_hash,
             signing_key=self._signing_key,
             recent_decisions=self._decisions_since_last_attestation(),
+            topology=self._buffer.topology,
+            topology_change=pending_change,
         )
         self._chain.append(record)
         return score
+
+    def set_topology(
+        self,
+        topology: Any,  # AgentTopology
+        my_role: Any = None,  # AgentRole | None
+    ) -> None:
+        """Declare or update the in-process multi-agent topology this
+        adapter participates in.
+
+        Called by team-aware adapters at instrument time (Agno
+        ``instrument_team``, CrewAI ``instrument`` over a Crew, etc.)
+        and again on any structural mutation. The first call emits a
+        ``topology_declared`` event; subsequent calls emit
+        ``topology_change`` with a :class:`TopologyChange` diff. Both
+        kinds of event trigger an attestation so the chain commits to
+        the topology via ``Evidence(evidence_type="topology")``.
+        """
+        previous = self._buffer.topology
+        self._buffer.topology = topology
+        self._buffer.my_role = my_role
+
+        if previous is None:
+            self._dispatch(
+                "topology_declared",
+                {"topology": topology.to_dict()},
+            )
+            return
+
+        if previous.content_hash() == topology.content_hash():
+            # No structural change — nothing to attest.
+            return
+
+        from agentegrity.core.topology import TopologyChange
+
+        change = TopologyChange.between(previous, topology)
+        self._pending_topology_change = change
+        self._dispatch(
+            "topology_change",
+            {
+                "change": change.to_dict(),
+                "topology": topology.to_dict(),
+            },
+        )
 
     def _decisions_since_last_attestation(self) -> list[DecisionRecord]:
         """Return the trailing run of :class:`DecisionRecord`\\s since
@@ -483,6 +578,13 @@ class _BaseAdapter:
             "subagent_start": self._handle_subagent_start,
             "subagent_stop": self._handle_subagent_stop,
             "pre_compact": self._handle_pre_compact,
+            # Multi-agent (v0.8)
+            "topology_declared": self._handle_topology_declared,
+            "topology_change": self._handle_topology_change,
+            "peer_message": self._handle_peer_message,
+            "shared_memory_write": self._handle_shared_memory_write,
+            "broadcast": self._handle_broadcast,
+            "task_started": self._handle_task_started,
         }
         handler = handlers.get(event_type)
         if handler:
@@ -597,6 +699,8 @@ class _BaseAdapter:
                 "started": datetime.now(timezone.utc).isoformat(),
             }
         )
+        if agent_id:
+            self._buffer.subagent_starts_seen.add(agent_id)
         # subagent_start fires when the child starts running. The parent's
         # decision to delegate already happened earlier (often at the
         # parent's pre_tool_use if the subagent is invoked as a tool). So
@@ -618,13 +722,28 @@ class _BaseAdapter:
     def _handle_subagent_stop(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
+        agent_id = data.get("agent_id", "")
+        # Orphan handling: a _stop without a corresponding _start
+        # (e.g., AutoGen OTel sampling drops the start span) would
+        # silently corrupt the topology view. Emit a subagent_orphan
+        # event so monitoring can see the gap.
+        if agent_id and agent_id not in self._buffer.subagent_starts_seen:
+            logger.warning(
+                "%s saw subagent_stop for %r without matching start",
+                self.name, agent_id,
+            )
+            self._emit_event(
+                "subagent_orphan",
+                {"agent_id": agent_id, "reason": "stop_without_start"},
+            )
         self._buffer.subagents.append(
             {
-                "agent_id": data.get("agent_id", ""),
+                "agent_id": agent_id,
                 "stopped": datetime.now(timezone.utc).isoformat(),
                 "transcript_path": data.get("agent_transcript_path", ""),
             }
         )
+        self._buffer.subagent_starts_seen.discard(agent_id)
         self._emit_event("subagent_stop", data)
         return {}
 
@@ -636,6 +755,118 @@ class _BaseAdapter:
                 "archived_chain": list(self._buffer.reasoning_chain),
             },
         )
+        return {}
+
+    # --- Multi-agent handlers (v0.8) ---
+
+    def _handle_topology_declared(
+        self, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Fired once when the adapter receives its topology.
+
+        The data dict carries a serialized ``AgentTopology``
+        (``{"topology": topology.to_dict()}``). Triggers an
+        attestation so the chain commits to the topology via
+        ``Evidence(evidence_type="topology")``.
+        """
+        score = self._run_evaluation()
+        self._emit_event("topology_declared", data, score)
+        return {}
+
+    def _handle_topology_change(
+        self, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Fired when the topology mutates structurally.
+
+        Triggers an attestation that carries both
+        ``Evidence(evidence_type="topology", ...)`` (the new
+        snapshot) and ``Evidence(evidence_type="topology_change", ...)``
+        (the diff). ``_pending_topology_change`` was set by
+        ``set_topology()`` and is consumed inside ``_run_evaluation``.
+        """
+        score = self._run_evaluation()
+        self._emit_event("topology_change", data, score)
+        return {}
+
+    def _handle_peer_message(self, data: dict[str, Any]) -> dict[str, Any]:
+        """A peer agent sent a message into this agent's context.
+
+        Buffers the message under ``peer_messages`` so the
+        AdversarialLayer can scan it. ``writer_agent_id`` is
+        critical for downstream attack attribution.
+        """
+        entry = {
+            "sender_agent_id": data.get("sender_agent_id", ""),
+            "content": data.get("content", ""),
+            "channel": data.get("channel", "peer_messages"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self._buffer.peer_messages.append(entry)
+        self._emit_event("peer_message", data)
+        return {}
+
+    def _handle_shared_memory_write(
+        self, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """A peer wrote data into shared memory that this agent reads.
+
+        ``writer_agent_id`` is captured so shared-memory poisoning
+        attributes the attack to the writer, not the reader (T-SHARED-
+        MEM-MISATTRIB threat).
+        """
+        entry = {
+            "writer_agent_id": data.get("writer_agent_id", ""),
+            "key": data.get("key", ""),
+            "content": data.get("content", ""),
+            "content_hash": data.get("content_hash", ""),
+            "summary": data.get("summary", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self._buffer.shared_memory.append(entry)
+        self._emit_event("shared_memory_write", data)
+        return {}
+
+    def _handle_broadcast(self, data: dict[str, Any]) -> dict[str, Any]:
+        """A broadcast on a channel this agent subscribes to.
+
+        Broadcasts can amplify (T-BROADCAST-AMP): N members × one
+        broadcast = N evaluations. Adapters that fan a broadcast out
+        to each member should rate-limit at the source. The buffer
+        caps at 1000 entries per session as a defensive ceiling.
+        """
+        if len(self._buffer.broadcast_messages) >= 1000:
+            self._emit_event(
+                "broadcast_overflow",
+                {"dropped": data, "limit": 1000},
+            )
+            return {}
+        entry = {
+            "sender_agent_id": data.get("sender_agent_id", ""),
+            "channel": data.get("channel", "broadcast_channels"),
+            "content": data.get("content", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self._buffer.broadcast_messages.append(entry)
+        self._emit_event("broadcast", data)
+        return {}
+
+    def _handle_task_started(self, data: dict[str, Any]) -> dict[str, Any]:
+        """A task started — distinct from a subagent (e.g. CrewAI task
+        vs CrewAI agent).
+
+        Tasks ARE meaningful CrewAI primitives even if they aren't
+        agents. Adapters can emit ``task_started`` alongside
+        ``subagent_start`` to preserve task structure without
+        conflating it with subagent counts.
+        """
+        entry = {
+            "task_id": data.get("task_id", ""),
+            "description": data.get("description", ""),
+            "agent_id": data.get("agent_id", ""),
+            "started": datetime.now(timezone.utc).isoformat(),
+        }
+        self._buffer.tasks.append(entry)
+        self._emit_event("task_started", data)
         return {}
 
     def get_summary(self) -> dict[str, Any]:
