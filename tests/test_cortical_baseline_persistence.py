@@ -156,3 +156,101 @@ class TestSurvivesRestartCycle:
         # marker).
         drift = result.details["drift"]
         assert "action_distribution" in drift["dimensions"]
+
+
+class TestPerRoleBaselines:
+    """v0.8: CorticalLayer threads ``my_role`` from
+    ``topology_context`` into BaselineStore.load/save so the same
+    agent in different roles gets distinct baselines."""
+
+    def test_same_agent_different_roles_get_distinct_baselines(
+        self, tmp_path: Path
+    ) -> None:
+        from agentegrity.layers.baseline_store import SqliteBaselineStore
+
+        profile = _profile()
+        store = SqliteBaselineStore(tmp_path / "b.db")
+
+        # Drive observations under LEADER role.
+        leader_layer = CorticalLayer(baseline_store=store)
+        leader_layer.evaluate(
+            profile,
+            {"topology_context": {"role": "leader"}},
+        )
+        for _ in range(30):
+            leader_layer.update_baseline({"action": "delegate"})
+
+        # Drive observations under WORKER role.
+        worker_layer = CorticalLayer(baseline_store=store)
+        worker_layer.evaluate(
+            profile,
+            {"topology_context": {"role": "worker"}},
+        )
+        for _ in range(30):
+            worker_layer.update_baseline({"action": "execute"})
+
+        # Distinct baselines:
+        leader_bl = store.load(profile.agent_id, role="leader")
+        worker_bl = store.load(profile.agent_id, role="worker")
+        assert leader_bl is not None
+        assert worker_bl is not None
+        # Action distributions diverge because each role observed
+        # different actions.
+        assert "delegate" in leader_bl.action_distribution
+        assert "execute" in worker_bl.action_distribution
+        assert "execute" not in leader_bl.action_distribution
+        assert "delegate" not in worker_bl.action_distribution
+
+    def test_single_agent_unchanged_when_no_role(
+        self, tmp_path: Path
+    ) -> None:
+        """Pre-v0.8 behavior: evaluate() without topology_context
+        keeps writing to the role=None entry."""
+        from agentegrity.layers.baseline_store import SqliteBaselineStore
+
+        profile = _profile()
+        store = SqliteBaselineStore(tmp_path / "b.db")
+        layer = CorticalLayer(baseline_store=store)
+        layer.evaluate(profile)
+        layer.update_baseline({"action": "search"})
+        loaded = store.load(profile.agent_id, role=None)
+        assert loaded is not None
+        assert "search" in loaded.action_distribution
+
+    def test_role_keyed_load_falls_back_to_legacy(
+        self, tmp_path: Path
+    ) -> None:
+        """An operator with a pre-v0.8 baseline (no role) gets it
+        returned for any role-keyed lookup until a role-specific
+        entry is written."""
+        from agentegrity.layers.baseline_store import SqliteBaselineStore
+
+        profile = _profile()
+        store = SqliteBaselineStore(tmp_path / "b.db")
+        # Phase 1: pre-v0.8 single-agent baseline.
+        layer_v07 = CorticalLayer(baseline_store=store)
+        layer_v07.evaluate(profile)
+        for _ in range(30):
+            layer_v07.update_baseline({"action": "respond"})
+        original = store.load(profile.agent_id, role=None)
+        assert original is not None
+        original_samples = original.sample_count
+
+        # Phase 2: v0.8 layer queries with a role. Should get the
+        # legacy entry via the fallback path.
+        layer_v08 = CorticalLayer(baseline_store=store)
+        result = layer_v08.evaluate(
+            profile,
+            {"topology_context": {"role": "supervisor"}},
+        )
+        assert layer_v08._baseline is not None
+        assert layer_v08._baseline.sample_count == original_samples
+        # And the next observation gets saved under the new role key.
+        layer_v08.update_baseline({"action": "decide"})
+        new_role_entry = store.load(profile.agent_id, role="supervisor")
+        assert new_role_entry is not None
+        # The legacy role=None entry is unchanged.
+        legacy_after = store.load(profile.agent_id, role=None)
+        assert legacy_after is not None
+        assert legacy_after.sample_count == original_samples
+        del result  # silence unused

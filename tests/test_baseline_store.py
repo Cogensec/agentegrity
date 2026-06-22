@@ -172,3 +172,141 @@ class TestSqliteBackendSpecifics:
         assert loaded is not None
         assert loaded.sample_count == 99
         assert store.list_agent_ids() == ["dup"]
+
+
+# --- v0.8: per-role baseline persistence ---
+
+
+class TestPerRoleBaselines:
+    """Each of the 3 backends keys baselines by (agent_id, role)
+    with backward-compat fallback to role=None for legacy entries."""
+
+    @pytest.fixture(
+        params=["memory", "file", "sqlite"], ids=["memory", "file", "sqlite"]
+    )
+    def store(
+        self, request: pytest.FixtureRequest, tmp_path: Path
+    ) -> BaselineStore:
+        kind = request.param
+        if kind == "memory":
+            return InMemoryBaselineStore()
+        if kind == "file":
+            return FileBaselineStore(tmp_path / "store")
+        return SqliteBaselineStore(tmp_path / "b.db")
+
+    def test_role_keyed_save_and_load(self, store: BaselineStore) -> None:
+        store.save(_baseline(agent_id="a", sample_count=10), role="leader")
+        store.save(_baseline(agent_id="a", sample_count=99), role="worker")
+        leader = store.load("a", role="leader")
+        worker = store.load("a", role="worker")
+        assert leader is not None
+        assert worker is not None
+        assert leader.sample_count == 10
+        assert worker.sample_count == 99
+
+    def test_load_with_role_falls_back_to_legacy(
+        self, store: BaselineStore
+    ) -> None:
+        """A pre-v0.8 baseline (saved without a role) is returned for
+        role-keyed lookups when no role-specific entry exists."""
+        store.save(_baseline(agent_id="legacy", sample_count=42))
+        # No "leader" baseline written; fallback returns the role-less.
+        loaded = store.load("legacy", role="leader")
+        assert loaded is not None
+        assert loaded.sample_count == 42
+
+    def test_role_specific_does_not_shadow_other_roles(
+        self, store: BaselineStore
+    ) -> None:
+        store.save(_baseline(agent_id="b"), role=None)
+        store.save(_baseline(agent_id="b", sample_count=77), role="supervisor")
+        # role=None remains its own entry
+        roleless = store.load("b", role=None)
+        assert roleless is not None
+        assert roleless.sample_count == 20
+        # supervisor is distinct
+        sup = store.load("b", role="supervisor")
+        assert sup is not None
+        assert sup.sample_count == 77
+
+    def test_list_keys_returns_role_pairs(self, store: BaselineStore) -> None:
+        store.save(_baseline(agent_id="a"), role=None)
+        store.save(_baseline(agent_id="a"), role="leader")
+        store.save(_baseline(agent_id="b"), role="peer")
+        keys = set(store.list_keys())
+        assert ("a", None) in keys
+        assert ("a", "leader") in keys
+        assert ("b", "peer") in keys
+
+    def test_list_agent_ids_deduplicates_across_roles(
+        self, store: BaselineStore
+    ) -> None:
+        store.save(_baseline(agent_id="a"), role=None)
+        store.save(_baseline(agent_id="a"), role="leader")
+        store.save(_baseline(agent_id="b"), role="peer")
+        ids = store.list_agent_ids()
+        # Each agent_id appears once regardless of how many roles it has.
+        assert sorted(ids) == ["a", "b"]
+
+    def test_delete_targets_specific_role(self, store: BaselineStore) -> None:
+        store.save(_baseline(agent_id="a"), role=None)
+        store.save(_baseline(agent_id="a"), role="leader")
+        deleted = store.delete("a", role="leader")
+        assert deleted is True
+        assert store.load("a", role="leader") is not None  # fallback to None
+        # But the role=None entry survives.
+        assert store.load("a", role=None) is not None
+        # And direct query for "leader" without fallback path: NOTE
+        # load always falls back, so we need list_keys to assert.
+        assert ("a", "leader") not in store.list_keys()
+        assert ("a", None) in store.list_keys()
+
+    def test_invalid_role_rejected(self, store: BaselineStore) -> None:
+        with pytest.raises(ValueError, match="invalid role"):
+            store.save(_baseline(agent_id="a"), role="../etc/passwd")
+        with pytest.raises(ValueError, match="invalid role"):
+            store.load("a", role="../etc/passwd")
+
+
+class TestSqliteSchemaMigration:
+    def test_old_schema_migrated_on_open(self, tmp_path: Path) -> None:
+        """A pre-v0.8 SQLite database (no role column) is migrated
+        to the composite-PK schema on first v0.8 open. Existing
+        rows are preserved with role=''."""
+        import sqlite3
+        db = tmp_path / "legacy.db"
+        # Hand-craft a pre-v0.8 database.
+        conn = sqlite3.connect(str(db))
+        conn.executescript(
+            "CREATE TABLE baselines ("
+            "  agent_id TEXT PRIMARY KEY,"
+            "  payload TEXT NOT NULL,"
+            "  inserted_at TEXT NOT NULL DEFAULT (datetime('now'))"
+            ");"
+        )
+        payload = json.dumps({
+            "agent_id": "old-agent",
+            "action_distribution": {},
+            "tool_usage_patterns": {},
+            "response_length_mean": 0.0,
+            "response_length_std": 0.0,
+            "reasoning_depth_mean": 0.0,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "sample_count": 100,
+        })
+        conn.execute(
+            "INSERT INTO baselines (agent_id, payload) VALUES (?, ?)",
+            ("old-agent", payload),
+        )
+        conn.commit()
+        conn.close()
+
+        # First v0.8 open triggers migration.
+        store = SqliteBaselineStore(db)
+        loaded = store.load("old-agent")
+        assert loaded is not None
+        assert loaded.sample_count == 100
+        # Role-keyed lookup falls back to the migrated role='' entry.
+        loaded_with_role = store.load("old-agent", role="leader")
+        assert loaded_with_role is not None
+        assert loaded_with_role.sample_count == 100
