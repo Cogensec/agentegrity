@@ -152,6 +152,60 @@ python -m agentegrity          # version + installed adapters
 python -m agentegrity doctor   # end-to-end self-check, prints composite score
 ```
 
+### Instrument a multi-agent system (v0.8+)
+
+For frameworks with multi-agent primitives (teams, crews, collaborators, graphs, handoffs), the adapter declares an `AgentTopology` at instrument time. The chain commits to the structure via `Evidence(evidence_type="topology")` so a downstream verifier can prove which topology the agent participated in. The four layers automatically gain peer-authority scanning, cascade detection, role-conformant drift, and `GOV-004` gating once the topology is declared.
+
+```python
+# Agno team — instrument_team walks team.members → HUB_SPOKE
+from agentegrity.agno import instrument_team, report
+team = instrument_team(team); team.run("..."); print(report())
+
+# CrewAI crew — instrument(crew) walks crew.agents → HUB_SPOKE / HIERARCHICAL_DAG
+# (v0.8 semantic fix: TaskStartedEvent → task_started, not subagent_start.
+#  Pass legacy_task_mapping=True for the v0.7 mapping with a DeprecationWarning.)
+from agentegrity.crewai import instrument, report
+instrument(crew); crew.kickoff(); print(report())
+
+# AWS Bedrock Agents — collaborators discovered in the trace stream grow the topology
+from agentegrity.bedrock_agents import wrap_client, instrument_strands
+client = wrap_client(boto_client)  # boto3 path (observation-only)
+agent  = instrument_strands(strands_agent)  # Strands path (real enforce)
+
+# AutoGen — incremental GROUP_CHAT from OTel invoke_agent span hierarchy
+from agentegrity.autogen import instrument
+instrument()  # installs the SpanProcessor; root + nested spans grow topology
+
+# Google ADK — walks SequentialAgent / ParallelAgent / LoopAgent.sub_agents
+from agentegrity.google_adk import instrument
+instrument(workflow_agent)  # HIERARCHICAL_DAG; plain Agent stays single-agent
+
+# LangGraph — walks graph.get_graph().nodes (supervisor pattern → HIERARCHICAL_DAG,
+# swarm → PEER_TO_PEER)
+from agentegrity.langchain import instrument_graph
+instrument_graph(compiled_graph)
+
+# OpenAI Agents handoffs — PEER_TO_PEER seeded on first agent; topology grows on each handoff
+from agentegrity.openai_agents import run_hooks
+await Runner.run(agent, input="...", hooks=run_hooks())
+```
+
+Verify the resulting chain — both single-agent decision links and (when peer chains are available) cross-agent links:
+
+```bash
+python -m agentegrity verify-decisions chain.json
+```
+
+```python
+# Programmatic: walk peer_message / handoff Evidence into peer agents' chains
+ok = adapter.attestation_chain.verify_cross_agent_links({
+    "peer-1": peer1.attestation_chain,
+    "peer-2": peer2.attestation_chain,
+})
+```
+
+Claude Agent SDK is single-agent at the framework level — no topology is declared, and the conformance suite pins the absence. Multi-agent layer checks (cascade detection, peer-authority, `GOV-004` gating, role-conformant drift via per-role `BaselineStore` keys) silently no-op for single-agent deployments.
+
 ### Export session data to a dashboard or external sink
 
 Every adapter exposes `register_exporter(exporter)`. Implement three async methods — `on_session_start`, `on_event`, `on_session_end` — and every evaluated event streams to your exporter as JSON-ready dicts. Exporter exceptions are caught and logged so a broken sink can never break the agent.
@@ -214,6 +268,27 @@ import { streamText } from "ai";
 import { instrument } from "@agentegrity/vercel-ai";
 await streamText({ model, prompt: "hi", experimental_telemetry: instrument() });
 ```
+
+**Multi-agent in TypeScript (v0.8+).** The TS adapters mirror the Python multi-agent surface: `@agentegrity/client` ships `AgentTopology` / `AgentMember` / `AgentRole` / `TopologyKind` / `Evidence` types with a cross-runtime SHA-256 `contentHash()` that matches Python byte-for-byte. Each adapter declares topology at the right discovery point:
+
+```ts
+// LangGraph JS — walks graph.getGraph().nodes
+import { instrumentGraph } from "@agentegrity/langchain";
+instrumentGraph(compiledGraph);
+
+// OpenAI Agents JS — seeds PEER_TO_PEER on first agent, grows on each handoff
+// (no extra call: runHooks() already does this when used with handoffs)
+
+// CrewAI JS — instrument({ crew }) walks crew.agents
+import { instrument } from "@agentegrity/crewai";
+instrument({ crew });
+
+// Google ADK JS — walks agent.subAgents (or sub_agents)
+import { instrument } from "@agentegrity/google-adk";
+instrument(workflowAgent);
+```
+
+Claude SDK and Vercel AI SDK stay single-agent by framework design; conformance pins the absence.
 
 Each adapter re-exports `report()`, `reset()`, and `registerExporter()` for the same flow you get in Python. The low-level `@agentegrity/client` reporter is still available for custom frameworks, and the wire format is published as JSON Schema (`schemas/exporter/`) and OpenAPI 3.1 (`schemas/openapi.yaml`). Drift between the Python `to_dict()` output and the schemas is caught in CI by `tests/test_schemas.py`.
 
@@ -373,7 +448,7 @@ agentegrity/
 
 **v0.7.0 — Three new Python adapters + decision provenance.** AWS Bedrock Agents (Strands hooks with real `event.cancel_tool` enforcement + boto3 trace-stream observation surface), Agno (Agent + Team via `pre_hooks` / `post_hooks` / `tool_hooks`, real enforcement via `StopAgentRun`), and AutoGen (OpenTelemetry SpanProcessor consuming GenAI semconv spans) join the Python adapter family — now eight strong. CrewAI compat fix for the 1.x event-bus relocation. A new synchronous `_evaluate_sync` dispatch core unlocks real enforcement on sync hook surfaces. The big core addition is **decision provenance**: `DecisionRecord` lives in the same `AttestationChain` as `AttestationRecord`, captured at the three decision boundaries (`pre_tool_use` / `stop` / `subagent_start`) before the action executes, Evidence-linked back from each subsequent attestation, verifiable via `python -m agentegrity verify-decisions <chain.json>`. The `Evidence.content_hash` defect (process-salted Python `hash()`) is fixed; chains serialized pre-v0.7 fail `verify_chain()` after upgrade — re-build from a fresh root.
 
-**v0.8.0 — Multi-agent topology (current).** New `AgentTopology` core type (immutable snapshots with deterministic `content_hash`) modeling the in-process multi-agent system across `HUB_SPOKE` / `HIERARCHICAL_DAG` / `PEER_TO_PEER` / `GROUP_CHAT` shapes. Every framework with multi-agent primitives (Agno teams, CrewAI crews, Bedrock collaborators, AutoGen GroupChat, Google ADK workflow agents, LangGraph supervisor/swarm, OpenAI Agents handoffs) declares its topology at the right discovery point; Claude Agent SDK stays single-agent by framework design. Topology surfaces as `Evidence(evidence_type="topology")` — no canonical-payload break. Adversarial layer extends to `shared_memory` and `broadcast_channels` with a new `peer_coercion` regex family and a peer-authority check on undeclared senders. Recovery layer adds cascade detection over `peer_score_history` (T-CASCADE) and a `peer_quarantine` capability. Governance rule `GOV-004` now gates on topology member count instead of a synthetic action type that no adapter produced. Six new canonical events: `topology_declared`, `topology_change`, `peer_message`, `shared_memory_write`, `broadcast`, `task_started`. CrewAI semantic fix: tasks no longer map to `subagent_start` — that fires only on real `AgentExecutionStartedEvent`s now.
+**v0.8.0 — Multi-agent topology (current).** New `AgentTopology` core type (immutable snapshots with deterministic `content_hash`) modeling the in-process multi-agent system across `HUB_SPOKE` / `HIERARCHICAL_DAG` / `PEER_TO_PEER` / `GROUP_CHAT` shapes. Every framework with multi-agent primitives (Agno teams, CrewAI crews, Bedrock collaborators, AutoGen GroupChat, Google ADK workflow agents, LangGraph supervisor/swarm, OpenAI Agents handoffs) declares its topology at the right discovery point; Claude Agent SDK stays single-agent by framework design. Topology surfaces as `Evidence(evidence_type="topology")` — no canonical-payload break. Adversarial layer extends to `shared_memory` and `broadcast_channels` with a new `peer_coercion` regex family and a peer-authority check on undeclared senders. Recovery layer adds cascade detection over `peer_score_history` (T-CASCADE) and a `peer_quarantine` capability. Cortical layer gains **per-role behavioural baselines** — `BaselineStore` keyed by `(agent_id, role)` with backward-compat fallback to pre-v0.8 entries — catching the role-drift attack (T-ROLE-DRIFT) where a compromised member starts behaving outside its declared role. Governance rule `GOV-004` now gates on topology member count instead of a synthetic action type that no adapter produced. Six new canonical events: `topology_declared`, `topology_change`, `peer_message`, `shared_memory_write`, `broadcast`, `task_started`. CrewAI semantic fix: tasks no longer map to `subagent_start` — that fires only on real `AgentExecutionStartedEvent`s now (`legacy_task_mapping=True` shim for one cycle). **Full TypeScript multi-agent parity**: `@agentegrity/client` ships `AgentTopology` / `Evidence` types with cross-runtime SHA-256 hash compatibility (TS and Python produce the same digest for structurally identical topologies); the LangChain / OpenAI Agents / CrewAI / Google ADK JS adapters declare topology from their framework's multi-agent primitives.
 
 **v0.9.0 — Federation + fleet (next).** `FederationLayer` at pipeline position 0 producing topology context the existing layers consume. `Coordination Integrity` property at default weight 0.0 (rebalanced to ~0.10-0.15 in v0.9.1). `KeyProvider` Protocol with multi-agent signatures + per-agent attestation chains (pattern b). Fleet aggregator for population posture formalizing the glossary's "Agentegrity Posture."
 
