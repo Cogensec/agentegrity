@@ -89,21 +89,69 @@ class AgnoAdapter(_BaseAdapter):
         calls are captured regardless of which member runs them. All
         members share this one adapter, so the attestation chain is
         unified across the whole team.
+
+        v0.8: also declares an :class:`AgentTopology` of kind
+        ``HUB_SPOKE`` (leader + members) to the adapter via
+        ``set_topology()`` so the four-layer pipeline sees the
+        topology and the chain commits to it via
+        ``Evidence(evidence_type="topology")``.
         """
+        from agentegrity.core.topology import (
+            AgentMember,
+            AgentRole,
+            AgentTopology,
+            TopologyKind,
+        )
+
         self._attach_hooks(team, is_team_member=False)
         members = getattr(team, "members", None)
+
+        leader_id = str(getattr(team, "name", "") or id(team))
+        leader_member = AgentMember(
+            agent_id=leader_id,
+            name=leader_id,
+            role=AgentRole.LEADER,
+            capabilities=("tool_use",),
+        )
+
         if callable(members):
             # Agno allows a callable that returns members at runtime; we
             # can't enumerate those statically. Tool hooks on the leader
             # still capture their tool calls; only subagent_* lifecycle
-            # events are missed for dynamically-produced members.
+            # events are missed for dynamically-produced members. We
+            # still declare a single-member topology so layers see at
+            # least the leader; per-member additions are surfaced via
+            # subagent_start events at runtime.
             logger.info(
                 "agno team uses a callable members provider; subagent_* "
                 "lifecycle events are only attached to statically-listed members."
             )
+            topology = AgentTopology(
+                kind=TopologyKind.HUB_SPOKE,
+                members=(leader_member,),
+                comm_channels=frozenset({"peer_messages"}),
+            )
+            self.set_topology(topology, my_role=AgentRole.LEADER)
             return team
+
+        member_models: list[AgentMember] = [leader_member]
         for member in members or []:
             self._attach_hooks(member, is_team_member=True)
+            member_id = str(getattr(member, "name", "") or id(member))
+            member_models.append(AgentMember(
+                agent_id=member_id,
+                name=member_id,
+                role=AgentRole.MEMBER,
+                parent_id=leader_id,
+                capabilities=("tool_use",),
+            ))
+
+        topology = AgentTopology(
+            kind=TopologyKind.HUB_SPOKE,
+            members=tuple(member_models),
+            comm_channels=frozenset({"peer_messages"}),
+        )
+        self.set_topology(topology, my_role=AgentRole.LEADER)
         return team
 
     # --- Hook construction ---

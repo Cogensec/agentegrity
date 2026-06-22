@@ -54,6 +54,10 @@ def stub_crewai_events(monkeypatch: pytest.MonkeyPatch) -> _FakeBus:
 
     class ToolUsageErrorEvent: ...
 
+    class AgentExecutionStartedEvent: ...
+
+    class AgentExecutionCompletedEvent: ...
+
     bus = _FakeBus()
 
     events.CrewKickoffStartedEvent = CrewKickoffStartedEvent  # type: ignore[attr-defined]
@@ -62,6 +66,8 @@ def stub_crewai_events(monkeypatch: pytest.MonkeyPatch) -> _FakeBus:
     events.ToolUsageStartedEvent = ToolUsageStartedEvent  # type: ignore[attr-defined]
     events.ToolUsageFinishedEvent = ToolUsageFinishedEvent  # type: ignore[attr-defined]
     events.ToolUsageErrorEvent = ToolUsageErrorEvent  # type: ignore[attr-defined]
+    events.AgentExecutionStartedEvent = AgentExecutionStartedEvent  # type: ignore[attr-defined]
+    events.AgentExecutionCompletedEvent = AgentExecutionCompletedEvent  # type: ignore[attr-defined]
     events.crewai_event_bus = bus  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "crewai", pkg)
