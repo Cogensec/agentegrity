@@ -24,7 +24,13 @@ from agentegrity.layers.checkpoint import (
 
 logger = logging.getLogger("agentegrity.recovery")
 
-RECOVERY_CAPABILITIES = {"state_restore", "checkpoint", "rollback", "session_reset"}
+RECOVERY_CAPABILITIES = {
+    "state_restore",
+    "checkpoint",
+    "rollback",
+    "session_reset",
+    "peer_quarantine",  # v0.8: multi-agent — isolate a compromised peer.
+}
 
 
 @dataclass
@@ -42,6 +48,10 @@ class RecoveryAssessment:
     recovery_capabilities_present: list[str] = field(default_factory=list)
     checkpoint_count: int = 0
     last_checkpoint_id: str | None = None
+    # v0.8 multi-agent extensions
+    cascade_compromise_suspected: bool = False
+    degrading_peer_ids: list[str] = field(default_factory=list)
+    quarantine_capable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +66,9 @@ class RecoveryAssessment:
             "recovery_capabilities_present": self.recovery_capabilities_present,
             "checkpoint_count": self.checkpoint_count,
             "last_checkpoint_id": self.last_checkpoint_id,
+            "cascade_compromise_suspected": self.cascade_compromise_suspected,
+            "degrading_peer_ids": self.degrading_peer_ids,
+            "quarantine_capable": self.quarantine_capable,
         }
 
 
@@ -124,6 +137,12 @@ class RecoveryLayer:
             action = "alert"
         elif not assessment.chain_intact:
             action = "escalate"
+        elif assessment.cascade_compromise_suspected:
+            # T-CASCADE: even if THIS agent's own metrics are fine,
+            # correlated peer degradation is a signal something is
+            # propagating. Escalate to alert so a human can decide
+            # whether to quarantine.
+            action = "alert"
         elif passed:
             action = "pass"
         else:
@@ -171,6 +190,13 @@ class RecoveryLayer:
         chain_score, chain_intact, chain_len = self._check_chain()
         scores.append(chain_score)
 
+        # 5. v0.8 multi-agent: cascade detection over peer score
+        #    history. T-CASCADE — correlated degradation across two
+        #    or more peers is signal that compromise is propagating.
+        cascade_suspected, degrading_peers = self._check_cascade(context)
+
+        quarantine_capable = "peer_quarantine" in caps
+
         composite = sum(scores) / len(scores) if scores else 0.0
 
         checkpoint_count = (
@@ -189,7 +215,50 @@ class RecoveryLayer:
             recovery_capabilities_present=caps,
             checkpoint_count=checkpoint_count,
             last_checkpoint_id=self._last_checkpoint_id,
+            cascade_compromise_suspected=cascade_suspected,
+            degrading_peer_ids=degrading_peers,
+            quarantine_capable=quarantine_capable,
         )
+
+    def _check_cascade(
+        self, context: dict[str, Any]
+    ) -> tuple[bool, list[str]]:
+        """Detect correlated degradation across peers (T-CASCADE).
+
+        Reads ``peer_score_history`` from the topology context. A
+        peer is "degrading" when its score trend over the
+        degradation window drops by more than the configured
+        threshold (matches the single-agent sustained-degradation
+        check). Two or more degrading peers signals a potential
+        cascade.
+        """
+        topo_ctx = context.get("topology_context") or {}
+        peer_history = topo_ctx.get("peer_score_history") or {}
+        if not isinstance(peer_history, dict):
+            return False, []
+
+        degrading: list[str] = []
+        for peer_id, history in peer_history.items():
+            if not isinstance(history, list) or len(history) < self._degradation_window:
+                continue
+            window = history[-self._degradation_window:]
+            drop = max(window) - min(window)
+            # The drop must end downward (recent < older). If the
+            # window's first half median is higher than the second
+            # half median by more than threshold, the trend is down.
+            half = len(window) // 2
+            if half == 0:
+                continue
+            first_half_max = max(window[:half])
+            second_half_min = min(window[half:])
+            if (
+                drop >= self._degradation_threshold
+                and second_half_min < first_half_max - self._degradation_threshold
+            ):
+                degrading.append(str(peer_id))
+
+        cascade = len(degrading) >= 2
+        return cascade, sorted(degrading)
 
     def _check_baseline(
         self, context: dict[str, Any]

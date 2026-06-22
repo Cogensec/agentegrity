@@ -306,7 +306,8 @@ class TestExtensionAPI:
     def test_default_taxonomy_size_stable(self):
         # If the taxonomy ever changes, this will fail and the maintainer
         # has to consciously update STATUS.md / CHANGELOG.
-        assert len(default_detector_patterns()) == 21
+        # v0.8 added 3 peer_coercion patterns for multi-agent support.
+        assert len(default_detector_patterns()) == 24
 
 
 class TestAggregation:

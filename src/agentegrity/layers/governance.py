@@ -157,11 +157,28 @@ def _rule_financial_threshold(
 def _rule_multi_agent_escalation(
     profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
-    """Require human oversight for multi-agent coordination actions."""
-    return (
+    """Require human oversight for multi-agent coordination with >3 agents.
+
+    v0.8: the rule now reads the topology context populated by
+    team-aware adapters (Agno team, Bedrock collaborators, CrewAI
+    crew, AutoGen group chat). Pre-v0.8 it fired only on a
+    synthetic ``action.type == "multi_agent_coordination"`` that no
+    adapter actually produced.
+
+    Backward compat: the old action-based path stays valid in
+    parallel — a caller can still trigger the rule by passing
+    ``action={"type": "multi_agent_coordination", "agent_count": ...}``.
+    """
+    legacy_match = (
         action.get("type") == "multi_agent_coordination"
         and action.get("agent_count", 0) > 3
     )
+    if legacy_match:
+        return True
+    topology_ctx = context.get("topology_context") or {}
+    topology = topology_ctx.get("topology") or {}
+    members = topology.get("members") or []
+    return len(members) > 3
 
 
 # Default policy sets
