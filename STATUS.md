@@ -49,17 +49,23 @@ this document is the operational version of it.
 
 ## Python Adapters (`src/agentegrity/<framework>.py`)
 
-| Adapter                           | Status | Notes |
-|-----------------------------------|:------:|-------|
-| `agentegrity.claude` (Claude Agent SDK) | ✅ | Five hook points: Harness, Tools, Sandbox, Session, Orchestration. |
-| `agentegrity.langchain` (LangChain + LangGraph) | ✅ | Single adapter covers both via callback-handler propagation. |
-| `agentegrity.openai_agents` | ✅ | Hooks via the official `openai-agents` Python SDK. |
-| `agentegrity.crewai` | ✅ | Event-bus subscription (crewai 1.x; subscribes via `crewai.events`). |
-| `agentegrity.google_adk` | ✅ | Google Agent Development Kit. Observation-only: ADK `before_*` callbacks expose no veto mechanism, so `enforce=True` records block decisions but cannot prevent tool calls (warns at construction). |
+All eight adapters inherit from `_BaseAdapter` (`adapters/base.py`),
+share the eight canonical event types (extended to fourteen in v0.8
+with multi-agent additions), and feed the same evaluator +
+attestation chain. The **v0.8 Topology** column shows the
+`TopologyKind` each adapter declares — Claude SDK is correctly
+single-agent at the framework level.
 
-All five inherit from `_BaseAdapter` (`adapters/base.py`), share the
-seven canonical event types, and feed the same evaluator + attestation
-chain.
+| Adapter                | Status | v0.8 Topology | Enforcement | Notes |
+|------------------------|:------:|:-------------:|:-----------:|-------|
+| `agentegrity.claude` (Claude Agent SDK) | ✅ | n/a (single-agent) | ✅ deny via hook return | Eight hook surfaces including `SubagentStart` / `SubagentStop`; flows through base orphan-stop detection. Claude SDK has no multi-agent topology primitive — pinning test asserts no topology is ever declared. |
+| `agentegrity.langchain` (LangChain + LangGraph) | ✅ | HIERARCHICAL_DAG (supervisor) / PEER_TO_PEER (swarm) | ✅ via callback handler return | Single adapter covers both LangChain Runnables (single-agent) and LangGraph compiled graphs. `instrument_graph` introspects `graph.get_graph()` to detect supervisor nodes; falls back to single-agent on introspection failure. |
+| `agentegrity.openai_agents` (OpenAI Agents SDK) | ✅ | PEER_TO_PEER (incremental) | ✅ via RunHooks return | `on_agent_start` seeds a single-member topology; each `on_handoff(from, to)` appends the handoff target as a PEER via `topology_change`. |
+| `agentegrity.crewai` (CrewAI 1.x) | ✅ | HUB_SPOKE (sequential) / HIERARCHICAL_DAG (hierarchical) | ✅ via event-bus deny | Event-bus subscription (`crewai.events`). v0.8 semantic fix: `TaskStartedEvent` → new `task_started` event; real `AgentExecution*` events drive `subagent_start/stop`. `legacy_task_mapping=True` restores v0.7 behavior with DeprecationWarning (one-cycle escape hatch). |
+| `agentegrity.google_adk` (Google ADK) | ✅ | HIERARCHICAL_DAG when `sub_agents` present | 🟡 observation-only | ADK `before_*` callbacks expose no veto mechanism. `instrument` walks `sub_agents` of `SequentialAgent` / `ParallelAgent` / `LoopAgent` workflow agents; plain `Agent` stays single-agent. |
+| `agentegrity.autogen` (Microsoft AutoGen) | ✅ | GROUP_CHAT (incremental from OTel) | 🟡 observation-only | OpenTelemetry `SpanProcessor` consuming GenAI semconv spans. Root `invoke_agent` span seeds a single-member GROUP_CHAT; nested spans grow it via `topology_change`. Lazily seeds if root span is sampled out. Honest limitations: GroupChat broadcasts surface as N spans not 1; relayed_conversation_history is not visible to the SpanProcessor. |
+| `agentegrity.agno` (Agno 2.x) | ✅ | HUB_SPOKE | ✅ via `StopAgentRun` | `instrument_team()` reads `team.members` and declares topology with team as LEADER, members as MEMBER. Callable members provider declares leader-only topology + runtime additions. Real enforcement (StopAgentRun is the only AgentRunException subclass FunctionCall.execute re-raises). |
+| `agentegrity.bedrock_agents` (AWS Bedrock Agents) | ✅ | HUB_SPOKE (incremental) | ✅ Strands path / 🟡 boto3 path | Two surfaces, one adapter. `instrument_strands` registers Strands hooks with real `event.cancel_tool` enforcement; seeds HUB_SPOKE with supervisor. `wrap_client` patches `bedrock-agent-runtime.invoke_agent` (observation-only, traces post-hoc); collaborators discovered in trace stream grow topology via `topology_change`. |
 
 ## TypeScript Packages (`clients/typescript/packages/`)
 
@@ -82,8 +88,9 @@ chain.
 | `spec/layers/cortical-layer.md`      |   ✅   | Normative. |
 | `spec/layers/governance-layer.md`    |   ✅   | Normative. |
 | `spec/layers/recovery-layer.md`      |   🧪   | Newly added in v0.5.3-Unreleased; conformance section subject to revision. |
-| `spec/properties/*.md`               |   ✅   | Per-property normative docs (AC / EP / VA / decision-provenance). |
+| `spec/properties/*.md`               |   ✅   | Per-property normative docs (AC / EP / VA / decision-provenance / multi-agent-extensions). |
 | `spec/properties/decision-provenance.md` | 🟡  | Introduced in v0.7. Schema + verification path are normative; Tier B/A capture is reserved for future adapter-specific deliberation surfaces (Claude reasoning streams, OpenAI Responses reasoning content). |
+| `spec/properties/multi-agent-extensions.md` | 🟡 | Introduced in v0.8. Normative addendum describing how AC / EP / VA / RI extend under multi-agent semantics: peer-authority and peer-coercion under AC; multi-agent-emergence drift under EP; cross-agent attestation linking under VA; cascade detection and peer-quarantine under RI. The new property + layer (Coordination Integrity / FederationLayer) is reserved for v0.9. |
 | `schemas/exporter/*.json`            |   ✅   | JSON Schema for `event`, `session_start`, `session_end`, `common`. |
 | `schemas/openapi.yaml`               |   ✅   | OpenAPI 3.1 description of the exporter wire format. |
 
@@ -92,13 +99,13 @@ chain.
 | Capability                           | Status | Notes |
 |--------------------------------------|:------:|-------|
 | Lint (`ruff`)                        |   ✅   | Clean. |
-| Type check (`mypy --strict`)         |   ✅   | 27 source files, zero issues. |
-| Python tests                         |   ✅   | 147 tests, all green. |
+| Type check (`mypy --strict`)         |   ✅   | 40 source files, zero issues. |
+| Python tests                         |   ✅   | 581 tests, all green. |
 | TypeScript build / typecheck / test  |   ✅   | All 7 packages green via `bun run`. |
 | CI matrix (Python 3.10/3.12, Node 18/20/22) | ✅ | `.github/workflows/ci.yml`. |
 | Version-parity gate                  |   ✅   | `scripts/check_versions.py` (Python) + `scripts/check-versions.ts` (TS) wired into CI. |
 | Release workflow                     |   ✅   | `.github/workflows/release.yml` publishes Python wheel + npm matrix. |
-| Conformance test suite (Python adapters) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (81 tests; 10 invariants × 8 adapters + registry sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
+| Conformance test suite (Python adapters) | ✅ | `tests/test_adapter_conformance.py` runs the same canonical event stream + lifecycle assertions across every shipped adapter (91 tests; 12 invariants × 8 adapters + 2 non-parametrized multi-agent invariants: `test_topology_populated_when_multi_agent` for the seven multi-agent-capable adapters and `test_no_topology_for_single_agent_framework` pinning Claude SDK + registry sentinel). New adapters add one line to `ADAPTER_CLASSES` and inherit the entire matrix. |
 | Conformance test suite (TS packages)   | ✅ | `clients/typescript/test/cross-package-conformance.test.ts` is the TS mirror — 49 tests across 6 packages (claude-sdk / langchain / openai-agents / crewai / google-adk / vercel-ai), driving the same shared-core seam (`adapter()`) through the same canonical event stream and pinning the same parity invariants. The new suite caught two real bugs in `@agentegrity/client` on first run: missing `adapterName` field, no `registerExporter` deduplication. Both fixed in the same commit. |
 | Performance budget                     | ✅ | `tests/test_perf_budget.py` (run via `pytest -m benchmark`) measures 200-iteration p95 latency for each layer in isolation and the full default pipeline. Calibrated ceilings: 50 ms per-layer, 100 ms full-pipeline. Currently measured: per-layer p95 0.01-0.20 ms, pipeline p95 0.23 ms (250-5000x cushion before LLM-backed paths land). Per-layer + pipeline budgets pinned in metadata-sentinel tests so a maintainer can't silently raise them. |
 | Detection benchmark suite            |   ✅   | `pytest -m benchmark` runs the in-repo synthetic suite (~30 attacks + ~30 benign across 6 attack families) with calibrated thresholds (TPR ≥ 0.95, FPR ≤ 0.05, F1 ≥ 0.95, plus per-family floor: every family must register at least one TP). Loader stubs for PINT / AgentDojo / InjecAgent auto-skip when their `AGENTEGRITY_BENCH_*` env var is unset, so cron can plug in real datasets without touching CI defaults. `scripts/run_benchmarks.py [--all]` prints a markdown report and exits non-zero on regression. **Real-world numbers published below.** |
