@@ -12,7 +12,17 @@ export type EventType =
   | "stop"
   | "subagent_start"
   | "subagent_stop"
-  | "pre_compact";
+  | "pre_compact"
+  // v0.8: multi-agent canonical events
+  | "topology_declared"
+  | "topology_change"
+  | "peer_message"
+  | "shared_memory_write"
+  | "broadcast"
+  | "task_started"
+  // emitted by `_BaseAdapter._handle_subagent_stop` when a stop fires
+  // without a matching start (T-ORPHAN-LIFECYCLE mitigation).
+  | "subagent_orphan";
 
 export interface AgentProfile {
   agent_id: string;

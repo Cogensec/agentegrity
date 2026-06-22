@@ -16,6 +16,11 @@
  */
 
 import { AgentegrityReporter, type ReporterOptions } from "./reporter.js";
+import {
+  AgentRole,
+  AgentTopology,
+  TopologyChange,
+} from "./topology.js";
 import type {
   AgentProfile,
   EventType,
@@ -65,6 +70,12 @@ export interface DefaultAdapter {
   readonly disabled: boolean;
   /** Running count of emitted events (for the session summary). */
   readonly eventCount: number;
+  /**
+   * Currently-declared multi-agent topology (v0.8). `null` until
+   * {@link setTopology} is called by a team-aware adapter. Single-agent
+   * adapters (claude-sdk, vercel-ai) never set this.
+   */
+  readonly topology: AgentTopology | null;
   /** Idempotent. Safe to call from framework hooks. */
   ensureStart(): Promise<void>;
   /** Emit a FrameworkEvent. Auto-starts. Fans out to registered exporters. */
@@ -77,6 +88,18 @@ export interface DefaultAdapter {
   registerExporter(exporter: SessionExporter): void;
   /** Snapshot summary for `report()` helpers. */
   getSummary(): SessionSummary;
+  /**
+   * Declare or update the in-process multi-agent topology this
+   * adapter participates in (v0.8).
+   *
+   * First call emits a `topology_declared` event. Subsequent calls
+   * with a structurally-distinct topology (different `contentHash`)
+   * emit `topology_change` with a {@link TopologyChange} diff in
+   * `data.change`. Structurally-identical re-sets are a no-op.
+   *
+   * Mirrors Python `_BaseAdapter.set_topology(topology, my_role)`.
+   */
+  setTopology(topology: AgentTopology, myRole?: AgentRole): Promise<void>;
 }
 
 function readEnv(name: string): string | undefined {
@@ -156,6 +179,8 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
   let started = false;
   let ended = false;
   let shutdownRegistered = false;
+  let topology: AgentTopology | null = null;
+  let myRole: AgentRole | null = null;
 
   const registerShutdown = () => {
     if (shutdownRegistered || disabled) return;
@@ -237,6 +262,42 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
       ended = false;
       eventCount = 0;
       evaluationCount = 0;
+      topology = null;
+      myRole = null;
+    },
+
+    get topology() {
+      return topology;
+    },
+
+    async setTopology(next: AgentTopology, role?: AgentRole): Promise<void> {
+      if (disabled) {
+        topology = next;
+        myRole = role ?? null;
+        return;
+      }
+      const previous = topology;
+      topology = next;
+      myRole = role ?? null;
+      if (previous === null) {
+        await api.emit({
+          event_type: "topology_declared",
+          data: { topology: next.toDict(), my_role: myRole },
+        });
+        return;
+      }
+      if (previous.contentHash() === next.contentHash()) {
+        return; // structurally identical; no-op
+      }
+      const change = TopologyChange.between(previous, next);
+      await api.emit({
+        event_type: "topology_change",
+        data: {
+          change: change.toDict(),
+          topology: next.toDict(),
+          my_role: myRole,
+        },
+      });
     },
 
     registerExporter(exporter) {

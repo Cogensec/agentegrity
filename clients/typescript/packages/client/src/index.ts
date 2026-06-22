@@ -28,3 +28,17 @@ export type {
   SessionStartPayload,
   SessionSummary,
 } from "./types.js";
+// v0.8: multi-agent
+export {
+  AgentMember,
+  AgentRole,
+  AgentTopology,
+  TopologyChange,
+  TopologyKind,
+} from "./topology.js";
+export type {
+  AgentMemberInit,
+  AgentTopologyInit,
+  TopologyChangeData,
+} from "./topology.js";
+export type { Evidence, EvidenceType } from "./evidence.js";
