@@ -275,3 +275,56 @@ describe("workspace adapter registry stability", () => {
     );
   });
 });
+
+// ---- v0.8 multi-agent invariants ----
+
+// Adapters that declare topology when given a multi-agent primitive.
+// Mirrors Python's per-adapter Phase 4 work. Claude SDK and Vercel
+// AI SDK are correctly single-agent at the framework level.
+const MULTI_AGENT_CAPABLE = new Set([
+  "langchain",
+  "openai_agents",
+  "crewai",
+  "google_adk",
+]);
+
+const SINGLE_AGENT_BY_DESIGN = new Set(["claude", "vercel_ai"]);
+
+describe("v0.8 multi-agent: topology declaration", () => {
+  afterEach(() => {
+    for (const { module } of ADAPTER_MODULES) {
+      module.reset();
+    }
+  });
+
+  for (const { expectedName, module } of ADAPTER_MODULES) {
+    if (!SINGLE_AGENT_BY_DESIGN.has(expectedName)) continue;
+    test(`${expectedName} stays single-agent (no topology declared)`, async () => {
+      // Drive the canonical event stream — these adapters should
+      // never declare a topology. The DefaultAdapter.topology
+      // getter must remain null.
+      await drive(module);
+      const ad = module.adapter() as { topology?: unknown };
+      expect(ad.topology ?? null).toBeNull();
+    });
+  }
+
+  test(
+    "multi-agent-capable adapters expose the setTopology API",
+    () => {
+      for (const { expectedName, module } of ADAPTER_MODULES) {
+        if (!MULTI_AGENT_CAPABLE.has(expectedName)) continue;
+        const ad = module.adapter() as {
+          setTopology?: (...args: unknown[]) => Promise<void>;
+          topology?: unknown;
+        };
+        expect(typeof ad.setTopology).toBe("function");
+        // Until a multi-agent primitive is provided (graph / crew /
+        // sub_agents / handoff), topology is null. The invariant
+        // here is that the API surface exists, not that any
+        // particular adapter auto-declares.
+        expect(ad.topology ?? null).toBeNull();
+      }
+    },
+  );
+});
