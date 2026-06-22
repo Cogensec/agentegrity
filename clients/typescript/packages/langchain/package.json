@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/langchain",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Zero-config agentegrity adapter for LangChain JS and LangGraph JS. Mirrors the Python agentegrity.langchain module.",
   "license": "Apache-2.0",
   "type": "module",
@@ -8,36 +8,56 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "AGENTEGRITY_OFFLINE=1 node --test --import tsx src/*.test.ts",
     "clean": "rm -rf dist"
   },
-  "keywords": ["agentegrity", "langchain", "langgraph", "agent", "security", "observability"],
+  "keywords": [
+    "agentegrity",
+    "langchain",
+    "langgraph",
+    "agent",
+    "security",
+    "observability"
+  ],
   "dependencies": {
-    "@agentegrity/client": "0.7.0"
+    "@agentegrity/client": "0.8.0"
   },
   "peerDependencies": {
     "@langchain/core": ">=0.3.0"
   },
   "peerDependenciesMeta": {
-    "@langchain/core": { "optional": true }
+    "@langchain/core": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "typescript": "^5.4.0",
     "tsx": "^4.7.0",
     "@types/node": "^20.0.0"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "homepage": "https://github.com/cogensec/agentegrity/tree/main/clients/typescript/packages/langchain",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cogensec/agentegrity.git",
     "directory": "clients/typescript/packages/langchain"
   },
-  "bugs": { "url": "https://github.com/cogensec/agentegrity/issues" }
+  "bugs": {
+    "url": "https://github.com/cogensec/agentegrity/issues"
+  }
 }

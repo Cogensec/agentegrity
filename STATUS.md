@@ -29,7 +29,8 @@ this document is the operational version of it.
 | `evaluator.IntegrityEvaluator`             |   ✅   | Sync four-layer pipeline; composite scoring with configurable `PropertyWeights`; fail-fast on `block`. |
 | `evaluator.AsyncIntegrityEvaluator`        |   ✅   | Runs independent layers via `asyncio.gather` when `fail_fast=False`. Wraps sync layers via `asyncio.to_thread`. |
 | `attestation.AttestationRecord`            |   ✅   | Ed25519 signing via `cryptography`, deterministic JSON canonicalization, real SHA-256 content hash (was process-salted Python `hash()` pre-v0.7). Carries `record_kind` discriminator so the same chain can hold both attestations and decision records. |
-| `attestation.AttestationChain`             |   ✅   | Heterogeneous chain holding both `AttestationRecord` and `DecisionRecord`; `verify_chain()` covers hash linkage; `verify_chain_detailed()` reports broken index + kind; `to_json()`/`from_json()` round-trip; `verify_decision_links()` validates attestation→decision Evidence pointers. |
+| `attestation.AttestationChain`             |   ✅   | Heterogeneous chain holding both `AttestationRecord` and `DecisionRecord`; `verify_chain()` covers hash linkage; `verify_chain_detailed()` reports broken index + kind; `to_json()`/`from_json()` round-trip; `verify_decision_links()` validates attestation→decision Evidence pointers; `verify_cross_agent_links()` v0.8 stub validates peer Evidence (full v0.9 with KeyProvider). |
+| `core.topology.AgentTopology` (v0.8+)      |   ✅   | Immutable in-process multi-agent topology snapshot. `HUB_SPOKE` / `HIERARCHICAL_DAG` / `PEER_TO_PEER` / `GROUP_CHAT` kinds; `AgentRole` enum (LEADER/MEMBER/SUPERVISOR/WORKER/PEER); frozen dataclasses with deterministic SHA-256 `content_hash()` across processes. Mutations produce new snapshots via `with_member` / `without_member` / `with_channels`. Surfaces on the chain as `Evidence(evidence_type="topology")` — no canonical-payload break. |
 | `attestation.ChainedRecord`                |   ✅   | Structural Protocol both record kinds satisfy; chain operations are kind-agnostic. |
 | `decision.DecisionRecord`                  |   ✅   | Signed, hash-chained record of one decision the agent made at a boundary. Mirrors `AttestationRecord` shape so both kinds live in one chain. `CaptureTier` enum quantifies how much rationale was captured (Tier C in production today; A/B unlock as adapter-specific deliberation surfaces ship). |
 | `monitor.IntegrityMonitor`                 |   ✅   | `@guard` decorator, violation callbacks, four `ViolationAction` modes. Optional `signing_key=` signs every attestation; `record_decision()` mirrors the adapter-side capture API for non-framework agents. |
@@ -179,12 +180,18 @@ picks the same env var up from repository variables.
 
 ---
 
-**Last reviewed:** v0.7.0 (2026-06-08). v0.7 ships the adapter batch
-(Bedrock Agents, Agno, AutoGen, CrewAI 1.x compat) plus
-**decision-provenance**: signed, hash-chained `DecisionRecord`s
-captured at the three decision boundaries (`pre_tool_use` / `stop` /
-`subagent_start`), Evidence-linked back from each subsequent
-`AttestationRecord`, verifiable via `python -m agentegrity
-verify-decisions <chain.json>`. This file is the source of truth for
-"what's done." Update it in the same commit that ships a status
-change.
+**Last reviewed:** v0.8.0 (2026-06-08). v0.8 ships **multi-agent
+topology**: `AgentTopology` immutable snapshots declared by all 7
+multi-agent-capable adapters (Agno teams, CrewAI crews, Bedrock
+collaborators, AutoGen GroupChat, Google ADK workflow agents,
+LangGraph supervisor/swarm, OpenAI Agents handoffs); Claude Agent
+SDK stays single-agent by framework design. Topology surfaces on
+the chain as `Evidence(evidence_type="topology")` (no canonical-
+payload break). AC/RI/Governance layers gain multi-agent extensions:
+peer-authority + peer-coercion patterns + shared_memory/broadcast
+scanning (AC), cascade detection over peer_score_history + peer_quarantine
+capability (RI), GOV-004 finally gates on topology member count.
+CrewAI semantic fix: tasks ≠ subagents (legacy_task_mapping=True for
+one-cycle compat).
+This file is the source of truth for "what's done." Update it in the
+same commit that ships a status change.
