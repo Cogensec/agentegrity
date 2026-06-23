@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentegrity.core.attestation import AttestationRecord
 from agentegrity.core.profile import (
     AgentProfile,
@@ -170,6 +172,7 @@ class TestGoogleADKWorkflowTopology:
         assert adapter._buffer.topology is None
 
 
+@pytest.mark.usefixtures("stub_langchain")
 class TestLangGraphTopologyIntrospection:
     def test_supervisor_pattern_declares_hierarchical_dag(self):
         from agentegrity.adapters.langchain import LangChainAdapter
