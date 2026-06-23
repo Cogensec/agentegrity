@@ -72,8 +72,10 @@ def test_strands_invocation_lifecycle_emits_prompt_and_stop() -> None:
     _drive_registry(agent.hooks, after)
 
     types = [e.event_type for e in adapter.events]
-    assert types == ["user_prompt_submit", "stop"]
-    assert adapter.events[0].data["prompt"] == "find files"
+    # instrument_strands seeds a HUB_SPOKE topology with the agent as
+    # supervisor, so topology_declared leads the stream.
+    assert types == ["topology_declared", "user_prompt_submit", "stop"]
+    assert adapter.events[1].data["prompt"] == "find files"
 
 
 def test_strands_tool_lifecycle_success_emits_pre_and_post() -> None:
@@ -99,8 +101,9 @@ def test_strands_tool_lifecycle_success_emits_pre_and_post() -> None:
     _drive_registry(agent.hooks, after)
 
     types = [e.event_type for e in adapter.events]
-    assert types == ["pre_tool_use", "post_tool_use"]
-    assert adapter.events[0].data["tool_name"] == "search"
+    # topology_declared from instrument_strands precedes the tool events.
+    assert types == ["topology_declared", "pre_tool_use", "post_tool_use"]
+    assert adapter.events[1].data["tool_name"] == "search"
 
 
 def test_strands_tool_failure_emits_post_tool_use_failure() -> None:
@@ -131,7 +134,8 @@ def test_strands_tool_failure_emits_post_tool_use_failure() -> None:
     )
 
     types = [e.event_type for e in adapter.events]
-    assert types == ["pre_tool_use", "post_tool_use_failure"]
+    # topology_declared from instrument_strands precedes the tool events.
+    assert types == ["topology_declared", "pre_tool_use", "post_tool_use_failure"]
     failure = adapter.events[-1]
     assert "kaboom" in failure.data["error"]
 
@@ -279,8 +283,16 @@ def test_boto3_trace_stream_maps_full_lifecycle() -> None:
     assert raw[-1] == {"chunk": {"bytes": b"final answer"}}
 
     types = [e.event_type for e in adapter.events]
-    assert types == ["user_prompt_submit", "pre_tool_use", "post_tool_use", "stop"]
-    pre = adapter.events[1]
+    # wrap_client seeds a HUB_SPOKE supervisor topology on invoke_agent,
+    # so topology_declared leads the stream.
+    assert types == [
+        "topology_declared",
+        "user_prompt_submit",
+        "pre_tool_use",
+        "post_tool_use",
+        "stop",
+    ]
+    pre = adapter.events[2]
     assert pre.data["tool_name"] == "list_dir"
 
 
@@ -300,12 +312,14 @@ def test_boto3_failure_trace_emits_post_tool_use_failure() -> None:
     list(resp["completion"])
 
     types = [e.event_type for e in adapter.events]
+    # wrap_client seeds the supervisor topology, so topology_declared leads.
     assert types == [
+        "topology_declared",
         "user_prompt_submit",
         "post_tool_use_failure",
         "stop",
     ]
-    assert adapter.events[1].data["error"] == "kaboom"
+    assert adapter.events[2].data["error"] == "kaboom"
 
 
 def test_boto3_collaborator_invocations_emit_subagent_events() -> None:
@@ -345,8 +359,12 @@ def test_boto3_collaborator_invocations_emit_subagent_events() -> None:
     list(resp["completion"])
 
     types = [e.event_type for e in adapter.events]
+    # topology_declared seeds the supervisor; the collaborator observed in
+    # the trace stream grows the topology by one member (topology_change).
     assert types == [
+        "topology_declared",
         "user_prompt_submit",
+        "topology_change",
         "subagent_start",
         "subagent_stop",
         "stop",
@@ -373,8 +391,9 @@ def test_boto3_partial_stream_still_fires_stop() -> None:
     completion.close()
 
     types = [e.event_type for e in adapter.events]
-    # user_prompt_submit at start, stop fires from the generator's finally
-    # with the "stream_terminated_early" reason.
-    assert types == ["user_prompt_submit", "stop"]
+    # topology_declared seeds the supervisor on invoke; user_prompt_submit
+    # at start, stop fires from the generator's finally with the
+    # "stream_terminated_early" reason.
+    assert types == ["topology_declared", "user_prompt_submit", "stop"]
     stop = adapter.events[-1]
     assert stop.data.get("reason") == "stream_terminated_early"
