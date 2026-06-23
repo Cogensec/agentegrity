@@ -18,12 +18,73 @@
  */
 
 import {
+  AgentMember,
+  AgentRole,
+  AgentTopology,
+  TopologyKind,
   createDefaultAdapter,
   type AgentProfile,
   type DefaultAdapter,
   type SessionExporter,
   type SessionSummary,
 } from "@agentegrity/client";
+
+/**
+ * Build and declare an AgentTopology from a CrewAI Crew (v0.8).
+ *
+ * crew.process === "sequential" → HUB_SPOKE with the first agent as
+ * LEADER (structural convention for parent_id linkage, not crew
+ * semantics). "hierarchical" → HIERARCHICAL_DAG with SUPERVISOR /
+ * WORKER roles.
+ *
+ * Mirrors Python `agentegrity.crewai.CrewAIAdapter._declare_topology`.
+ */
+export function declareCrewTopology(crew: unknown, ad: DefaultAdapter): void {
+  const c = (crew ?? {}) as { agents?: unknown[]; process?: string };
+  const agents = Array.isArray(c.agents) ? c.agents : [];
+  if (agents.length === 0) return;
+  const process = String(c.process ?? "sequential").toLowerCase();
+  const kind = process.includes("hierarch")
+    ? TopologyKind.HIERARCHICAL_DAG
+    : TopologyKind.HUB_SPOKE;
+
+  const idOf = (a: unknown): string => {
+    const x = (a ?? {}) as { role?: string; id?: string };
+    return String(x.role ?? x.id ?? "agent");
+  };
+
+  const leaderId = idOf(agents[0]);
+  const members: AgentMember[] = [];
+  for (let i = 0; i < agents.length; i++) {
+    const id = idOf(agents[i]);
+    if (i === 0) {
+      members.push(
+        new AgentMember({
+          agentId: id,
+          name: id,
+          role: AgentRole.LEADER,
+          capabilities: ["tool_use"],
+        }),
+      );
+    } else {
+      members.push(
+        new AgentMember({
+          agentId: id,
+          name: id,
+          role: kind === TopologyKind.HUB_SPOKE ? AgentRole.MEMBER : AgentRole.WORKER,
+          parentId: leaderId,
+          capabilities: ["tool_use"],
+        }),
+      );
+    }
+  }
+  const topology = new AgentTopology({
+    kind,
+    members,
+    commChannels: new Set(["peer_messages"]),
+  });
+  void ad.setTopology(topology, AgentRole.LEADER);
+}
 
 let _default: DefaultAdapter | null = null;
 
@@ -37,6 +98,13 @@ function defaultAdapter(): DefaultAdapter {
 export interface InstrumentOptions {
   profile?: Partial<AgentProfile>;
   enforce?: boolean;
+  /**
+   * Optional CrewAI Crew instance. When passed, the adapter walks
+   * `crew.agents` at instrument time and declares an
+   * AgentTopology so the chain commits to the structure
+   * (v0.8 multi-agent). Without this, the adapter stays single-agent.
+   */
+  crew?: unknown;
 }
 
 export interface CrewAIEventBridge {
@@ -66,6 +134,10 @@ export function instrument(options: InstrumentOptions = {}): CrewAIEventBridge {
   const ad = options.profile
     ? createDefaultAdapter({ adapterName: "crewai", profile: options.profile })
     : defaultAdapter();
+
+  if (options.crew !== undefined) {
+    declareCrewTopology(options.crew, ad);
+  }
 
   const attached = new WeakSet<object>();
   // Serialize fire-and-forget emitter listeners so events reach the

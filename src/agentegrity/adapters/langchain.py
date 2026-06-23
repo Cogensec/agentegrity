@@ -28,10 +28,13 @@ Usage (LangGraph):
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import UUID
 
 from agentegrity.adapters.base import _BaseAdapter
+
+logger = logging.getLogger("agentegrity.adapters.langchain")
 
 
 class LangChainAdapter(_BaseAdapter):
@@ -163,7 +166,97 @@ class LangChainAdapter(_BaseAdapter):
         """Attach the agentegrity callback handler to a LangGraph compiled graph.
 
         LangGraph graphs use the same ``Runnable.with_config`` interface,
-        so this is functionally identical to ``instrument_chain`` but
-        documented separately for discoverability.
+        so the callback handler wiring is identical to
+        ``instrument_chain``.
+
+        v0.8: also introspects the compiled graph via ``graph.get_graph()``
+        to declare an :class:`AgentTopology` so the layers see the
+        multi-agent structure. Heuristic for kind: if a node named
+        ``"supervisor"`` exists, kind = HIERARCHICAL_DAG with supervisor +
+        workers; otherwise kind = PEER_TO_PEER with all nodes as peers
+        (covers the swarm pattern). If graph introspection fails (graph
+        is uncompiled, lacks ``get_graph``, or raises), falls back to
+        single-agent — no topology declaration.
         """
-        return self.instrument_chain(graph)
+        result = self.instrument_chain(graph)
+        try:
+            self._maybe_declare_graph_topology(graph)
+        except Exception as exc:
+            logger.warning(
+                "langchain instrument_graph could not introspect topology: %s",
+                exc,
+            )
+        return result
+
+    def _maybe_declare_graph_topology(self, graph: Any) -> None:
+        """Introspect a LangGraph compiled graph and declare topology.
+
+        LangGraph compiled graphs expose ``get_graph()`` returning a
+        ``Graph`` with ``nodes`` (dict). We walk node keys, skip the
+        builtin ``__start__`` / ``__end__`` sentinels, and produce
+        either a HIERARCHICAL_DAG (supervisor + workers) or
+        PEER_TO_PEER (swarm) topology.
+        """
+        get_graph = getattr(graph, "get_graph", None)
+        if not callable(get_graph):
+            return
+        graph_obj = get_graph()
+        nodes = getattr(graph_obj, "nodes", None)
+        if not nodes:
+            return
+
+        node_keys = [
+            k for k in nodes
+            if k not in ("__start__", "__end__") and not k.startswith("__")
+        ]
+        if not node_keys:
+            return
+
+        from agentegrity.core.topology import (
+            AgentMember,
+            AgentRole,
+            AgentTopology,
+            TopologyKind,
+        )
+
+        supervisor_key = None
+        for k in node_keys:
+            if k.lower() in ("supervisor", "supervisor_agent", "orchestrator"):
+                supervisor_key = k
+                break
+
+        if supervisor_key is not None:
+            kind = TopologyKind.HIERARCHICAL_DAG
+            members = [AgentMember(
+                agent_id=supervisor_key,
+                name=supervisor_key,
+                role=AgentRole.SUPERVISOR,
+                capabilities=("tool_use",),
+            )]
+            for k in node_keys:
+                if k == supervisor_key:
+                    continue
+                members.append(AgentMember(
+                    agent_id=k,
+                    name=k,
+                    role=AgentRole.WORKER,
+                    parent_id=supervisor_key,
+                    capabilities=("tool_use",),
+                ))
+            my_role = AgentRole.SUPERVISOR
+        else:
+            kind = TopologyKind.PEER_TO_PEER
+            members = [AgentMember(
+                agent_id=k,
+                name=k,
+                role=AgentRole.PEER,
+                capabilities=("tool_use",),
+            ) for k in node_keys]
+            my_role = AgentRole.PEER
+
+        topology = AgentTopology(
+            kind=kind,
+            members=tuple(members),
+            comm_channels=frozenset({"peer_messages"}),
+        )
+        self.set_topology(topology, my_role=my_role)

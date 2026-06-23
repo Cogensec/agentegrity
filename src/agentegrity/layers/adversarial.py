@@ -47,7 +47,8 @@ class DetectorPattern:
 
     Patterns are organized by ``threat_type`` (a coarse taxonomy:
     prompt_injection, jailbreak, role_confusion, data_exfiltration,
-    system_prompt_extraction, prompt_obfuscation, tool_manipulation).
+    system_prompt_extraction, prompt_obfuscation, tool_manipulation,
+    peer_coercion, peer_authority).
     Each pattern carries its own ``severity`` and ``confidence`` so the
     aggregate :class:`ThreatAssessment` for a channel can summarise the
     most severe match without losing per-pattern provenance.
@@ -293,6 +294,35 @@ _PROMPT_OBFUSCATION_PATTERNS: list[DetectorPattern] = [
         severity=0.50,
         confidence=0.50,
         description="Repeated zero-width characters (possible instruction smuggling)",
+    ),
+    # ---- peer_coercion (v0.8 multi-agent) ----
+    # Targets the cascade-compromise threat where one compromised peer
+    # tries to redirect the others. Fires against peer_messages,
+    # shared_memory, and broadcast_channels — all three multi_agent_comm
+    # channels.
+    DetectorPattern(
+        name="peer_coerce_do_as_i_say",
+        pattern=r"\b(do\s+as\s+I\s+say|follow\s+(?:my|these)\s+(?:instructions?|orders?|commands?))\b",
+        threat_type="peer_coercion",
+        severity=0.70,
+        confidence=0.75,
+        description="Peer instructing this agent to follow its directives directly",
+    ),
+    DetectorPattern(
+        name="peer_coerce_override_instructions",
+        pattern=r"\b(override|disregard|forget)\s+(?:your|the|previous)\s+(?:instructions?|orders?|directives?|system\s+prompt)\b",
+        threat_type="peer_coercion",
+        severity=0.75,
+        confidence=0.80,
+        description="Peer attempting to override the receiving agent's instructions",
+    ),
+    DetectorPattern(
+        name="peer_coerce_impersonate_user",
+        pattern=r"\b(respond|reply|act)\s+(?:to\s+me)?\s*as\s+(?:if\s+)?I\s+(?:am|were|was)\s+(?:the\s+)?user\b",
+        threat_type="peer_coercion",
+        severity=0.70,
+        confidence=0.75,
+        description="Peer instructing the agent to treat it as the user",
     ),
 ]
 
@@ -551,6 +581,12 @@ class AdversarialLayer:
         #    context). Every CrewAI / multi-agent framework with an
         #    inter-agent message bus is vulnerable to this; scanning
         #    the channel makes the attack visible to the layer.
+        topology_ctx = context.get("topology_context") or {}
+        topology_dict = topology_ctx.get("topology") or {}
+        declared_member_ids = {
+            m.get("agent_id") for m in topology_dict.get("members", [])
+        }
+
         for message in context.get("peer_messages", []) or []:
             if isinstance(message, dict):
                 content = (
@@ -561,6 +597,74 @@ class AdversarialLayer:
                 if isinstance(content, str) and content:
                     threats.extend(
                         self._scan_text(content, channel="peer_messages")
+                    )
+                # Peer-authority check (v0.8 multi-agent extension):
+                # if we know the declared topology, a peer message
+                # from an agent NOT in the topology is suspicious.
+                sender = message.get("sender_agent_id")
+                if (
+                    declared_member_ids
+                    and sender
+                    and sender not in declared_member_ids
+                ):
+                    threats.append(
+                        ThreatAssessment(
+                            channel="peer_messages",
+                            threat_type="peer_authority",
+                            severity=0.70,
+                            confidence=0.85,
+                            description=(
+                                f"Peer message from {sender!r} not in declared "
+                                f"topology"
+                            ),
+                            indicators=[f"undeclared_sender:{sender}"],
+                        )
+                    )
+
+        # 6. Shared memory (v0.8 multi-agent extension). A peer wrote
+        #    into shared memory this agent reads; writer_agent_id is
+        #    captured at ingest so attack attribution is correct
+        #    (T-SHARED-MEM-MISATTRIB).
+        for entry in topology_ctx.get("shared_memory", []) or []:
+            if isinstance(entry, dict):
+                content = (
+                    entry.get("content")
+                    or entry.get("summary")
+                    or entry.get("text")
+                )
+                if isinstance(content, str) and content:
+                    threats.extend(
+                        self._scan_text(content, channel="shared_memory")
+                    )
+
+        # 7. Broadcast channels (v0.8 multi-agent extension). Same
+        #    pattern as peer_messages — scan content + flag undeclared
+        #    senders.
+        for entry in topology_ctx.get("broadcast_messages", []) or []:
+            if isinstance(entry, dict):
+                content = entry.get("content") or entry.get("text")
+                if isinstance(content, str) and content:
+                    threats.extend(
+                        self._scan_text(content, channel="broadcast_channels")
+                    )
+                sender = entry.get("sender_agent_id")
+                if (
+                    declared_member_ids
+                    and sender
+                    and sender not in declared_member_ids
+                ):
+                    threats.append(
+                        ThreatAssessment(
+                            channel="broadcast_channels",
+                            threat_type="peer_authority",
+                            severity=0.70,
+                            confidence=0.85,
+                            description=(
+                                f"Broadcast from {sender!r} not in declared "
+                                f"topology"
+                            ),
+                            indicators=[f"undeclared_broadcaster:{sender}"],
+                        )
                     )
 
         return threats

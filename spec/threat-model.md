@@ -1,7 +1,7 @@
 # Agentegrity Framework — Threat Model
 
 **Status:** Normative
-**Version:** 0.7.0
+**Version:** 0.8.0
 **Last reviewed:** 2026-06-08
 
 ---
@@ -71,7 +71,7 @@ Trust boundaries (each of these is an attack surface):
 | # | Boundary | Description |
 |---|---|---|
 | TB-1 | Framework SDK ↔ Adapter | The framework SDK can pass arbitrary content into adapter event handlers. |
-| TB-2 | LLM ↔ Adapter | LLM output (tool responses, retrieved documents, peer messages) reaches the AdversarialLayer's scanned channels. |
+| TB-2 | LLM ↔ Adapter | LLM output (tool responses, retrieved documents, peer messages, shared memory entries, broadcast channel messages) reaches the AdversarialLayer's scanned channels. The three multi-agent channels (`peer_messages`, `shared_memory`, `broadcast_channels`) were added to AC scanning in v0.8. |
 | TB-3 | Adapter ↔ Layers | The four-layer evaluator runs in-process; trusted. |
 | TB-4 | Layers ↔ Persistence | Checkpoint and BaselineStore writes go to local disk or sqlite. |
 | TB-5 | Adapter ↔ Exporter | Session data (start, events, end) is fanned out to caller-registered exporters and the HTTP reporter. |
@@ -329,6 +329,136 @@ credential could publish a malicious release.
 - **Operator must.** Pin exact versions, verify SLSA provenance once
   it's re-enabled, and use `pip install agentegrity==0.6.0
   --require-hashes` against a lock file.
+
+### 2.7 Multi-agent threats (v0.8)
+
+The threats below are intrinsic to in-process multi-agent
+deployments. Mitigations live in the layer extensions documented
+in [`spec/properties/multi-agent-extensions.md`](properties/multi-agent-extensions.md).
+
+**T-CASCADE — Cascade compromise via peer channels.** A
+compromised agent in a multi-agent topology redirects others
+through `peer_messages`, `shared_memory`, or `broadcast_channels`.
+This is the glossary's "Cascade Compromise" failure mode given
+operational threat-model status.
+
+- **Mitigation.** AC scans all three multi-agent channels (was
+  `peer_messages` only pre-v0.8) with the existing regex taxonomy
+  + LLM classifier, plus the new `peer_coercion` family targeting
+  the cascade-redirect pattern specifically. RI's cascade
+  detection reads `peer_score_history` from the topology context
+  and sets `cascade_compromise_suspected` when two or more peers
+  are correlating downward over the degradation window; the
+  Recovery action escalates to `alert` even if this agent's own
+  metrics are healthy, so a human can decide whether to
+  quarantine.
+- **Residual.** Single-peer compromise without correlated peer
+  degradation does not trip cascade detection. Detection scales
+  with topology breadth (more peers → more signal). Mitigation
+  for two-agent topologies is necessarily weaker; the layer
+  documents this honestly.
+- **Operator must.** Declare `peer_quarantine` in the profile's
+  recovery_capabilities when the deployment has an out-of-band
+  mechanism to isolate a compromised peer; operationalize the
+  alert.
+
+**T-ROLE-DRIFT — Agent in declared role acts outside role.** A
+compromised member in a hub-spoke or hierarchical topology
+declared as e.g. `data_extractor` starts behaving like
+`task_planner` — escalating its position in the system.
+
+- **Mitigation today.** v0.8 captures `my_role` in the context
+  buffer and surfaces it in `topology_context`; the
+  CorticalLayer's drift metric can use it.
+- **Mitigation reserved for v0.9.** Per-role behavioural baselines
+  (`BaselineStore` keyed by `(agent_id, role)`) so drift
+  detection compares observed action distribution against the
+  role's baseline rather than the agent's own. Requires
+  BaselineStore key extension + migration story for existing
+  single-agent baselines.
+- **Residual.** Until per-role baselines land in v0.9, role drift
+  is observable but not scored as a distinct signal. The
+  declared role IS captured in chain evidence (so audit can
+  reason about it post-hoc); runtime detection is the v0.9
+  improvement.
+
+**T-SHARED-MEM-MISATTRIB — Shared-memory poisoning attributed
+to the reader, not the writer.** A peer writes attack content
+into shared memory; a different agent reads it. Naive
+instrumentation would attribute the resulting threat to the
+reader (the agent whose context contains the content), losing
+the writer's identity.
+
+- **Mitigation.** `shared_memory_write` events carry
+  `writer_agent_id` at ingest time. `_BaseAdapter`'s
+  `_handle_shared_memory_write` records the writer; the
+  AdversarialLayer's shared-memory scan tags threats with the
+  writer in the indicator field. Spec defines this attribution
+  as normative — implementations that observe shared memory
+  without writer identity SHOULD omit the entry rather than
+  misattribute.
+- **Residual.** Adapters whose underlying framework discards
+  writer identity at the source (e.g., raw shared dicts) cannot
+  reconstruct it. Such adapters log a warning instead of
+  emitting a misattributed event.
+
+**T-ORPHAN-LIFECYCLE — Lifecycle event dropped by sampling.**
+OTel-backed adapters (notably AutoGen) sample spans. A
+`subagent_start` span can be sampled out while the
+`subagent_stop` span fires, leaving the chain with a stop
+event for an agent it never saw start.
+
+- **Mitigation.** `_handle_subagent_stop` checks
+  `_buffer.subagent_starts_seen` and emits a structured
+  `subagent_orphan` event with `reason="stop_without_start"`
+  when the start is missing, plus a WARNING log. The chain
+  records the orphan; downstream monitoring can query for
+  orphan events.
+- **Residual.** A pair where both events are sampled out is
+  silently invisible to this adapter. OTel sampling
+  configuration is upstream; agentegrity has no way to require
+  unsampled spans.
+
+**T-BROADCAST-AMP — Broadcast amplification of evaluation
+load.** A broadcast on a channel + N subscribed members yields
+N evaluations per broadcast. T-D2 (already in this document)
+covers exporter fan-out amplification; broadcasts amplify it
+within the evaluator itself.
+
+- **Mitigation.** `_handle_broadcast` caps
+  `_buffer.broadcast_messages` at 1000 entries per session. On
+  overflow, the adapter emits a `broadcast_overflow` event
+  recording the dropped event and the cap. Subsequent broadcasts
+  within the same session are dropped silently with no
+  evaluation work performed.
+- **Residual.** The 1000 cap is a defensive ceiling, not a
+  per-second rate limit. A burst of < 1000 broadcasts in a
+  single session can still amplify load. Operators with very
+  high broadcast volume should treat the `broadcast_overflow`
+  event as a degradation signal.
+
+**T-TOPO-FALSE — Forged topology declaration.** An adversary
+controlling the adapter wrapper (post-import attack) calls
+`set_topology(...)` with a topology that includes peers that
+don't exist, or omits real peers, to manipulate the
+peer-authority check.
+
+- **Mitigation today.** v0.8 captures the topology declaration
+  in the chain as `Evidence(evidence_type="topology")` with a
+  deterministic `content_hash`; tampering with the topology
+  after the attestation invalidates the chain via the existing
+  `verify_chain` mechanism (Evidence hash mismatch).
+- **Mitigation reserved for v0.9.** `KeyProvider` Protocol with
+  per-agent keys lets a verifier require that the topology
+  declaration be co-signed by each declared member's key.
+  Without per-agent identity (v0.8's single shared key per
+  topology) the adversary controlling the wrapper still
+  controls the signing key.
+- **Residual.** Until KeyProvider lands in v0.9, topology
+  declarations are only as trustworthy as the adapter wrapper.
+  Operators MUST treat the topology-declaration call as a
+  trust-boundary action and only invoke it from a code path
+  that cannot be replaced by adversary code at runtime.
 
 ---
 

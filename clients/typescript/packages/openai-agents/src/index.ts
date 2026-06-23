@@ -15,12 +15,63 @@
  */
 
 import {
+  AgentMember,
+  AgentRole,
+  AgentTopology,
+  TopologyKind,
   createDefaultAdapter,
   type AgentProfile,
   type DefaultAdapter,
   type SessionExporter,
   type SessionSummary,
 } from "@agentegrity/client";
+
+function agentIdOf(agent: unknown): string {
+  const a = agent as { name?: string; id?: string } | null;
+  return String(a?.name ?? a?.id ?? "agent");
+}
+
+async function seedTopologyFromInitial(
+  ad: DefaultAdapter,
+  agentId: string,
+): Promise<void> {
+  if (ad.topology !== null) {
+    if (ad.topology.member(agentId) !== null) return;
+  }
+  const member = new AgentMember({
+    agentId,
+    name: agentId,
+    role: AgentRole.PEER,
+    capabilities: ["tool_use"],
+  });
+  const topology = new AgentTopology({
+    kind: TopologyKind.PEER_TO_PEER,
+    members: [member],
+    commChannels: new Set(["peer_messages"]),
+  });
+  await ad.setTopology(topology, AgentRole.PEER);
+}
+
+async function addHandoffTarget(
+  ad: DefaultAdapter,
+  agentId: string,
+): Promise<void> {
+  const existing = ad.topology;
+  if (existing === null) {
+    await seedTopologyFromInitial(ad, agentId);
+    return;
+  }
+  if (existing.member(agentId) !== null) return;
+  const next = existing.withMember(
+    new AgentMember({
+      agentId,
+      name: agentId,
+      role: AgentRole.PEER,
+      capabilities: ["tool_use"],
+    }),
+  );
+  await ad.setTopology(next, AgentRole.PEER);
+}
 
 let _default: DefaultAdapter | null = null;
 
@@ -48,6 +99,9 @@ export function runHooks(options: RunHooksOptions = {}): Record<string, unknown>
 
   return {
     onAgentStart: async (_ctx: unknown, agentInfo: unknown) => {
+      // v0.8: seed a PEER_TO_PEER topology with this agent as the
+      // single PEER. Handoffs grow the topology incrementally.
+      await seedTopologyFromInitial(ad, agentIdOf(agentInfo));
       await ad.emit({
         event_type: "user_prompt_submit",
         data: { agent: agentInfo },
@@ -79,9 +133,13 @@ export function runHooks(options: RunHooksOptions = {}): Record<string, unknown>
       });
     },
     onHandoff: async (_ctx: unknown, fromAgent: unknown, toAgent: unknown) => {
+      // v0.8: append the handoff target as a PEER, growing the
+      // PEER_TO_PEER topology and emitting topology_change.
+      const toId = agentIdOf(toAgent);
+      await addHandoffTarget(ad, toId);
       await ad.emit({
         event_type: "subagent_start",
-        data: { from: fromAgent, to: toAgent },
+        data: { from: fromAgent, to: toAgent, handoff_to: toId },
       });
     },
   };

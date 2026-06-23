@@ -127,6 +127,27 @@ A discriminator over how much rationale was actually captured in a `Decision Rec
 **Decision Boundary** †
 A point in the agent's execution where it commits to an externally-visible action. The Agentegrity adapter base captures three: **pre_tool_use** (the agent decided to invoke a tool), **stop** (the agent decided to return a final output), and **subagent_start** (a child agent began running; honest lifecycle attestation rather than a primary decision, because the parent's decision to delegate happened earlier). Capture is fail-open: a failure in the capture path emits a structured `capture_failure` event but does not halt the agent.
 
+**Agent Topology** †
+An immutable snapshot of an in-process multi-agent system: which agents participate, what `Agent Role` each holds, what comm channels connect them, and what kind of structure they form. Immutability is load-bearing: `Recovery Integrity` needs deterministic restore targets and attestations must commit to *which* topology version was live at evaluation time. Mutations produce a new snapshot with a new `content_hash`; the old snapshot is unchanged. Surfaces on the `AttestationChain` as `Evidence(evidence_type="topology")` so the chain commits to the structural shape without expanding the canonical payload schema.
+
+**Topology Kind** †
+One of four shapes the supported framework adapters expose: **HUB_SPOKE** (one orchestrator + N workers — CrewAI sequential crews, Agno teams in coordinator mode, AWS Bedrock supervisor with collaborators); **HIERARCHICAL_DAG** (arbitrary parent-child tree — LangGraph workflow supervisors, Google ADK SequentialAgent / ParallelAgent / LoopAgent compositions); **PEER_TO_PEER** (no orchestrator, handoffs between equals — LangGraph swarm, OpenAI Swarm, OpenAI Agents handoffs); **GROUP_CHAT** (dynamic membership with broadcast comms — AutoGen GroupChatManager-driven conversations).
+
+**Topology Snapshot** †
+A hashed point-in-time view of an `Agent Topology`. Each snapshot carries a `topology_id` (stable across the topology's lifetime) and a `content_hash` (changes on every structural mutation). A `Topology Change` event records the diff between two snapshots so an adapter that observes dynamic membership (Agno callable members provider, AutoGen incremental span discovery) can walk a chain of structural shifts.
+
+**Peer Authority** †
+The property that a peer message or broadcast originated from an agent declared in the receiving agent's topology. v0.8's `AdversarialLayer` fires a `peer_authority` threat (severity 0.70, confidence 0.85) when a message arrives from a `sender_agent_id` not in the declared topology. Silent when no topology is declared so single-agent deployments don't generate false positives.
+
+**Role Drift** †
+An agent's observed action distribution deviating from the behavioural baseline for its declared `Agent Role`. The single-agent analogue is `Behavioral Drift`. Role drift specifically targets the attack where a compromised member tries to escalate its position in the topology (e.g., a declared `data_extractor` starts acting like a `task_planner`). v0.8 captures the declared role in attestation evidence so role drift is auditable post-hoc; runtime detection via per-role baselines is reserved for v0.9.
+
+**Peer Quarantine** †
+A recovery capability declaring the system can isolate a compromised peer in a multi-agent topology. Listed in the agent profile's `recovery_capabilities`. v0.8's `RecoveryLayer` reports `quarantine_capable=True` when declared but does not act on it; v0.9's `FederationLayer` will use the capability to route around quarantined peers.
+
+**Subagent Orphan** †
+A `subagent_stop` event observed without a matching prior `subagent_start`, typically because an OTel-backed adapter (AutoGen) had its start span sampled out while the stop span survived. The base adapter detects orphans, emits a structured `subagent_orphan` event with `reason="stop_without_start"`, and logs a warning so monitoring can see the gap. Distinct from missing-stop (an unfinished session) — the orphan event names a specific reliability artifact of post-hoc tracing surfaces.
+
 ---
 
 ## Domain-Specific Concepts

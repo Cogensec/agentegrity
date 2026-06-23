@@ -138,4 +138,52 @@ class GoogleADKAdapter(_BaseAdapter):
                 "passed object is not a Google ADK Agent. "
                 "Install it with: pip install agentegrity[google-adk]"
             ) from exc
+
+        # v0.8: if the agent has sub_agents (SequentialAgent /
+        # ParallelAgent / LoopAgent), declare a HIERARCHICAL_DAG
+        # topology. Plain Agent without sub_agents stays single-agent.
+        self._maybe_declare_workflow_topology(agent)
         return agent
+
+    def _maybe_declare_workflow_topology(self, agent: Any) -> None:
+        """Walk a Google ADK workflow agent's sub_agents and declare a
+        HIERARCHICAL_DAG topology.
+
+        ``SequentialAgent`` / ``ParallelAgent`` / ``LoopAgent`` all
+        expose ``sub_agents``. A plain ``Agent`` does not — that case
+        is correctly single-agent and we skip declaration.
+        """
+        sub_agents = getattr(agent, "sub_agents", None)
+        if not sub_agents:
+            return
+
+        from agentegrity.core.topology import (
+            AgentMember,
+            AgentRole,
+            AgentTopology,
+            TopologyKind,
+        )
+
+        supervisor_id = str(getattr(agent, "name", None) or id(agent))
+        members: list[AgentMember] = [AgentMember(
+            agent_id=supervisor_id,
+            name=supervisor_id,
+            role=AgentRole.SUPERVISOR,
+            capabilities=("tool_use",),
+        )]
+        for sub in sub_agents:
+            sub_id = str(getattr(sub, "name", None) or id(sub))
+            members.append(AgentMember(
+                agent_id=sub_id,
+                name=sub_id,
+                role=AgentRole.WORKER,
+                parent_id=supervisor_id,
+                capabilities=("tool_use",),
+            ))
+
+        topology = AgentTopology(
+            kind=TopologyKind.HIERARCHICAL_DAG,
+            members=tuple(members),
+            comm_channels=frozenset(),
+        )
+        self.set_topology(topology, my_role=AgentRole.SUPERVISOR)

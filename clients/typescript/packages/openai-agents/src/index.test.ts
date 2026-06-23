@@ -27,11 +27,17 @@ test("lifecycle events forward to exporter in order", async () => {
   await h.onToolEnd!({}, {}, { name: "lookup" }, { hit: true });
   await h.onHandoff!({}, { name: "main" }, { name: "sub" });
   await h.onAgentFinish!({}, {}, { final: "done" });
+  // v0.8: onAgentStart seeds topology (emits topology_declared);
+  // onHandoff appends the target as a PEER (emits topology_change).
+  // Both events flow through the exporter alongside the existing
+  // lifecycle events.
   assert.deepEqual(seen, [
     "start",
+    "topology_declared",
     "user_prompt_submit",
     "pre_tool_use",
     "post_tool_use",
+    "topology_change",
     "subagent_start",
     "stop",
   ]);

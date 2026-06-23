@@ -23,12 +23,60 @@
  */
 
 import {
+  AgentMember,
+  AgentRole,
+  AgentTopology,
+  TopologyKind,
   createDefaultAdapter,
   type AgentProfile,
   type DefaultAdapter,
   type SessionExporter,
   type SessionSummary,
 } from "@agentegrity/client";
+
+/**
+ * Walk the ADK agent's sub_agents/subAgents at instrument time and
+ * declare a HIERARCHICAL_DAG topology. Plain Agent without
+ * sub_agents → no topology (correctly single-agent).
+ *
+ * Mirrors Python `agentegrity.google_adk.GoogleADKAdapter._maybe_declare_workflow_topology`.
+ */
+function maybeDeclareWorkflowTopology(
+  agent: { sub_agents?: unknown; subAgents?: unknown; name?: string; [k: string]: unknown },
+  ad: DefaultAdapter,
+): void {
+  const subAgents = (agent.subAgents ?? agent.sub_agents) as unknown[] | undefined;
+  if (!Array.isArray(subAgents) || subAgents.length === 0) return;
+
+  const supervisorId = String(agent.name ?? "workflow_agent");
+  const members: AgentMember[] = [
+    new AgentMember({
+      agentId: supervisorId,
+      name: supervisorId,
+      role: AgentRole.SUPERVISOR,
+      capabilities: ["tool_use"],
+    }),
+  ];
+  for (const sub of subAgents) {
+    const subRecord = (sub ?? {}) as { name?: string };
+    const subId = String(subRecord.name ?? "sub_agent");
+    members.push(
+      new AgentMember({
+        agentId: subId,
+        name: subId,
+        role: AgentRole.WORKER,
+        parentId: supervisorId,
+        capabilities: ["tool_use"],
+      }),
+    );
+  }
+  const topology = new AgentTopology({
+    kind: TopologyKind.HIERARCHICAL_DAG,
+    members,
+    commChannels: new Set(),
+  });
+  void ad.setTopology(topology, AgentRole.SUPERVISOR);
+}
 
 let _default: DefaultAdapter | null = null;
 
@@ -72,6 +120,12 @@ export function instrument(
   const ad = options.profile
     ? createDefaultAdapter({ adapterName: "google_adk", profile: options.profile })
     : defaultAdapter();
+
+  // v0.8: declare HIERARCHICAL_DAG topology when sub_agents present.
+  maybeDeclareWorkflowTopology(
+    agent as { sub_agents?: unknown; subAgents?: unknown; name?: string; [k: string]: unknown },
+    ad,
+  );
 
   if ((agent as { __agentegrityAttached?: boolean }).__agentegrityAttached) {
     return async () => {

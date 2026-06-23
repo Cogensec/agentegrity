@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentegrity.core.decision import DecisionRecord
+    from agentegrity.core.topology import AgentTopology, TopologyChange
 
 try:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -293,6 +294,57 @@ class AttestationChain:
         ok, _, _ = self.verify_chain_detailed()
         return ok
 
+    def verify_cross_agent_links(
+        self, peer_chains: dict[str, "AttestationChain"] | None = None
+    ) -> bool:
+        """Verify ``peer_message`` and ``handoff`` Evidence references
+        in this chain resolve to real records in peer chains.
+
+        In v0.8 this is a permissive stub returning ``True`` when no
+        peer chains are supplied. The full implementation lands in
+        v0.9 alongside the :class:`KeyProvider` Protocol and per-agent
+        chains (pattern b). The signature exists now so adapters can
+        wire it into their multi-agent verification path without
+        another API churn next release.
+
+        Parameters
+        ----------
+        peer_chains : dict[str, AttestationChain], optional
+            Map of ``agent_id`` to its chain. When provided, every
+            ``peer_message`` / ``handoff`` Evidence in this chain
+            must point at a real record in the corresponding peer
+            chain whose ``content_hash`` matches.
+        """
+        if peer_chains is None:
+            return True
+        for r in self._records:
+            if not isinstance(r, AttestationRecord):
+                continue
+            for ev in r.evidence:
+                if ev.evidence_type not in ("peer_message", "handoff"):
+                    continue
+                # The Evidence.source format for cross-agent links is
+                # "<peer_agent_id>:<record_id>" so we can find the
+                # right peer chain to walk.
+                if ":" not in ev.source:
+                    return False
+                peer_id, peer_record_id = ev.source.split(":", 1)
+                peer_chain = peer_chains.get(peer_id)
+                if peer_chain is None:
+                    return False
+                # Look for the referenced record in the peer chain.
+                matched = False
+                for peer_record in peer_chain.records:
+                    rid = getattr(peer_record, "record_id", None)
+                    if rid == peer_record_id:
+                        if peer_record.content_hash != ev.content_hash:
+                            return False
+                        matched = True
+                        break
+                if not matched:
+                    return False
+        return True
+
     def verify_decision_links(self) -> bool:
         """Verify every attestation's decision-type :class:`Evidence`
         entries point at unaltered :class:`DecisionRecord`\\s earlier
@@ -462,6 +514,8 @@ def build_attestation_record(
     previous_record_hash: str | None = None,
     signing_key: Any | None = None,
     recent_decisions: list["DecisionRecord"] | None = None,
+    topology: "AgentTopology | None" = None,
+    topology_change: "TopologyChange | None" = None,
 ) -> AttestationRecord:
     """Construct an :class:`AttestationRecord` from a profile + score.
 
@@ -488,6 +542,15 @@ def build_attestation_record(
         attestation. Each contributes an ``Evidence`` entry of type
         ``"decision"`` so the attestation cryptographically commits to
         the rationales that preceded it.
+    topology : AgentTopology, optional
+        The in-process multi-agent topology snapshot live at
+        evaluation time. Contributes an ``Evidence`` entry of type
+        ``"topology"`` so the attestation commits to the structural
+        shape the agent participated in.
+    topology_change : TopologyChange, optional
+        A diff against the previous topology snapshot, emitted when
+        the topology mutated since the last attestation. Contributes
+        an ``Evidence`` entry of type ``"topology_change"``.
     """
     evidence = [_layer_result_evidence(r) for r in score.layer_results]
     if recent_decisions:
@@ -498,6 +561,23 @@ def build_attestation_record(
                 content_hash=d.content_hash,
                 summary=f"{d.decision_point}: {d.capture_tier.value}",
             ))
+    if topology is not None:
+        evidence.append(Evidence(
+            evidence_type="topology",
+            source=topology.topology_id,
+            content_hash=topology.content_hash(),
+            summary=f"{topology.kind.value}: {len(topology.members)} members",
+        ))
+    if topology_change is not None:
+        evidence.append(Evidence(
+            evidence_type="topology_change",
+            source=topology_change.previous_topology_id,
+            content_hash=topology_change.new_content_hash,
+            summary=(
+                f"+{len(topology_change.added_members)} "
+                f"-{len(topology_change.removed_member_ids)} members"
+            ),
+        ))
     record = AttestationRecord(
         agent_id=profile.agent_id,
         integrity_score=score.to_dict(),

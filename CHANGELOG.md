@@ -8,6 +8,182 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [0.8.0] - 2026-06-08
+
+### Added
+- **Per-role behavioural baselines in `CorticalLayer`.** Catches the
+  role-drift attack where a compromised member acting in one
+  declared role (e.g., `data_extractor`) starts behaving like
+  another (e.g., `task_planner`). `BaselineStore` Protocol grows an
+  optional `role: str | None = None` parameter on `save` / `load` /
+  `delete` plus a new `list_keys()` method returning
+  `list[tuple[agent_id, role|None]]`. `CorticalLayer.evaluate` reads
+  the role from `context["topology_context"]["role"]` (populated by
+  team-aware adapters via `set_topology`). Backward-compatible:
+  pre-v0.8 baselines (saved without a role) silently serve
+  role-keyed lookups via `BaselineStore`-side fallback until a
+  role-specific entry is written. SQLite backend migrates the
+  pre-v0.8 schema in place on first v0.8 open. T-ROLE-DRIFT
+  mitigation in the threat model.
+- **TypeScript multi-agent parity** with the Python adapter
+  surface. `@agentegrity/client` ships `AgentTopology` /
+  `AgentMember` / `AgentRole` / `TopologyKind` / `TopologyChange`
+  immutable types plus `Evidence` / `EvidenceType` mirroring the
+  Python core. `DefaultAdapter.setTopology(topology, myRole?)` is
+  the canonical entry point — first call emits `topology_declared`,
+  subsequent structurally-distinct calls emit `topology_change`
+  with a `TopologyChange` diff. Cross-runtime SHA-256
+  `contentHash()` matches Python byte-for-byte (validated via
+  subprocess test). Six new canonical events in the `EventType`
+  union: `topology_declared`, `topology_change`, `peer_message`,
+  `shared_memory_write`, `broadcast`, `task_started`. Plus
+  `subagent_orphan` (T-ORPHAN-LIFECYCLE event). Four framework
+  adapters declare topology at the right discovery point:
+  `@agentegrity/langchain` (`instrumentGraph(graph)` walks
+  `graph.getGraph().nodes`), `@agentegrity/openai-agents`
+  (`onAgentStart` seeds PEER_TO_PEER; `onHandoff` grows
+  incrementally), `@agentegrity/crewai` (`instrument({ crew })`
+  walks `crew.agents`), `@agentegrity/google-adk` (`instrument(agent)`
+  walks `agent.subAgents`). Claude SDK and Vercel AI SDK stay
+  single-agent by framework design (pinning tests assert no
+  topology declaration). TS conformance suite gains two
+  multi-agent invariants: single-agent adapters MUST NOT declare a
+  topology; multi-agent-capable adapters MUST expose `setTopology`.
+  Test count: 117 (52 cross-package conformance + 65 per-package).
+- **Multi-agent topology as a first-class type.** New
+  `agentegrity.core.topology` module with `AgentTopology`,
+  `AgentMember`, `AgentRole` (`LEADER` / `MEMBER` / `SUPERVISOR` /
+  `WORKER` / `PEER`), `TopologyKind` (`HUB_SPOKE` /
+  `HIERARCHICAL_DAG` / `PEER_TO_PEER` / `GROUP_CHAT`), and
+  `TopologyChange`. Frozen dataclasses with deterministic
+  `content_hash()` (SHA-256 across processes). Mutations produce
+  new snapshots via `with_member` / `without_member` /
+  `with_channels`. Immutability is load-bearing — RI needs
+  deterministic restore targets, and attestation records commit
+  to which topology was live at evaluation time.
+- **Topology surfaces as `Evidence`, NOT as a canonical-payload
+  field.** Four new `evidence_type` values are non-breaking
+  additions to the existing list-of-Evidence field:
+  - `"topology"`: source = topology_id, content_hash =
+    topology.content_hash(). Emitted on every attestation when
+    a topology is set.
+  - `"topology_change"`: emitted when topology mutates. Source =
+    previous topology_id, content_hash = new
+    topology.content_hash(), summary = added/removed member
+    counts.
+  - `"peer_message"`: source = sender_agent_id, content_hash =
+    SHA-256 of message canonical, for cross-agent attestation
+    links.
+  - `"handoff"`: source = parent_agent_id, content_hash =
+    parent's DecisionRecord, for walking back to the handoff
+    boundary.
+- **Six new canonical events on `_BaseAdapter`** (existing 8 →
+  14): `topology_declared`, `topology_change`, `peer_message`,
+  `shared_memory_write` (with `writer_agent_id` for T-SHARED-MEM-
+  MISATTRIB attribution), `broadcast` (capped at 1000/session
+  per T-BROADCAST-AMP), `task_started`.
+- **`_BaseAdapter.set_topology(topology, my_role)`** API.
+  First call emits `topology_declared` + triggers an
+  attestation; subsequent calls with a structurally-distinct
+  topology emit `topology_change` + carry both Evidence types
+  on the next attestation. Structurally-identical re-set is a
+  no-op. Topology is sticky across subsequent evaluations.
+- **Orphan `subagent_stop` detection.** A stop without a
+  matching start (e.g., AutoGen OTel sampling drops the start
+  span) logs a warning and emits a structured `subagent_orphan`
+  event. T-ORPHAN-LIFECYCLE mitigation.
+- **`AttestationChain.verify_cross_agent_links(peer_chains)`**
+  stub. Validates `peer_message` / `handoff` Evidence sources
+  resolve to real records in supplied peer chains with matching
+  content_hash. Returns `True` permissively when no peer chains
+  supplied. Full implementation lands in v0.9 with `KeyProvider`.
+- **Adversarial layer extensions (AC)**:
+  - Scans `shared_memory` and `broadcast_channels` in addition
+    to today's `peer_messages`.
+  - New `peer_coercion` regex family (3 patterns): "do as I
+    say", "override your instructions", "respond as the user."
+    Targets cascade-compromise where a peer redirects others.
+    Default taxonomy 21 → 24 patterns.
+  - New `peer_authority` check: a peer message from an agent
+    NOT in the declared topology fires a threat (severity
+    0.70, confidence 0.85).
+- **Recovery layer extensions (RI)**:
+  - T-CASCADE detection over `peer_score_history`. Two or more
+    peers correlating downward over the degradation window sets
+    `cascade_compromise_suspected = True`. Action escalates to
+    `alert` EVEN IF this agent's own metrics are healthy.
+  - New `peer_quarantine` entry in `RECOVERY_CAPABILITIES`.
+    Declared in the profile → `RecoveryAssessment.quarantine_capable`
+    reports True.
+  - `RecoveryAssessment` gains
+    `cascade_compromise_suspected`, `degrading_peer_ids`,
+    `quarantine_capable`.
+- **Governance layer extension**: `GOV-004` (Multi-Agent
+  Escalation) was dead code pre-v0.8 (only fired on a synthetic
+  `action.type` no adapter produced). Now reads topology member
+  count from `topology_context.topology.members`; fires
+  REQUIRE_APPROVAL when > 3 members declared. Legacy
+  action-based path remains as a parallel trigger.
+- **Adapter uplift: topology declaration across 7 frameworks.**
+  Every adapter with multi-agent primitives declares an
+  `AgentTopology` at the right discovery point:
+  - **Agno** `instrument_team` → HUB_SPOKE from `team.members`,
+    leader + members linkage.
+  - **CrewAI** `subscribe(crew=...)` → HUB_SPOKE (sequential) /
+    HIERARCHICAL_DAG (hierarchical) from `crew.agents`.
+  - **AWS Bedrock** `wrap_client` + `instrument_strands` →
+    HUB_SPOKE seeded with the supervisor; collaborators
+    discovered in the trace stream grow the topology via
+    `topology_change`.
+  - **AutoGen** OTel SpanProcessor → GROUP_CHAT seeded on the
+    root `invoke_agent` span; nested spans add members
+    incrementally.
+  - **Google ADK** `instrument` → HIERARCHICAL_DAG when the
+    agent has `sub_agents` (SequentialAgent / ParallelAgent /
+    LoopAgent); plain Agent stays single-agent.
+  - **LangChain / LangGraph** `instrument_graph` → introspects
+    `graph.get_graph()`. Node named `supervisor` /
+    `supervisor_agent` / `orchestrator` → HIERARCHICAL_DAG;
+    otherwise → PEER_TO_PEER. Plain Runnables (instrument_chain)
+    stay single-agent.
+  - **OpenAI Agents** `run_hooks` → PEER_TO_PEER seeded on
+    `on_agent_start`; each `on_handoff` appends the target as a
+    PEER via `topology_change`.
+  - **Claude Agent SDK**: NOT modified. Single-agent by
+    framework design. Pinning test asserts no topology is ever
+    declared.
+
+### Changed
+- **CrewAI semantic fix (behavioral change)**: pre-v0.8,
+  `TaskStartedEvent` mapped to `subagent_start`. Tasks are NOT
+  agents in CrewAI's data model; this was a semantic bug.
+  v0.8 maps `TaskStartedEvent` to the new `task_started`
+  canonical event, and `AgentExecutionStartedEvent` /
+  `AgentExecutionCompletedEvent` to `subagent_start` /
+  `subagent_stop`. Real agent boundaries now drive real
+  subagent_* events. Subagent counts will change for operators
+  upgrading. Pass `legacy_task_mapping=True` to
+  `CrewAIAdapter.subscribe(...)` to keep v0.7 behavior; the
+  escape hatch emits a `DeprecationWarning` at subscribe and is
+  removed in v0.9.
+- **`_ContextBuffer.to_evaluation_context`** emits new
+  `topology_context` key when topology / peer_messages /
+  shared_memory / broadcast_messages are populated. Existing
+  `peer_messages` stays at the top level for backward compat
+  with the AdversarialLayer's pre-v0.8 access pattern.
+- **`AttestationChain.append`** preserves a preset
+  `chain_previous` when it matches the chain's expected
+  predecessor, raising `ValueError` on mismatch. Old default
+  (silently overwriting None) preserved for callers that don't
+  preset.
+
+### Fixed
+- Cortical, Governance, and Recovery layers can now read
+  multi-agent context that the AdversarialLayer was already
+  consuming. Closes the detection gap where
+  `_ContextBuffer.subagents` was captured but never surfaced to
+  layer evaluation.
+
 ## [0.7.0] - 2026-06-08
 
 ### Added
@@ -438,7 +614,8 @@ in beta until the v1.0 stability criteria documented in
 - Three working examples (`basic_evaluation.py`,
   `runtime_monitoring.py`, `custom_validator.py`).
 
-[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.8.0
 [0.7.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.7.0
 [0.6.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.6.0
 [0.5.3]: https://github.com/cogensec/agentegrity/releases/tag/v0.5.3

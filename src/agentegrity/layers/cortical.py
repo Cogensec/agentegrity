@@ -220,12 +220,23 @@ class CorticalLayer:
         """
         ctx = context or {}
 
+        # v0.8: per-role baselines for multi-agent topologies. The
+        # role (if any) flows through topology_context, populated by
+        # team-aware adapters. ``None`` is the legacy single-agent
+        # key; BaselineStore.load falls back to it transparently
+        # when no role-specific entry exists.
+        topology_ctx = ctx.get("topology_context") or {}
+        my_role = topology_ctx.get("role")
+        self._last_role = my_role  # consumed by update_baseline save
+
         # Initialize baseline if needed. If a baseline_store is wired,
-        # try to read through for this agent_id before falling back to
-        # a fresh in-memory baseline.
+        # try to read through for this (agent_id, role) before falling
+        # back to a fresh in-memory baseline.
         if self._baseline is None:
             if self._baseline_store is not None:
-                stored = self._baseline_store.load(profile.agent_id)
+                stored = self._baseline_store.load(
+                    profile.agent_id, role=my_role
+                )
                 if stored is not None:
                     self._baseline = stored
             if self._baseline is None:
@@ -606,7 +617,11 @@ class CorticalLayer:
             tool_dist[tool] = tool_dist.get(tool, 0) + 1
 
         if self._baseline_store is not None:
-            self._baseline_store.save(self._baseline)
+            # v0.8: write through under the role most recently seen
+            # in evaluate(). update_baseline called before any
+            # evaluate (rare) saves under role=None.
+            role = getattr(self, "_last_role", None)
+            self._baseline_store.save(self._baseline, role=role)
 
     def __repr__(self) -> str:
         return (

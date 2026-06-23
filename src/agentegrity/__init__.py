@@ -5,7 +5,7 @@ Agentegrity defines what it means for an autonomous AI agent to be whole:
 adversarially coherent, environmentally portable, and verifiably assured.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 from agentegrity.adapters.base import FrameworkEvent, SessionExporter
 from agentegrity.agno import instrument as agno_instrument
@@ -33,6 +33,13 @@ from agentegrity.core.decision import (
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.monitor import IntegrityMonitor
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.core.topology import (
+    AgentMember,
+    AgentRole,
+    AgentTopology,
+    TopologyChange,
+    TopologyKind,
+)
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
 from agentegrity.google_adk import instrument as google_adk_instrument
@@ -76,6 +83,11 @@ __all__ = [
     "DecisionInput",
     "RejectedAlternative",
     "CaptureTier",
+    "AgentTopology",
+    "AgentMember",
+    "AgentRole",
+    "TopologyKind",
+    "TopologyChange",
     "IntegrityMonitor",
     "AgentegrityClient",
     "FrameworkEvent",
