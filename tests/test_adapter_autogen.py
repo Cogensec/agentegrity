@@ -60,8 +60,10 @@ def test_root_invoke_agent_emits_user_prompt_submit_and_stop() -> None:
         pass
 
     event_types = [e.event_type for e in adapter.events]
-    assert event_types == ["user_prompt_submit", "stop"]
-    assert adapter.evaluation_count == 2  # both events run evaluation
+    # The root invoke_agent span seeds a GROUP_CHAT topology, so
+    # topology_declared leads the stream.
+    assert event_types == ["topology_declared", "user_prompt_submit", "stop"]
+    assert adapter.evaluation_count == 3  # topology_declared + both lifecycle events
     assert adapter.attestation_chain.verify_chain()
 
 
@@ -86,8 +88,12 @@ def test_nested_invoke_agent_emits_subagent_events() -> None:
             pass
 
     event_types = [e.event_type for e in adapter.events]
+    # Root span seeds the GROUP_CHAT topology (topology_declared); the
+    # nested child invoke_agent grows it by one member (topology_change).
     assert event_types == [
+        "topology_declared",
         "user_prompt_submit",
+        "topology_change",
         "subagent_start",
         "subagent_stop",
         "stop",

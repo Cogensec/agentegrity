@@ -218,7 +218,11 @@ def test_instrument_team_marks_members_as_subagents() -> None:
     team.post_hooks[0](_FakeRunOutput("top done"))
 
     types = [e.event_type for e in adapter.events]
+    # instrument_team seeds the team topology up front, so the first
+    # event is topology_declared (all members declared at once -> no
+    # incremental topology_change).
     assert types == [
+        "topology_declared",
         "user_prompt_submit",
         "subagent_start",
         "subagent_stop",
