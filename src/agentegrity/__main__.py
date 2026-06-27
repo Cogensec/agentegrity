@@ -73,12 +73,33 @@ def _doctor() -> int:
     return 0 if score.composite > 0 else 1
 
 
-def _verify_decisions(path: str) -> int:
+def _load_trusted_keys(paths: list[str]) -> set[bytes] | None:
+    """Read raw Ed25519 public keys (hex, one per file) into a pinned set.
+
+    Returns None when no anchor files are supplied, which signals the
+    caller that verification is unanchored (the chain may self-vouch).
+    """
+    if not paths:
+        return None
+    keys: set[bytes] = set()
+    for p in paths:
+        keys.add(bytes.fromhex(Path(p).read_text().strip()))
+    return keys
+
+
+def _verify_decisions(path: str, trusted_key_paths: list[str]) -> int:
     """Load a chain from a JSON file and report its verification status.
 
-    Walks both ``verify_chain()`` and ``verify_decision_links()``, then
-    prints a per-record table (kind | decision_point | tier | signed |
-    verified). Exits non-zero on any failure.
+    Walks ``verify_chain()`` (hash linkage), ``verify_decision_links()``,
+    and ``verify_signatures()`` (cryptographic authenticity), then prints
+    a per-record table. Exits non-zero on any failure.
+
+    Hash linkage alone is NOT tamper-evidence: ``content_hash`` is an
+    unkeyed SHA-256, so an attacker who edits a record can recompute the
+    links and pass ``verify_chain()``. A clean exit therefore requires
+    signatures to verify too. Pass ``--trusted-key`` to pin the signing
+    key — without it, a chain forged with an attacker-generated key
+    self-verifies.
     """
     try:
         text = Path(path).read_text()
@@ -92,19 +113,31 @@ def _verify_decisions(path: str) -> int:
         print(f"error: cannot parse chain JSON: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        trusted_keys = _load_trusted_keys(trusted_key_paths)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot read trusted key: {exc}", file=sys.stderr)
+        return 2
+
     chain_ok, broken_idx, broken_kind = chain.verify_chain_detailed()
     links_ok = chain.verify_decision_links()
+    sigs_ok, sig_bad_idx = chain.verify_signatures(trusted_keys)
 
     print(f"agentegrity {__version__} — verify-decisions {path}")
     print(f"  records:        {len(chain)}")
     if chain_ok:
-        print("  chain valid:    yes")
+        print("  chain linkage:  yes (hash-linked)")
     else:
         print(
-            f"  chain valid:    NO (broken at index {broken_idx}, "
+            f"  chain linkage:  NO (broken at index {broken_idx}, "
             f"kind={broken_kind})"
         )
     print(f"  decision links: {'yes' if links_ok else 'NO'}")
+    anchor = "pinned" if trusted_keys is not None else "UNPINNED (self-vouched)"
+    if sigs_ok:
+        print(f"  signatures:     yes [{anchor}]")
+    else:
+        print(f"  signatures:     NO (record {sig_bad_idx}) [{anchor}]")
     print()
     print(
         f"  {'idx':>3}  {'kind':<12}  {'boundary/score':<22}  "
@@ -112,10 +145,13 @@ def _verify_decisions(path: str) -> int:
     )
     for i, r in enumerate(chain.records):
         signed = "yes" if r.signature is not None else "no"
-        try:
-            verified = "yes" if r.signature is None or r.verify() else "NO"
-        except ImportError:
-            verified = "n/a"
+        if r.signature is None:
+            verified = "unsigned"
+        else:
+            try:
+                verified = "yes" if r.verify() else "NO"
+            except ImportError:
+                verified = "n/a"
         if isinstance(r, DecisionRecord):
             boundary = r.decision_point
             tier = r.capture_tier.value
@@ -127,7 +163,7 @@ def _verify_decisions(path: str) -> int:
             f"{tier:<8}  {signed:<6}  {verified:<8}"
         )
 
-    if chain_ok and links_ok:
+    if chain_ok and links_ok and sigs_ok:
         return 0
     return 1
 
@@ -139,17 +175,36 @@ def main(argv: list[str] | None = None) -> int:
     if args[0] == "doctor":
         return _doctor()
     if args[0] == "verify-decisions":
-        if len(args) < 2:
-            print("usage: python -m agentegrity verify-decisions <chain.json>",
-                  file=sys.stderr)
+        rest = args[1:]
+        trusted_key_paths = []
+        positional = []
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--trusted-key":
+                if i + 1 >= len(rest):
+                    print("error: --trusted-key requires a path", file=sys.stderr)
+                    return 2
+                trusted_key_paths.append(rest[i + 1])
+                i += 2
+            else:
+                positional.append(rest[i])
+                i += 1
+        if not positional:
+            print(
+                "usage: python -m agentegrity verify-decisions "
+                "[--trusted-key <pub.hex>]... <chain.json>",
+                file=sys.stderr,
+            )
             return 2
-        return _verify_decisions(args[1])
+        return _verify_decisions(positional[0], trusted_key_paths)
     if args[0] in ("-h", "--help", "help"):
         print("usage: python -m agentegrity [doctor | verify-decisions <path>]")
         print()
         print("  (no args)                       print version + adapter availability")
         print("  doctor                          run an end-to-end self-check")
         print("  verify-decisions <chain.json>   verify a serialized chain")
+        print("    --trusted-key <pub.hex>       pin a signing key (repeatable);")
+        print("                                  without it, signatures are self-vouched")
         return 0
     print(f"unknown command: {args[0]!r} (try 'python -m agentegrity help')", file=sys.stderr)
     return 2

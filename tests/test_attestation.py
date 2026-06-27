@@ -150,6 +150,90 @@ class TestAttestationChain:
             chain.append(r2)
 
 
+class TestVerifySignatures:
+    """verify_chain proves only hash linkage; verify_signatures proves
+    cryptographic authenticity. These guard the trust-model fixes for the
+    audit findings C1/C2: a re-hashed or self-signed forged chain must NOT
+    pass signature verification.
+    """
+
+    def _signed_chain(self, key):
+        chain = AttestationChain()
+        r1 = make_record(score=0.90)
+        r1.sign(key)
+        chain.append(r1)
+        r2 = make_record(score=0.85)
+        r2.chain_previous = r1.content_hash
+        r2.sign(key)
+        chain.append(r2)
+        return chain
+
+    def test_unsigned_chain_fails_signature_check(self):
+        """C1: a fully unsigned chain is hash-valid but not signed."""
+        chain = AttestationChain()
+        chain.append(make_record(score=0.90))
+        chain.append(make_record(score=0.85))
+        assert chain.verify_chain() is True  # hash links are fine
+        ok, idx = chain.verify_signatures()
+        assert ok is False
+        assert idx == 0  # first record is unsigned
+
+    def test_signed_chain_passes(self):
+        from agentegrity.core.attestation import generate_signing_key
+
+        key = generate_signing_key()
+        chain = self._signed_chain(key)
+        assert chain.verify_chain() is True
+        ok, idx = chain.verify_signatures()
+        assert ok is True
+        assert idx is None
+
+    def test_tampered_signed_record_fails(self):
+        """Editing a signed record's payload invalidates its signature
+        even though an attacker can recompute the content_hash."""
+        from agentegrity.core.attestation import generate_signing_key
+
+        key = generate_signing_key()
+        chain = self._signed_chain(key)
+        # Attacker lowers a score after signing; content_hash recomputes
+        # but the signature was over the old payload.
+        chain.records[1].integrity_score["composite"] = 0.01
+        # Re-link so verify_chain still passes (the C1 attack).
+        records = chain.records
+        records[1].chain_previous = records[0].content_hash
+        rebuilt = AttestationChain.from_records(records)
+        assert rebuilt.verify_chain() is True  # hash linkage survives
+        ok, idx = rebuilt.verify_signatures()
+        assert ok is False
+        assert idx == 1
+
+    def test_trusted_keys_anchor_rejects_self_signed_forgery(self):
+        """C2: a forged chain signed with an attacker key self-verifies
+        without a trust anchor, but is rejected against a pinned key set."""
+        from agentegrity.core.attestation import generate_signing_key
+
+        legit_key = generate_signing_key()
+        attacker_key = generate_signing_key()
+        # Derive the pinned key bytes exactly as the signing path stores
+        # them, so the anchor comparison is byte-for-byte correct.
+        _probe = make_record()
+        _probe.sign(legit_key)
+        legit_pub = _probe.public_key
+
+        forged = AttestationChain()
+        r = make_record(score=0.99)
+        r.sign(attacker_key)  # attacker signs with their own key
+        forged.append(r)
+
+        # Without an anchor, the self-embedded key makes it "verify".
+        ok_no_anchor, _ = forged.verify_signatures()
+        assert ok_no_anchor is True
+        # With the pinned legit key, the forgery is rejected.
+        ok_anchored, idx = forged.verify_signatures(trusted_keys={legit_pub})
+        assert ok_anchored is False
+        assert idx == 0
+
+
 class TestBuildAttestationRecordHelper:
     """The build_attestation_record helper replaces three duplicated bodies
     in adapter base, monitor, and SDK client. Critically, Evidence

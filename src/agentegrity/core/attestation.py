@@ -402,6 +402,42 @@ class AttestationChain:
                 return False, i, self._records[i].record_kind
         return True, None, None
 
+    def verify_signatures(
+        self, trusted_keys: set[bytes] | None = None
+    ) -> tuple[bool, int | None]:
+        """Verify every record's Ed25519 signature.
+
+        ``verify_chain`` only proves the records are hash-linked — and
+        ``content_hash`` is an unkeyed SHA-256, so anyone who edits a
+        record can recompute the links. Hash linkage alone is therefore
+        NOT tamper-evidence against an attacker who controls the
+        serialized chain. Cryptographic tamper-evidence requires
+        verifying signatures, which is what this method does.
+
+        Returns ``(True, None)`` iff every record is signed AND its
+        signature verifies. Returns ``(False, first_bad_index)`` on the
+        first record that is unsigned or fails verification.
+
+        Parameters
+        ----------
+        trusted_keys : set[bytes], optional
+            Allow-list of raw Ed25519 public keys. When provided, a
+            record whose embedded ``public_key`` is not in the set is
+            rejected even if its self-embedded signature verifies — this
+            is the trust anchor. WITHOUT it, a forged chain signed with
+            an attacker-generated key self-verifies, since each record
+            carries its own public key. Always pass a pinned key set in
+            any context where the chain crosses a trust boundary.
+        """
+        for i, r in enumerate(self._records):
+            if r.signature is None or r.public_key is None:
+                return False, i
+            if trusted_keys is not None and r.public_key not in trusted_keys:
+                return False, i
+            if not r.verify():
+                return False, i
+        return True, None
+
     @property
     def records(self) -> list[ChainedRecord]:
         return list(self._records)

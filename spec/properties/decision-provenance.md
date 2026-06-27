@@ -24,8 +24,8 @@ Decision provenance closes the gap between **what** the evaluator concluded (`At
 | Attack class | Description | Prevented when |
 |---|---|---|
 | Post-hoc rationalization | Adversary fabricates a clean explanation for a malicious action after the fact | Records are signed AND verified by an independent party |
-| Decision-rationale tampering | Adversary modifies stored rationale to mislead audit | Tampering invalidates the signature; `verify_decision_links()` detects content-hash mismatch |
-| Audit-trail gaps | Adversary deletes records to hide actions | Chain hash linkage (`verify_chain()`) detects missing intermediate records |
+| Decision-rationale tampering | Adversary modifies stored rationale to mislead audit | Records are signed AND `verify_signatures()` is checked against a **pinned** key. (`verify_decision_links()` catches a content-hash mismatch only when the attacker does not also rewrite the referencing Evidence — it is not adversary-proof on its own, since `content_hash` is unkeyed.) |
+| Audit-trail gaps | Adversary deletes records to hide actions | Chain hash linkage (`verify_chain()`) detects a *missing* intermediate record. It does NOT detect an adversary who deletes a record and re-links the survivors; that requires signature verification plus an out-of-band anchor for the chain head. |
 
 ## What It Does NOT Prevent
 
@@ -79,9 +79,10 @@ A conforming implementation MUST:
 
 A conforming verifier MUST:
 
-1. Validate `chain.verify_chain()` — record-to-record hash linkage.
+1. Validate `chain.verify_chain()` — record-to-record hash linkage. This is necessary but NOT sufficient: `content_hash` is unkeyed, so hash linkage alone does not detect an adversary who edits records and recomputes the links.
 2. Validate `chain.verify_decision_links()` — every attestation's decision-type Evidence points at an existing, unaltered, temporally-prior decision in the chain.
-3. When records are signed, validate `record.verify()` for each one.
+3. Validate `chain.verify_signatures(trusted_keys=...)` against a public key (or key set) obtained **out-of-band**, not from the records themselves. This is what provides adversarial tamper-evidence and non-repudiation. A verifier that skips this, or that verifies signatures against the key embedded in each record, does NOT meet the tamper-evidence guarantee — a forged chain signed with an attacker key self-verifies.
+4. Treat an unsigned chain, or a chain whose signatures do not verify against the pinned key, as **unverified** — never report it as valid in a context where signing is expected.
 
 ## Relationship to Other Properties
 
