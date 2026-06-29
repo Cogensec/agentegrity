@@ -42,7 +42,11 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterator, Protocol, runtime_checkable
 
-from agentegrity.layers.checkpoint import validate_storage_identifier
+from agentegrity.layers.checkpoint import (
+    create_private_dir,
+    restrict_file,
+    validate_storage_identifier,
+)
 from agentegrity.layers.cortical import BehavioralBaseline
 
 # Sentinel string for SQLite composite-PK rows that represent
@@ -179,7 +183,7 @@ class FileBaselineStore:
 
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
-        self._root.mkdir(parents=True, exist_ok=True)
+        create_private_dir(self._root)
 
     def _path_for(self, agent_id: str, role: str | None) -> Path:
         validate_storage_identifier(agent_id, kind="agent_id")
@@ -218,17 +222,21 @@ class FileBaselineStore:
     def load(
         self, agent_id: str, role: str | None = None
     ) -> BehavioralBaseline | None:
+        # Read-then-catch rather than exists()-then-read, which races
+        # (TOCTOU) if the file is removed between the two calls.
         if role is not None:
             role_path = self._path_for(agent_id, role)
-            if role_path.exists():
+            try:
                 return _deserialize(
                     json.loads(role_path.read_text(encoding="utf-8"))
                 )
-            # Fallback to role-less (legacy) entry.
+            except FileNotFoundError:
+                pass  # Fallback to role-less (legacy) entry.
         path = self._path_for(agent_id, None)
-        if not path.exists():
+        try:
+            return _deserialize(json.loads(path.read_text(encoding="utf-8")))
+        except FileNotFoundError:
             return None
-        return _deserialize(json.loads(path.read_text(encoding="utf-8")))
 
     def list_agent_ids(self) -> list[str]:
         files = list(self._root.glob("*.json"))
@@ -262,10 +270,12 @@ class FileBaselineStore:
 
     def delete(self, agent_id: str, role: str | None = None) -> bool:
         path = self._path_for(agent_id, role)
-        if path.exists():
+        # Unlink-then-catch rather than exists()-then-unlink (TOCTOU).
+        try:
             path.unlink()
             return True
-        return False
+        except FileNotFoundError:
+            return False
 
 
 _SQLITE_SCHEMA = """
@@ -307,6 +317,8 @@ class SqliteBaselineStore:
         with self._open() as conn:
             self._migrate_schema_if_needed(conn)
             conn.executescript(_SQLITE_SCHEMA)
+        if self._path != ":memory:":
+            restrict_file(self._path)
 
     def _migrate_schema_if_needed(self, conn: sqlite3.Connection) -> None:
         """Add the v0.8 ``role`` column to pre-v0.8 databases.

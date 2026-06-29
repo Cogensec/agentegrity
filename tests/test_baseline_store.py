@@ -12,6 +12,8 @@ test for the wire-through to ``CorticalLayer``.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -140,6 +142,24 @@ class TestFileBackendSpecifics:
         store = FileBaselineStore(tmp_path)
         with pytest.raises(ValueError):
             store.save(_baseline(agent_id="agent"), role="r__x")
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX mode bits")
+    def test_freshly_created_root_is_private(self, tmp_path: Path) -> None:
+        # Audit L3: a store dir we create is owner-only.
+        root = tmp_path / "baselines"
+        FileBaselineStore(root)
+        mode = stat.S_IMODE(root.stat().st_mode)
+        assert mode & 0o077 == 0
+
+    def test_load_missing_returns_none(self, tmp_path: Path) -> None:
+        # Audit L4: read-then-catch, no exists() race.
+        store = FileBaselineStore(tmp_path)
+        assert store.load("nobody") is None
+
+    def test_delete_missing_returns_false(self, tmp_path: Path) -> None:
+        # Audit L4: unlink-then-catch, no exists() race.
+        store = FileBaselineStore(tmp_path)
+        assert store.delete("nobody") is False
 
     def test_no_temp_files_left_after_save(self, tmp_path: Path) -> None:
         store = FileBaselineStore(tmp_path)

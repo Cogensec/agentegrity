@@ -60,6 +60,17 @@ in beta until the v1.0 stability criteria documented in
   visibility (non-blocking, since a full-environment audit would otherwise
   fail `main` on ambient/transitive advisories with no project-side fix).
 
+- **Restrictive permissions on store files (shared-host hardening).**
+  `FileCheckpoint` / `FileBaselineStore` create a freshly-made store
+  directory as owner-only (0700) instead of the umask default (0755), and
+  `SqliteCheckpoint` / `SqliteBaselineStore` tighten their DB file to 0600
+  (sqlite creates it world-readable). Pre-existing directories are left as
+  the operator set them; all changes are best-effort. (The JSON backends
+  already wrote 0600 files via `NamedTemporaryFile`.)
+- **Race-free store reads/deletes.** `FileCheckpoint.load`,
+  `FileBaselineStore.load`, and `FileBaselineStore.delete` now read/unlink
+  and catch `FileNotFoundError` instead of `exists()`-then-act, removing a
+  TOCTOU window.
 - **Allow-list validation for filesystem-bound identifiers.**
   `FileCheckpoint` (`checkpoint_id`) and `FileBaselineStore` (`agent_id`,
   `role`) replaced their `/`,`\`,`..` block-list with a shared
