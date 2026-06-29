@@ -40,6 +40,30 @@ export interface ReporterOptions {
   onError?: (err: unknown, step: string) => void;
 }
 
+/**
+ * Whether a Bearer token may be sent to `baseUrl` without crossing the
+ * network in cleartext. True for HTTPS, or loopback hosts (traffic never
+ * leaves the machine). Everything else — including a parse failure — is
+ * unsafe, so a misconfigured `http://remote` endpoint never leaks the
+ * credential.
+ */
+function isCredentialSafe(baseUrl: string): boolean {
+  try {
+    const u = new URL(baseUrl);
+    if (u.protocol === "https:") return true;
+    const host = u.hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function randomHex32(): string {
   // Node 18+ and modern browsers both expose crypto.randomUUID.
   // Strip hyphens to match Python's uuid4().hex.
@@ -62,6 +86,7 @@ export class AgentegrityReporter {
   private readonly apiKey?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly onError: (err: unknown, step: string) => void;
+  private readonly credentialSafe: boolean;
   private started = false;
   private ended = false;
 
@@ -78,6 +103,19 @@ export class AgentegrityReporter {
         // eslint-disable-next-line no-console
         console.warn(`agentegrity reporter ${step} failed:`, err);
       });
+    this.credentialSafe = isCredentialSafe(this.baseUrl);
+    if (this.apiKey && !this.credentialSafe) {
+      // Surface the misconfiguration once at construction: the token
+      // will be withheld from requests (see post()) rather than sent
+      // in cleartext to a non-loopback http:// endpoint.
+      this.onError(
+        new Error(
+          `apiKey will NOT be sent: baseUrl ${this.baseUrl} is not HTTPS ` +
+            `or loopback. Use https:// to transmit the Authorization header.`,
+        ),
+        "config",
+      );
+    }
   }
 
   /** Open the session. Idempotent — subsequent calls are no-ops. */
@@ -151,7 +189,12 @@ export class AgentegrityReporter {
       const headers: Record<string, string> = {
         "content-type": "application/json",
       };
-      if (this.apiKey) headers.authorization = `Bearer ${this.apiKey}`;
+      // Only attach the Bearer token over a credential-safe transport
+      // (HTTPS or loopback). Never leak it in cleartext to a remote
+      // http:// endpoint.
+      if (this.apiKey && this.credentialSafe) {
+        headers.authorization = `Bearer ${this.apiKey}`;
+      }
       const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: "POST",
         headers,

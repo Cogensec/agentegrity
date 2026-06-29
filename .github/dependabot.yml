@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Python package + its optional extras.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - python
+
+  # TypeScript client workspace (npm registry; bun resolves the same).
+  - package-ecosystem: npm
+    directory: "/clients/typescript"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - typescript
+
+  # Pinned GitHub Actions in the CI / release workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - ci

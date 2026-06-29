@@ -47,6 +47,19 @@ in beta until the v1.0 stability criteria documented in
   in the audit log and attestation `layer_states`) now carries only the
   exception class name. Exception messages can embed tokens / URLs / PII;
   full detail still goes to the local operator log.
+- **TLS-gated Bearer token in the TypeScript reporter.** The
+  `Authorization: Bearer` header is now attached only over a
+  credential-safe transport (HTTPS, or a loopback host); a misconfigured
+  `http://<remote>` `baseUrl` no longer leaks the token in cleartext. The
+  reporter warns once at construction when an `apiKey` is set on an unsafe
+  URL and withholds the header at request time (events still send).
+- **Dependency CVE scanning in CI.** Added a `dependency-audit` job
+  (`pip-audit` + `bun audit`, advisory) and a Dependabot config
+  (`.github/dependabot.yml`) covering pip, npm, and github-actions. The
+  enforcing/remediation path is Dependabot; the CI job is per-PR
+  visibility (non-blocking, since a full-environment audit would otherwise
+  fail `main` on ambient/transitive advisories with no project-side fix).
+
 - **Allow-list validation for filesystem-bound identifiers.**
   `FileCheckpoint` (`checkpoint_id`) and `FileBaselineStore` (`agent_id`,
   `role`) replaced their `/`,`\`,`..` block-list with a shared
