@@ -34,6 +34,19 @@ in beta until the v1.0 stability criteria documented in
 - **Embedding-similarity cache moved from `pickle` to JSON.** A
   filesystem-write attacker (threat-model T-T2) could poison a pickle cache
   into arbitrary code execution on load; JSON deserializes to inert data.
+- **Bounded context buffers.** Every accumulating adapter buffer
+  (`tool_calls`, `tool_outputs`, `tool_failures`, `inputs`, `subagents`,
+  `peer_messages`, `shared_memory`, `broadcast_messages`, `tasks`) is now
+  capped at `_BUFFER_CAP` (1000) per session via a shared `_append_capped`
+  helper. Previously only broadcasts were capped, so a malicious peer/tool
+  could flood the buffers and exhaust memory (and bloat exported payloads).
+  Overflow emits a one-time `<channel>_overflow` event per channel.
+- **Exception text no longer leaks into serialized records.** The exported
+  `capture_failure` event dropped its raw `str(exc)` summary (kept
+  `exception_class`), and a crashing governance rule's `reason` (which lands
+  in the audit log and attestation `layer_states`) now carries only the
+  exception class name. Exception messages can embed tokens / URLs / PII;
+  full detail still goes to the local operator log.
 - **Allow-list validation for filesystem-bound identifiers.**
   `FileCheckpoint` (`checkpoint_id`) and `FileBaselineStore` (`agent_id`,
   `role`) replaced their `/`,`\`,`..` block-list with a shared

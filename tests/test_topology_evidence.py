@@ -359,6 +359,39 @@ class TestMultiAgentHandlers:
         overflow = [e for e in adapter.events if e.event_type == "broadcast_overflow"]
         assert len(overflow) == 1
 
+    def test_peer_messages_capped(self):
+        """Audit M3: peer_messages is bounded (was unbounded)."""
+        adapter = _make_adapter()
+        loop = asyncio.new_event_loop()
+        adapter._buffer.peer_messages.extend([{} for _ in range(1000)])
+        loop.run_until_complete(adapter.on_event(
+            "peer_message",
+            {"sender_agent_id": "flooder", "content": "x"},
+        ))
+        assert len(adapter._buffer.peer_messages) == 1000
+        overflow = [
+            e for e in adapter.events if e.event_type == "peer_message_overflow"
+        ]
+        assert len(overflow) == 1
+
+    def test_overflow_signals_once_under_sustained_flood(self):
+        """The overflow event fires once per channel, so a flood can't in
+        turn flood the event stream."""
+        adapter = _make_adapter()
+        loop = asyncio.new_event_loop()
+        adapter._buffer.shared_memory.extend([{} for _ in range(1000)])
+        for _ in range(5):
+            loop.run_until_complete(adapter.on_event(
+                "shared_memory_write",
+                {"writer_agent_id": "flooder", "key": "k", "content": "c"},
+            ))
+        assert len(adapter._buffer.shared_memory) == 1000
+        overflow = [
+            e for e in adapter.events
+            if e.event_type == "shared_memory_write_overflow"
+        ]
+        assert len(overflow) == 1
+
     def test_task_started_buffered_separately_from_subagents(self):
         """Task is not a subagent — CrewAI semantic fix."""
         adapter = _make_adapter()

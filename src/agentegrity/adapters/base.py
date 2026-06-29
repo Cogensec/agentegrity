@@ -217,6 +217,13 @@ class _BaseAdapter:
 
     _name: str = "base"
 
+    # Per-session ceiling on each accumulating context buffer. A
+    # malicious peer/tool can flood peer_messages / shared_memory /
+    # tool_outputs etc.; without a cap the buffers grow unbounded and
+    # exhaust memory (and bloat every exported event payload). 1000
+    # entries per channel is generous for legitimate sessions.
+    _BUFFER_CAP: int = 1000
+
     def __init__(
         self,
         profile: AgentProfile,
@@ -245,6 +252,9 @@ class _BaseAdapter:
         self._session_started = False
         self._session_ended = False
         self._pending_topology_change: Any = None  # TopologyChange | None
+        # Channels that have already emitted an overflow event, so a
+        # sustained flood signals once instead of flooding the stream.
+        self._buffer_overflow_signaled: set[str] = set()
 
         if evaluator is not None:
             self._evaluator = evaluator
@@ -520,12 +530,18 @@ class _BaseAdapter:
                 "%s decision capture failed at %s: %s",
                 self.name, decision_point, exc, exc_info=True,
             )
+            # The raw exception message is deliberately NOT included
+            # here: this event is fanned out to exporters (and the class
+            # of failures it covers can wrap framework internals whose
+            # messages carry tokens / URLs / PII). The full exception
+            # with traceback is in the local warning log above for
+            # operators; downstream consumers get the class name, which
+            # is enough to query the gap without leaking secrets.
             self._emit_event(
                 "capture_failure",
                 {
                     "decision_point": decision_point,
                     "exception_class": type(exc).__name__,
-                    "summary": str(exc)[:200],
                 },
             )
             return None
@@ -607,6 +623,28 @@ class _BaseAdapter:
                 )
         return {}
 
+    # --- Buffering ---
+
+    def _append_capped(self, buf: list[Any], item: Any, channel: str) -> bool:
+        """Append ``item`` to a bounded buffer.
+
+        Returns ``False`` (and emits a one-time ``<channel>_overflow``
+        event) once the buffer hits ``_BUFFER_CAP``, dropping the item.
+        Bounds per-session memory against a peer/tool/message flood. The
+        overflow event fires once per channel so the flood can't in turn
+        flood the event stream / exporters.
+        """
+        if len(buf) >= self._BUFFER_CAP:
+            if channel not in self._buffer_overflow_signaled:
+                self._buffer_overflow_signaled.add(channel)
+                self._emit_event(
+                    f"{channel}_overflow",
+                    {"channel": channel, "limit": self._BUFFER_CAP},
+                )
+            return False
+        buf.append(item)
+        return True
+
     # --- Enforcement ---
 
     def _deny_payload(self, reason: str) -> dict[str, Any]:
@@ -672,8 +710,10 @@ class _BaseAdapter:
         tool_name = data.get("tool_name", "")
         tool_input = data.get("tool_input", {})
 
-        self._buffer.tool_calls.append(
-            {"tool": tool_name, "type": "tool_call", **tool_input}
+        self._append_capped(
+            self._buffer.tool_calls,
+            {"tool": tool_name, "type": "tool_call", **tool_input},
+            "tool_calls",
         )
         self._buffer.tool_usage[tool_name] += 1
         self._buffer.action_distribution["tool_call"] += 1
@@ -701,8 +741,10 @@ class _BaseAdapter:
 
     def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_response = data.get("tool_response", "")
-        self._buffer.tool_outputs.append(
-            {"tool": data.get("tool_name", ""), "output": tool_response}
+        self._append_capped(
+            self._buffer.tool_outputs,
+            {"tool": data.get("tool_name", ""), "output": tool_response},
+            "tool_outputs",
         )
         score = self._run_evaluation()
         self._emit_event("post_tool_use", data, score)
@@ -711,8 +753,10 @@ class _BaseAdapter:
     def _handle_post_tool_use_failure(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
-        self._buffer.tool_failures.append(
-            {"tool": data.get("tool_name", ""), "error": data.get("error", "")}
+        self._append_capped(
+            self._buffer.tool_failures,
+            {"tool": data.get("tool_name", ""), "error": data.get("error", "")},
+            "tool_failures",
         )
         self._emit_event("post_tool_use_failure", data)
         return {}
@@ -722,7 +766,7 @@ class _BaseAdapter:
     ) -> dict[str, Any]:
         prompt = data.get("prompt", data.get("user_message", ""))
         if isinstance(prompt, str):
-            self._buffer.inputs.append(prompt)
+            self._append_capped(self._buffer.inputs, prompt, "inputs")
         self._buffer.action_distribution["user_prompt"] += 1
 
         score = self._run_evaluation()
@@ -755,11 +799,13 @@ class _BaseAdapter:
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
         agent_id = data.get("agent_id", "")
-        self._buffer.subagents.append(
+        self._append_capped(
+            self._buffer.subagents,
             {
                 "agent_id": agent_id,
                 "started": datetime.now(timezone.utc).isoformat(),
-            }
+            },
+            "subagents",
         )
         if agent_id:
             self._buffer.subagent_starts_seen.add(agent_id)
@@ -798,12 +844,14 @@ class _BaseAdapter:
                 "subagent_orphan",
                 {"agent_id": agent_id, "reason": "stop_without_start"},
             )
-        self._buffer.subagents.append(
+        self._append_capped(
+            self._buffer.subagents,
             {
                 "agent_id": agent_id,
                 "stopped": datetime.now(timezone.utc).isoformat(),
                 "transcript_path": data.get("agent_transcript_path", ""),
-            }
+            },
+            "subagents",
         )
         self._buffer.subagent_starts_seen.discard(agent_id)
         self._emit_event("subagent_stop", data)
@@ -863,7 +911,7 @@ class _BaseAdapter:
             "channel": data.get("channel", "peer_messages"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        self._buffer.peer_messages.append(entry)
+        self._append_capped(self._buffer.peer_messages, entry, "peer_message")
         self._emit_event("peer_message", data)
         return {}
 
@@ -884,7 +932,9 @@ class _BaseAdapter:
             "summary": data.get("summary", ""),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        self._buffer.shared_memory.append(entry)
+        self._append_capped(
+            self._buffer.shared_memory, entry, "shared_memory_write"
+        )
         self._emit_event("shared_memory_write", data)
         return {}
 
@@ -894,21 +944,19 @@ class _BaseAdapter:
         Broadcasts can amplify (T-BROADCAST-AMP): N members × one
         broadcast = N evaluations. Adapters that fan a broadcast out
         to each member should rate-limit at the source. The buffer
-        caps at 1000 entries per session as a defensive ceiling.
+        caps at ``_BUFFER_CAP`` entries per session as a defensive
+        ceiling, emitting a one-time ``broadcast_overflow`` event.
         """
-        if len(self._buffer.broadcast_messages) >= 1000:
-            self._emit_event(
-                "broadcast_overflow",
-                {"dropped": data, "limit": 1000},
-            )
-            return {}
         entry = {
             "sender_agent_id": data.get("sender_agent_id", ""),
             "channel": data.get("channel", "broadcast_channels"),
             "content": data.get("content", ""),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        self._buffer.broadcast_messages.append(entry)
+        if not self._append_capped(
+            self._buffer.broadcast_messages, entry, "broadcast"
+        ):
+            return {}
         self._emit_event("broadcast", data)
         return {}
 
@@ -927,7 +975,7 @@ class _BaseAdapter:
             "agent_id": data.get("agent_id", ""),
             "started": datetime.now(timezone.utc).isoformat(),
         }
-        self._buffer.tasks.append(entry)
+        self._append_capped(self._buffer.tasks, entry, "task_started")
         self._emit_event("task_started", data)
         return {}
 

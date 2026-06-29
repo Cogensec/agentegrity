@@ -192,7 +192,10 @@ class TestCaptureFailureFailsOpen:
         assert len(failure_events) == 1
         assert failure_events[0].data["decision_point"] == "pre_tool_use"
         assert failure_events[0].data["exception_class"] == "RuntimeError"
-        assert "simulated capture bug" in failure_events[0].data["summary"]
+        # Audit M6: the raw exception message must NOT be in the exported
+        # event (it can carry secrets/PII); only the class name is kept.
+        assert "summary" not in failure_events[0].data
+        assert "simulated capture bug" not in str(failure_events[0].data)
         # And critically, no DecisionRecord was appended
         assert _decisions(adapter) == []
 

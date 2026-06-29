@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -18,6 +19,8 @@ from typing import Any, Callable
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile, RiskTier
+
+logger = logging.getLogger("agentegrity.governance")
 
 
 class PolicyDecision(str, Enum):
@@ -67,12 +70,21 @@ class PolicyRule:
         try:
             triggered = self.condition(profile, action, context)
         except Exception as e:
-            # Rule evaluation failure is treated as a soft trigger
+            # Rule evaluation failure is treated as a soft trigger. The
+            # reason is serialized into the audit log and the attestation
+            # layer_states, so it carries only the exception CLASS, not
+            # the raw message (which can embed secrets/PII from whatever
+            # the custom condition touched). Full detail goes to the
+            # local log for operators.
+            logger.warning(
+                "governance rule %s evaluation failed: %s",
+                self.rule_id, e, exc_info=True,
+            )
             return PolicyEvaluation(
                 rule_id=self.rule_id,
                 triggered=True,
                 decision=PolicyDecision.REQUIRE_APPROVAL,
-                reason=f"Rule evaluation error: {str(e)}",
+                reason=f"Rule evaluation error: {type(e).__name__}",
             )
 
         return PolicyEvaluation(

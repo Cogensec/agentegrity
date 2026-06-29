@@ -1,5 +1,7 @@
 """Tests for IntegrityEvaluator and the four default layers."""
 
+import json
+
 import pytest
 
 from agentegrity.core.evaluator import IntegrityEvaluator, PropertyWeights
@@ -165,6 +167,29 @@ class TestGovernanceLayer:
             "sensitive_tools": {"weird_tool"},
         })
         assert result.action == "escalate"
+
+    def test_rule_exception_reason_omits_raw_message(self):
+        # Audit M6: a crashing rule's reason is serialized into the audit
+        # log and attestation layer_states, so it must carry only the
+        # exception class, never the raw message (which can hold secrets).
+        secret = "token=sk-secret-abc123"
+
+        def boom(p, a, c):
+            raise ValueError(secret)
+
+        rule = PolicyRule(
+            rule_id="BOOM-001",
+            name="Boom",
+            description="raises",
+            condition=boom,
+            decision=PolicyDecision.DENY,
+            severity=1.0,
+        )
+        layer = GovernanceLayer(policy_set="minimal", custom_rules=[rule])
+        result = layer.evaluate(make_profile(), {"action": {"type": "x"}})
+        serialized = json.dumps(result.to_dict())
+        assert secret not in serialized
+        assert "ValueError" in serialized
 
     def test_custom_rule(self):
         custom = PolicyRule(
