@@ -137,6 +137,14 @@ class TestFileBackendSpecifics:
         with pytest.raises(ValueError):
             backend.save(snap)
 
+    def test_rejects_empty_id(self, tmp_path: Path):
+        # Audit M5: empty id collapsed to ".json" under the old block-list.
+        backend = FileCheckpoint(tmp_path)
+        snap = _snapshot()
+        snap.checkpoint_id = ""
+        with pytest.raises(ValueError):
+            backend.save(snap)
+
     def test_atomic_write_no_partial_files(self, tmp_path: Path):
         # The save() implementation uses temp file + os.replace. After a
         # successful save there should be exactly one *.json per

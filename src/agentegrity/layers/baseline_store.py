@@ -34,7 +34,6 @@ continue to work transparently under role-keyed lookups.
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -43,6 +42,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterator, Protocol, runtime_checkable
 
+from agentegrity.layers.checkpoint import validate_storage_identifier
 from agentegrity.layers.cortical import BehavioralBaseline
 
 # Sentinel string for SQLite composite-PK rows that represent
@@ -50,13 +50,6 @@ from agentegrity.layers.cortical import BehavioralBaseline
 # differs across SQLite versions (some treat NULLs as distinct);
 # using a known-empty string avoids the portability hazard.
 _NO_ROLE = ""
-
-# Filesystem-safe characters for role values. v0.8's AgentRole
-# enum uses lowercase ASCII strings (leader/member/supervisor/
-# worker/peer) but the parameter is typed as str so a future role
-# could be anything. Restrict to ASCII alphanumeric + underscore +
-# hyphen to avoid path-traversal and platform-specific issues.
-_VALID_ROLE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _serialize(baseline: BehavioralBaseline) -> dict[str, Any]:
@@ -86,11 +79,12 @@ def _deserialize(data: dict[str, Any]) -> BehavioralBaseline:
 def _validate_role(role: str | None) -> None:
     if role is None:
         return
-    if not _VALID_ROLE_RE.match(role):
-        raise ValueError(
-            f"invalid role {role!r}: must be ASCII alphanumeric / "
-            f"underscore / hyphen"
-        )
+    validate_storage_identifier(role, kind="role")
+    # The "__" separator in role-keyed filenames must be unambiguous, so
+    # neither agent_id nor role may itself contain it (otherwise
+    # agent="a" role="b" collides with agent="a__b" role=None).
+    if "__" in role:
+        raise ValueError(f"invalid role {role!r}: must not contain '__'")
 
 
 @runtime_checkable
@@ -188,8 +182,12 @@ class FileBaselineStore:
         self._root.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, agent_id: str, role: str | None) -> Path:
-        if "/" in agent_id or "\\" in agent_id or ".." in agent_id:
-            raise ValueError(f"invalid agent_id: {agent_id!r}")
+        validate_storage_identifier(agent_id, kind="agent_id")
+        if "__" in agent_id:
+            raise ValueError(
+                f"invalid agent_id {agent_id!r}: must not contain '__' "
+                f"(reserved as the role-key separator)"
+            )
         _validate_role(role)
         if role is None:
             return self._root / f"{agent_id}.json"

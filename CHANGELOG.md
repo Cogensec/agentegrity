@@ -34,6 +34,23 @@ in beta until the v1.0 stability criteria documented in
 - **Embedding-similarity cache moved from `pickle` to JSON.** A
   filesystem-write attacker (threat-model T-T2) could poison a pickle cache
   into arbitrary code execution on load; JSON deserializes to inert data.
+- **Allow-list validation for filesystem-bound identifiers.**
+  `FileCheckpoint` (`checkpoint_id`) and `FileBaselineStore` (`agent_id`,
+  `role`) replaced their `/`,`\`,`..` block-list with a shared
+  `validate_storage_identifier` allow-list (non-empty ASCII alphanumeric /
+  underscore / hyphen). Closes empty-id collapse to `.json`, dotfiles, NUL
+  bytes, and platform-reserved names. `FileBaselineStore` also rejects
+  `__` in `agent_id`/`role` so the role-key separator stays unambiguous
+  (previously `agent="a"` + `role="b"` could collide on disk with
+  `agent="a__b"` + no role — a baseline-misattribution vector).
+
+### Added
+- **`GovernanceLayer(sensitive_tools=...)`** (and per-call
+  `context["sensitive_tools"]`) to extend the GOV-001 high-risk-tool gate.
+  The built-in set is a documented starting point, not exhaustive; matching
+  is exact-string, so operators must enumerate their own tool names
+  (including framework-namespaced variants). Exposed as
+  `DEFAULT_SENSITIVE_TOOLS`.
 
 ### Changed
 - **BREAKING: session-summary field `chain_valid` renamed to

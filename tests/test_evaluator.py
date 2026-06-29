@@ -135,6 +135,37 @@ class TestGovernanceLayer:
         })
         assert result.action == "escalate"
 
+    def test_unlisted_tool_not_gated_by_default(self):
+        # Audit M2: a sensitive operation under a name not in the default
+        # set is not gated — operators must enumerate their own names.
+        layer = GovernanceLayer(policy_set="enterprise-default")
+        profile = make_profile(risk_tier=RiskTier.HIGH)
+        result = layer.evaluate(profile, {
+            "action": {"tool": "mcp__db__delete", "type": "tool_call"}
+        })
+        assert result.action == "pass"
+
+    def test_custom_sensitive_tools_extend_gating(self):
+        # M2 fix: operators can register their own sensitive tool names.
+        layer = GovernanceLayer(
+            policy_set="enterprise-default",
+            sensitive_tools={"mcp__db__delete"},
+        )
+        profile = make_profile(risk_tier=RiskTier.HIGH)
+        result = layer.evaluate(profile, {
+            "action": {"tool": "mcp__db__delete", "type": "tool_call"}
+        })
+        assert result.action == "escalate"
+
+    def test_per_call_sensitive_tools_override(self):
+        layer = GovernanceLayer(policy_set="enterprise-default")
+        profile = make_profile(risk_tier=RiskTier.HIGH)
+        result = layer.evaluate(profile, {
+            "action": {"tool": "weird_tool", "type": "tool_call"},
+            "sensitive_tools": {"weird_tool"},
+        })
+        assert result.action == "escalate"
+
     def test_custom_rule(self):
         custom = PolicyRule(
             rule_id="TEST-001",

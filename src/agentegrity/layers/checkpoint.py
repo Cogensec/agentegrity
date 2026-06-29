@@ -28,6 +28,7 @@ four-method Protocol and pass the instance to ``RecoveryLayer(checkpoint=...)``.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -37,6 +38,28 @@ from os import fsync, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterator, Protocol, runtime_checkable
+
+# Allow-list for any identifier that becomes part of a filesystem path
+# (checkpoint_id, agent_id, role). An allow-list, not a block-list:
+# block-lists ("/", "\\", "..") miss empty strings (which collapse to
+# ".json"), leading dots (dotfiles), NUL bytes, and platform-reserved
+# names. ASCII alphanumeric + underscore + hyphen is safe everywhere.
+_VALID_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def validate_storage_identifier(value: str, *, kind: str = "identifier") -> None:
+    """Reject any identifier unsafe to embed in a filename.
+
+    Raises ``ValueError`` for an empty value or one containing anything
+    outside ASCII alphanumeric / underscore / hyphen. Shared by the
+    file-backed checkpoint and baseline stores so the path-traversal
+    guard lives in exactly one place.
+    """
+    if not value or not _VALID_IDENTIFIER_RE.match(value):
+        raise ValueError(
+            f"invalid {kind} {value!r}: must be non-empty ASCII "
+            f"alphanumeric / underscore / hyphen"
+        )
 
 
 @dataclass
@@ -153,9 +176,7 @@ class FileCheckpoint:
         self._root.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, checkpoint_id: str) -> Path:
-        # Refuse path-traversal attempts in the id.
-        if "/" in checkpoint_id or "\\" in checkpoint_id or ".." in checkpoint_id:
-            raise ValueError(f"invalid checkpoint id: {checkpoint_id!r}")
+        validate_storage_identifier(checkpoint_id, kind="checkpoint id")
         return self._root / f"{checkpoint_id}.json"
 
     def save(self, snapshot: CheckpointSnapshot) -> str:

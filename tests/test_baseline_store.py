@@ -122,6 +122,25 @@ class TestFileBackendSpecifics:
         with pytest.raises(ValueError):
             store.save(_baseline(agent_id="../escape"))
 
+    def test_rejects_empty_agent_id(self, tmp_path: Path) -> None:
+        # Audit M5: an empty id slipped the old block-list and wrote to
+        # ".json", colliding across all empty-id agents.
+        store = FileBaselineStore(tmp_path)
+        with pytest.raises(ValueError):
+            store.save(_baseline(agent_id=""))
+
+    def test_rejects_separator_collision(self, tmp_path: Path) -> None:
+        # Audit M5: agent_id "a" + role "b" must not collide with
+        # agent_id "a__b" + role None on disk.
+        store = FileBaselineStore(tmp_path)
+        with pytest.raises(ValueError):
+            store.save(_baseline(agent_id="a__b"))
+
+    def test_rejects_separator_in_role(self, tmp_path: Path) -> None:
+        store = FileBaselineStore(tmp_path)
+        with pytest.raises(ValueError):
+            store.save(_baseline(agent_id="agent"), role="r__x")
+
     def test_no_temp_files_left_after_save(self, tmp_path: Path) -> None:
         store = FileBaselineStore(tmp_path)
         for i in range(5):
