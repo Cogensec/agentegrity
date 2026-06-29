@@ -32,7 +32,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from agentegrity.core.attestation import (
@@ -224,11 +224,18 @@ class _BaseAdapter:
         enforce: bool = False,
         api_key: str | None = None,
         signing_key: Any | None = None,
+        approval_handler: Callable[..., bool] | None = None,
     ) -> None:
         self._profile = profile
         self._enforce = enforce
         self._api_key = api_key
         self._signing_key = signing_key
+        # Called when enforce=True and an action escalates (governance
+        # require-approval, cortical drift, recovery chain-tamper).
+        # Returns True to approve (allow), False to deny. Absent ⇒
+        # escalations fail closed (deny), so "require approval" is not
+        # silently advisory under enforcement.
+        self._approval_handler = approval_handler
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
         self._chain = AttestationChain()
@@ -600,6 +607,65 @@ class _BaseAdapter:
                 )
         return {}
 
+    # --- Enforcement ---
+
+    def _deny_payload(self, reason: str) -> dict[str, Any]:
+        """Build the hook deny payload from a human-readable reason."""
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    def _enforcement_decision(
+        self, score: Any, candidate_action: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Decide whether enforcement blocks this action.
+
+        Returns a deny hook payload when the action is blocked, else an
+        empty dict. No-op when ``enforce`` is off.
+
+        Under enforcement:
+
+        * ``block`` always denies (never approvable).
+        * ``escalate`` denies UNLESS an ``approval_handler`` is
+          configured and approves it. This is the fix for the
+          "require approval is silently advisory" gap: every escalate
+          source (governance require-approval, cortical drift, recovery
+          chain-tamper) now fails closed under enforcement instead of
+          proceeding. A raising handler is treated as a denial.
+        """
+        if not self._enforce:
+            return {}
+        action = score.action
+        if action == "block":
+            return self._deny_payload(
+                f"Agentegrity integrity score {score.composite:.3f} "
+                f"triggered block action"
+            )
+        if action == "escalate":
+            if self._approval_handler is not None:
+                try:
+                    approved = bool(
+                        self._approval_handler(
+                            self._profile, score, candidate_action
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "approval_handler raised (%s); denying fail-closed", exc
+                    )
+                    approved = False
+                if approved:
+                    return {}
+            return self._deny_payload(
+                f"Agentegrity integrity score {score.composite:.3f} "
+                f"triggered escalate action without approval"
+            )
+        return {}
+
     # --- Framework-agnostic event handlers ---
 
     def _handle_pre_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -624,18 +690,14 @@ class _BaseAdapter:
         )
         self._emit_event("pre_tool_use", data, score)
 
-        if self._enforce and score.action == "block":
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        f"Agentegrity integrity score {score.composite:.3f} "
-                        f"triggered block action"
-                    ),
-                }
-            }
-        return {}
+        return self._enforcement_decision(
+            score,
+            {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "arguments": tool_input,
+            },
+        )
 
     def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_response = data.get("tool_response", "")

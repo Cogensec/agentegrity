@@ -106,6 +106,7 @@ class IntegrityMonitor:
         on_violation_callback: Callable[[ViolationEvent], None] | None = None,
         enable_attestation: bool = True,
         signing_key: Any | None = None,
+        approval_handler: Callable[..., bool] | None = None,
     ):
         self.profile = profile
         self.evaluator = evaluator
@@ -114,6 +115,10 @@ class IntegrityMonitor:
         self.on_violation_callback = on_violation_callback
         self.enable_attestation = enable_attestation
         self.signing_key = signing_key
+        # Consulted by guard() when an action escalates. Returns True to
+        # approve (allow), False to deny. Absent ⇒ escalations fail
+        # closed, so guard blocks them instead of letting them proceed.
+        self.approval_handler = approval_handler
 
         self._chain = AttestationChain()
         self._violations: list[ViolationEvent] = []
@@ -154,6 +159,31 @@ class IntegrityMonitor:
 
         return score
 
+    def _guard_blocks(
+        self, score: IntegrityScore, context: dict[str, Any]
+    ) -> bool:
+        """Whether guard() must halt execution for this score.
+
+        Blocks on ``block`` always; blocks on ``escalate`` unless an
+        ``approval_handler`` approves it (fail-closed). This makes
+        governance require-approval, cortical drift, and recovery
+        chain-tamper actually gate execution rather than proceeding
+        silently.
+        """
+        if score.action == "block":
+            return True
+        if score.action == "escalate":
+            if self.approval_handler is not None:
+                try:
+                    if bool(self.approval_handler(self.profile, score, context)):
+                        return False
+                except Exception as exc:
+                    logger.warning(
+                        "approval_handler raised (%s); denying fail-closed", exc
+                    )
+            return True
+        return False
+
     def guard(self, func: Callable[..., Any]) -> Callable[..., Any]:
         """
         Decorator that wraps an agent function with integrity evaluation.
@@ -168,11 +198,11 @@ class IntegrityMonitor:
 
                 # Pre-execution check
                 pre_score = self.evaluate(context)
-                if pre_score.action == "block":
+                if self._guard_blocks(pre_score, context):
                     raise IntegrityViolationError(
                         f"Agent {self.profile.agent_id} blocked: "
                         f"integrity score {pre_score.composite:.3f} "
-                        f"below threshold {self.threshold}"
+                        f"triggered {pre_score.action} action"
                     )
 
                 # Execute
@@ -191,11 +221,11 @@ class IntegrityMonitor:
                 context = kwargs.get("context", {})
 
                 pre_score = self.evaluate(context)
-                if pre_score.action == "block":
+                if self._guard_blocks(pre_score, context):
                     raise IntegrityViolationError(
                         f"Agent {self.profile.agent_id} blocked: "
                         f"integrity score {pre_score.composite:.3f} "
-                        f"below threshold {self.threshold}"
+                        f"triggered {pre_score.action} action"
                     )
 
                 result = func(*args, **kwargs)
