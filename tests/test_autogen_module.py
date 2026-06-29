@@ -23,7 +23,7 @@ def test_report_before_instrument_returns_empty() -> None:
     summary = ag.report()
     assert summary["adapter"] == "autogen"
     assert summary["evaluations"] == 0
-    assert summary["chain_valid"] is True
+    assert summary["chain_hash_linked"] is True
 
 
 def test_adapter_lazy_construction() -> None:

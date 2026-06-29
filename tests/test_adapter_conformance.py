@@ -312,7 +312,7 @@ class TestAdapterConformance:
             summary["attestation_records"] + summary["decision_records"]
             == summary["chain_records"]
         )
-        assert summary["chain_valid"] is True
+        assert summary["chain_hash_linked"] is True
         assert summary["enforce_mode"] is False
 
     def test_close_is_idempotent(

@@ -159,7 +159,7 @@ def test_get_summary(adapter: ClaudeAdapter) -> None:
     assert summary["adapter"] == "claude"
     assert summary["evaluations"] == 0
     assert summary["enforce_mode"] is False
-    assert "chain_valid" in summary
+    assert "chain_hash_linked" in summary
 
 
 def test_create_hooks_with_stub_sdk(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -250,7 +250,7 @@ for (const { expectedName, module } of ADAPTER_MODULES) {
       expect(typeof summary.events).toBe("number");
       expect(summary.events).toBe(EVENT_STREAM.length);
       expect(typeof summary.attestation_records).toBe("number");
-      expect(typeof summary.chain_valid).toBe("boolean");
+      expect(typeof summary.chain_hash_linked).toBe("boolean");
       expect(typeof summary.enforce_mode).toBe("boolean");
     });
   });

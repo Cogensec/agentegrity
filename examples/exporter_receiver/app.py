@@ -231,11 +231,11 @@ async def end_session(session_id: str, request: Request) -> JSONResponse:
     else:
         session.summary = payload["summary"]
         logger.info(
-            "session_end: id=%s events=%d evals=%d chain_valid=%s",
+            "session_end: id=%s events=%d evals=%d chain_hash_linked=%s",
             session_id,
             session.summary.get("events", 0),
             session.summary.get("evaluations", 0),
-            session.summary.get("chain_valid", "?"),
+            session.summary.get("chain_hash_linked", "?"),
         )
     print(json.dumps({"event": "session_end", "payload": payload}))
     return JSONResponse({"accepted": True}, status_code=202)

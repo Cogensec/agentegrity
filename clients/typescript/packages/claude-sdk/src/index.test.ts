@@ -72,7 +72,7 @@ test("report() returns a well-formed empty summary before first hook call", asyn
   const s = await report();
   assert.equal(s.adapter, "claude");
   assert.equal(s.events, 0);
-  assert.equal(s.chain_valid, true);
+  assert.equal(s.chain_hash_linked, true);
 });
 
 test("adapter() returns a stable DefaultAdapter across calls", () => {

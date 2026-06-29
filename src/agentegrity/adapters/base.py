@@ -947,6 +947,6 @@ class _BaseAdapter:
             "attestation_records": attestation_count,
             "decision_records": decision_count,
             "chain_records": len(records),
-            "chain_valid": self._chain.verify_chain(),
+            "chain_hash_linked": self._chain.verify_chain(),
             "enforce_mode": self._enforce,
         }

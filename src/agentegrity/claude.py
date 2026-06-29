@@ -129,7 +129,7 @@ def report() -> dict[str, Any]:
             "evaluations": 0,
             "events": 0,
             "attestation_records": 0,
-            "chain_valid": True,
+            "chain_hash_linked": True,
             "enforce_mode": False,
         }
     return _default.get_summary()

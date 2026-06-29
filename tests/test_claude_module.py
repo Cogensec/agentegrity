@@ -71,7 +71,7 @@ def test_report_before_hooks_returns_empty() -> None:
     assert summary["adapter"] == "claude"
     assert summary["evaluations"] == 0
     assert summary["attestation_records"] == 0
-    assert summary["chain_valid"] is True
+    assert summary["chain_hash_linked"] is True
     assert summary["agent_id"] is None
 
 

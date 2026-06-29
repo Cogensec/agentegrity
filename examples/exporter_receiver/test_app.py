@@ -83,7 +83,7 @@ def _valid_session_end(session_id: str) -> dict[str, object]:
             "evaluations": 0,
             "events": 1,
             "attestation_records": 0,
-            "chain_valid": True,
+            "chain_hash_linked": True,
             "enforce_mode": False,
         },
     }

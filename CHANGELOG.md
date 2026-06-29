@@ -8,6 +8,41 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [Unreleased]
+
+### Security
+- **Signature-aware chain verification.** `AttestationChain.verify_chain()`
+  only checks the (unkeyed SHA-256) hash linkage between records, which an
+  attacker who controls the serialized chain can recompute — it is not
+  tamper-evidence against an adversary. Added
+  `AttestationChain.verify_signatures(trusted_keys=...)`, which verifies
+  every record's Ed25519 signature and, when a pinned key set is supplied,
+  rejects records that self-vouch with an attacker-embedded `public_key`.
+  The `verify-decisions` CLI now reports signature status, accepts
+  `--trusted-key` to pin a key, prints unsigned records as `unsigned`
+  (previously shown as `verified: yes`), and exits non-zero unless
+  signatures verify.
+- **Enforcement gates on `escalate`, not only `block`.** With `enforce=True`
+  the built-in governance `REQUIRE_APPROVAL` policies (high-risk tool,
+  code-execution boundary, financial threshold, multi-agent), cortical
+  drift, and recovery chain-tamper all emit `escalate`, which the
+  enforcement path previously ignored — so "require approval" silently
+  proceeded. `_BaseAdapter` and `IntegrityMonitor` now take an
+  `approval_handler`: under enforcement `block` always denies and
+  `escalate` denies unless the handler approves it (absent handler ⇒ fail
+  closed; a raising handler ⇒ deny).
+- **Embedding-similarity cache moved from `pickle` to JSON.** A
+  filesystem-write attacker (threat-model T-T2) could poison a pickle cache
+  into arbitrary code execution on load; JSON deserializes to inert data.
+
+### Changed
+- **BREAKING: session-summary field `chain_valid` renamed to
+  `chain_hash_linked`** across the Python adapters, the TypeScript client,
+  and the exporter JSON Schema (`schemas/exporter/common.json`). The old
+  name overstated the guarantee — the value reflects hash linkage
+  (`verify_chain()`), not cryptographic validity. Consumers of the exporter
+  HTTP API and `get_summary()` must update the field name.
+
 ## [0.8.0] - 2026-06-08
 
 ### Added
