@@ -75,6 +75,41 @@ jobs:
           path: coverage.xml
           retention-days: 14
 
+  dependency-audit:
+    # Surfaces known CVEs in Python + TypeScript dependencies on every
+    # PR. Advisory (continue-on-error), NOT a hard gate: pip-audit scans
+    # the whole environment (including ambient pip/setuptools/wheel and
+    # transitive/dev packages), so blocking here would fail main
+    # non-deterministically on advisories with no project-side fix. The
+    # ENFORCING mechanism is Dependabot (.github/dependabot.yml), which
+    # opens remediation PRs and feeds GitHub's security alerts. Read this
+    # job's log/annotations to triage; bump the offending dep to clear it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package + pip-audit
+        run: |
+          pip install -e ".[all,dev]"
+          pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: pip-audit --desc
+        continue-on-error: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Audit TypeScript dependencies
+        run: bun audit
+        working-directory: clients/typescript
+        continue-on-error: true
+
   typescript:
     runs-on: ubuntu-latest
     strategy:

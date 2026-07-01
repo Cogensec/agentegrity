@@ -34,7 +34,6 @@ continue to work transparently under role-keyed lookups.
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -43,6 +42,11 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterator, Protocol, runtime_checkable
 
+from agentegrity.layers.checkpoint import (
+    create_private_dir,
+    restrict_file,
+    validate_storage_identifier,
+)
 from agentegrity.layers.cortical import BehavioralBaseline
 
 # Sentinel string for SQLite composite-PK rows that represent
@@ -50,13 +54,6 @@ from agentegrity.layers.cortical import BehavioralBaseline
 # differs across SQLite versions (some treat NULLs as distinct);
 # using a known-empty string avoids the portability hazard.
 _NO_ROLE = ""
-
-# Filesystem-safe characters for role values. v0.8's AgentRole
-# enum uses lowercase ASCII strings (leader/member/supervisor/
-# worker/peer) but the parameter is typed as str so a future role
-# could be anything. Restrict to ASCII alphanumeric + underscore +
-# hyphen to avoid path-traversal and platform-specific issues.
-_VALID_ROLE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _serialize(baseline: BehavioralBaseline) -> dict[str, Any]:
@@ -86,11 +83,12 @@ def _deserialize(data: dict[str, Any]) -> BehavioralBaseline:
 def _validate_role(role: str | None) -> None:
     if role is None:
         return
-    if not _VALID_ROLE_RE.match(role):
-        raise ValueError(
-            f"invalid role {role!r}: must be ASCII alphanumeric / "
-            f"underscore / hyphen"
-        )
+    validate_storage_identifier(role, kind="role")
+    # The "__" separator in role-keyed filenames must be unambiguous, so
+    # neither agent_id nor role may itself contain it (otherwise
+    # agent="a" role="b" collides with agent="a__b" role=None).
+    if "__" in role:
+        raise ValueError(f"invalid role {role!r}: must not contain '__'")
 
 
 @runtime_checkable
@@ -185,11 +183,15 @@ class FileBaselineStore:
 
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
-        self._root.mkdir(parents=True, exist_ok=True)
+        create_private_dir(self._root)
 
     def _path_for(self, agent_id: str, role: str | None) -> Path:
-        if "/" in agent_id or "\\" in agent_id or ".." in agent_id:
-            raise ValueError(f"invalid agent_id: {agent_id!r}")
+        validate_storage_identifier(agent_id, kind="agent_id")
+        if "__" in agent_id:
+            raise ValueError(
+                f"invalid agent_id {agent_id!r}: must not contain '__' "
+                f"(reserved as the role-key separator)"
+            )
         _validate_role(role)
         if role is None:
             return self._root / f"{agent_id}.json"
@@ -220,17 +222,21 @@ class FileBaselineStore:
     def load(
         self, agent_id: str, role: str | None = None
     ) -> BehavioralBaseline | None:
+        # Read-then-catch rather than exists()-then-read, which races
+        # (TOCTOU) if the file is removed between the two calls.
         if role is not None:
             role_path = self._path_for(agent_id, role)
-            if role_path.exists():
+            try:
                 return _deserialize(
                     json.loads(role_path.read_text(encoding="utf-8"))
                 )
-            # Fallback to role-less (legacy) entry.
+            except FileNotFoundError:
+                pass  # Fallback to role-less (legacy) entry.
         path = self._path_for(agent_id, None)
-        if not path.exists():
+        try:
+            return _deserialize(json.loads(path.read_text(encoding="utf-8")))
+        except FileNotFoundError:
             return None
-        return _deserialize(json.loads(path.read_text(encoding="utf-8")))
 
     def list_agent_ids(self) -> list[str]:
         files = list(self._root.glob("*.json"))
@@ -264,10 +270,12 @@ class FileBaselineStore:
 
     def delete(self, agent_id: str, role: str | None = None) -> bool:
         path = self._path_for(agent_id, role)
-        if path.exists():
+        # Unlink-then-catch rather than exists()-then-unlink (TOCTOU).
+        try:
             path.unlink()
             return True
-        return False
+        except FileNotFoundError:
+            return False
 
 
 _SQLITE_SCHEMA = """
@@ -309,6 +317,8 @@ class SqliteBaselineStore:
         with self._open() as conn:
             self._migrate_schema_if_needed(conn)
             conn.executescript(_SQLITE_SCHEMA)
+        if self._path != ":memory:":
+            restrict_file(self._path)
 
     def _migrate_schema_if_needed(self, conn: sqlite3.Connection) -> None:
         """Add the v0.8 ``role`` column to pre-v0.8 databases.

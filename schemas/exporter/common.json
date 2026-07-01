@@ -96,7 +96,7 @@
         "evaluations",
         "events",
         "attestation_records",
-        "chain_valid",
+        "chain_hash_linked",
         "enforce_mode"
       ],
       "properties": {
@@ -105,7 +105,7 @@
         "evaluations": { "type": "integer", "minimum": 0 },
         "events": { "type": "integer", "minimum": 0 },
         "attestation_records": { "type": "integer", "minimum": 0 },
-        "chain_valid": { "type": "boolean" },
+        "chain_hash_linked": { "type": "boolean" },
         "enforce_mode": { "type": "boolean" }
       },
       "additionalProperties": true

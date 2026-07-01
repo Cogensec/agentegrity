@@ -70,7 +70,7 @@ export interface SessionSummary {
   evaluations: number;
   events: number;
   attestation_records: number;
-  chain_valid: boolean;
+  chain_hash_linked: boolean;
   enforce_mode: boolean;
   [extra: string]: unknown;
 }

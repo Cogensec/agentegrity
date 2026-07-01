@@ -142,6 +142,14 @@ A score of 1.0 means no policies were violated. A score of 0.0 means every polic
 | Rules triggered with `REQUIRE_APPROVAL` decision | `escalate` |
 | Rules triggered with `DENY` decision | `block` |
 
+Under `enforce=True`, both `escalate` and `block` deny the action. A
+`block` always denies; an `escalate` denies UNLESS an `approval_handler`
+(configured on the adapter or monitor) approves it. Without enforcement,
+both are advisory. This means the built-in `REQUIRE_APPROVAL` policies
+(high-risk tool access, code-execution boundary, financial threshold,
+multi-agent escalation) actually gate actions under enforcement rather
+than passing through.
+
 ## Audit Trail
 
 Every governance evaluation produces an audit entry regardless of outcome. The audit trail is the primary compliance evidence for organizational and regulatory audits.

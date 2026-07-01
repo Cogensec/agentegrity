@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -18,6 +19,8 @@ from typing import Any, Callable
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile, RiskTier
+
+logger = logging.getLogger("agentegrity.governance")
 
 
 class PolicyDecision(str, Enum):
@@ -67,12 +70,21 @@ class PolicyRule:
         try:
             triggered = self.condition(profile, action, context)
         except Exception as e:
-            # Rule evaluation failure is treated as a soft trigger
+            # Rule evaluation failure is treated as a soft trigger. The
+            # reason is serialized into the audit log and the attestation
+            # layer_states, so it carries only the exception CLASS, not
+            # the raw message (which can embed secrets/PII from whatever
+            # the custom condition touched). Full detail goes to the
+            # local log for operators.
+            logger.warning(
+                "governance rule %s evaluation failed: %s",
+                self.rule_id, e, exc_info=True,
+            )
             return PolicyEvaluation(
                 rule_id=self.rule_id,
                 triggered=True,
                 decision=PolicyDecision.REQUIRE_APPROVAL,
-                reason=f"Rule evaluation error: {str(e)}",
+                reason=f"Rule evaluation error: {type(e).__name__}",
             )
 
         return PolicyEvaluation(
@@ -126,11 +138,30 @@ class AuditEntry:
 
 
 # Built-in policy rules
+# Default set of tool names treated as sensitive by GOV-001. Matching is
+# exact-string by design: a name-based policy can only gate names it
+# knows. This is a starting set, NOT an exhaustive one — operators MUST
+# enumerate their own sensitive tools (including framework-namespaced
+# variants like "mcp__db__delete" and any aliases) via
+# GovernanceLayer(sensitive_tools=...) or per-call
+# context["sensitive_tools"]. Anything not listed is not gated.
+DEFAULT_SENSITIVE_TOOLS: frozenset[str] = frozenset(
+    {"database_write", "file_delete", "payment_execute", "admin_api"}
+)
+
+
 def _rule_high_risk_tool_access(
     profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
-    """Block high-risk agents from using sensitive tools without approval."""
-    sensitive_tools = {"database_write", "file_delete", "payment_execute", "admin_api"}
+    """Block high-risk agents from using sensitive tools without approval.
+
+    The sensitive-tool set is the operator-supplied
+    ``context["sensitive_tools"]`` (injected from the layer's
+    constructor) and falls back to ``DEFAULT_SENSITIVE_TOOLS``. Matching
+    is exact-string, so the set must list every sensitive tool name the
+    deployment exposes.
+    """
+    sensitive_tools = context.get("sensitive_tools") or DEFAULT_SENSITIVE_TOOLS
     action_tool = action.get("tool", "")
     return (
         profile.risk_tier in (RiskTier.HIGH, RiskTier.CRITICAL)
@@ -247,6 +278,12 @@ class GovernanceLayer:
     escalation_callback : callable, optional
         Function called when a policy requires human approval.
         Receives (AgentProfile, action, PolicyEvaluation).
+    sensitive_tools : set[str], optional
+        Tool names the GOV-001 high-risk rule gates (exact-string
+        match). Defaults to ``DEFAULT_SENSITIVE_TOOLS``. Supply the full
+        set your deployment exposes — including framework-namespaced
+        names and aliases — since unlisted tools are not gated. A
+        per-call ``context["sensitive_tools"]`` overrides this.
     """
 
     def __init__(
@@ -255,6 +292,7 @@ class GovernanceLayer:
         custom_rules: list[PolicyRule] | None = None,
         enable_audit: bool = True,
         escalation_callback: Callable[..., Any] | None = None,
+        sensitive_tools: set[str] | None = None,
     ):
         self.policy_set_name = policy_set
         self._rules = list(DEFAULT_POLICIES.get(policy_set, []))
@@ -262,6 +300,11 @@ class GovernanceLayer:
             self._rules.extend(custom_rules)
         self.enable_audit = enable_audit
         self.escalation_callback = escalation_callback
+        self._sensitive_tools = (
+            frozenset(sensitive_tools)
+            if sensitive_tools is not None
+            else DEFAULT_SENSITIVE_TOOLS
+        )
         self._audit_log: list[AuditEntry] = []
 
     @property
@@ -276,7 +319,10 @@ class GovernanceLayer:
         """
         Evaluate the agent's action against governance policies.
         """
-        ctx = context or {}
+        ctx = dict(context or {})
+        # Inject the layer's sensitive-tool set so GOV-001 sees it,
+        # without clobbering a per-call override the caller passed in.
+        ctx.setdefault("sensitive_tools", self._sensitive_tools)
         action = ctx.get("action", {})
         evaluations: list[PolicyEvaluation] = []
 

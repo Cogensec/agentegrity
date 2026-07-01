@@ -67,7 +67,7 @@ export async function report(): Promise<SessionSummary> {
       evaluations: 0,
       events: 0,
       attestation_records: 0,
-      chain_valid: true,
+      chain_hash_linked: true,
       enforce_mode: false,
     };
   }

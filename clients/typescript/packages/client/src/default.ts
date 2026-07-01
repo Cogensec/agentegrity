@@ -316,7 +316,7 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
         evaluations: evaluationCount,
         events: eventCount,
         attestation_records: 0,
-        chain_valid: true,
+        chain_hash_linked: true,
         enforce_mode: false,
       };
     },

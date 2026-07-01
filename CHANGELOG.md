@@ -8,6 +8,95 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [Unreleased]
+
+### Security
+- **Signature-aware chain verification.** `AttestationChain.verify_chain()`
+  only checks the (unkeyed SHA-256) hash linkage between records, which an
+  attacker who controls the serialized chain can recompute — it is not
+  tamper-evidence against an adversary. Added
+  `AttestationChain.verify_signatures(trusted_keys=...)`, which verifies
+  every record's Ed25519 signature and, when a pinned key set is supplied,
+  rejects records that self-vouch with an attacker-embedded `public_key`.
+  The `verify-decisions` CLI now reports signature status, accepts
+  `--trusted-key` to pin a key, prints unsigned records as `unsigned`
+  (previously shown as `verified: yes`), and exits non-zero unless
+  signatures verify.
+- **Enforcement gates on `escalate`, not only `block`.** With `enforce=True`
+  the built-in governance `REQUIRE_APPROVAL` policies (high-risk tool,
+  code-execution boundary, financial threshold, multi-agent), cortical
+  drift, and recovery chain-tamper all emit `escalate`, which the
+  enforcement path previously ignored — so "require approval" silently
+  proceeded. `_BaseAdapter` and `IntegrityMonitor` now take an
+  `approval_handler`: under enforcement `block` always denies and
+  `escalate` denies unless the handler approves it (absent handler ⇒ fail
+  closed; a raising handler ⇒ deny).
+- **Embedding-similarity cache moved from `pickle` to JSON.** A
+  filesystem-write attacker (threat-model T-T2) could poison a pickle cache
+  into arbitrary code execution on load; JSON deserializes to inert data.
+- **Bounded context buffers.** Every accumulating adapter buffer
+  (`tool_calls`, `tool_outputs`, `tool_failures`, `inputs`, `subagents`,
+  `peer_messages`, `shared_memory`, `broadcast_messages`, `tasks`) is now
+  capped at `_BUFFER_CAP` (1000) per session via a shared `_append_capped`
+  helper. Previously only broadcasts were capped, so a malicious peer/tool
+  could flood the buffers and exhaust memory (and bloat exported payloads).
+  Overflow emits a one-time `<channel>_overflow` event per channel.
+- **Exception text no longer leaks into serialized records.** The exported
+  `capture_failure` event dropped its raw `str(exc)` summary (kept
+  `exception_class`), and a crashing governance rule's `reason` (which lands
+  in the audit log and attestation `layer_states`) now carries only the
+  exception class name. Exception messages can embed tokens / URLs / PII;
+  full detail still goes to the local operator log.
+- **TLS-gated Bearer token in the TypeScript reporter.** The
+  `Authorization: Bearer` header is now attached only over a
+  credential-safe transport (HTTPS, or a loopback host); a misconfigured
+  `http://<remote>` `baseUrl` no longer leaks the token in cleartext. The
+  reporter warns once at construction when an `apiKey` is set on an unsafe
+  URL and withholds the header at request time (events still send).
+- **Dependency CVE scanning in CI.** Added a `dependency-audit` job
+  (`pip-audit` + `bun audit`, advisory) and a Dependabot config
+  (`.github/dependabot.yml`) covering pip, npm, and github-actions. The
+  enforcing/remediation path is Dependabot; the CI job is per-PR
+  visibility (non-blocking, since a full-environment audit would otherwise
+  fail `main` on ambient/transitive advisories with no project-side fix).
+
+- **Restrictive permissions on store files (shared-host hardening).**
+  `FileCheckpoint` / `FileBaselineStore` create a freshly-made store
+  directory as owner-only (0700) instead of the umask default (0755), and
+  `SqliteCheckpoint` / `SqliteBaselineStore` tighten their DB file to 0600
+  (sqlite creates it world-readable). Pre-existing directories are left as
+  the operator set them; all changes are best-effort. (The JSON backends
+  already wrote 0600 files via `NamedTemporaryFile`.)
+- **Race-free store reads/deletes.** `FileCheckpoint.load`,
+  `FileBaselineStore.load`, and `FileBaselineStore.delete` now read/unlink
+  and catch `FileNotFoundError` instead of `exists()`-then-act, removing a
+  TOCTOU window.
+- **Allow-list validation for filesystem-bound identifiers.**
+  `FileCheckpoint` (`checkpoint_id`) and `FileBaselineStore` (`agent_id`,
+  `role`) replaced their `/`,`\`,`..` block-list with a shared
+  `validate_storage_identifier` allow-list (non-empty ASCII alphanumeric /
+  underscore / hyphen). Closes empty-id collapse to `.json`, dotfiles, NUL
+  bytes, and platform-reserved names. `FileBaselineStore` also rejects
+  `__` in `agent_id`/`role` so the role-key separator stays unambiguous
+  (previously `agent="a"` + `role="b"` could collide on disk with
+  `agent="a__b"` + no role — a baseline-misattribution vector).
+
+### Added
+- **`GovernanceLayer(sensitive_tools=...)`** (and per-call
+  `context["sensitive_tools"]`) to extend the GOV-001 high-risk-tool gate.
+  The built-in set is a documented starting point, not exhaustive; matching
+  is exact-string, so operators must enumerate their own tool names
+  (including framework-namespaced variants). Exposed as
+  `DEFAULT_SENSITIVE_TOOLS`.
+
+### Changed
+- **BREAKING: session-summary field `chain_valid` renamed to
+  `chain_hash_linked`** across the Python adapters, the TypeScript client,
+  and the exporter JSON Schema (`schemas/exporter/common.json`). The old
+  name overstated the guarantee — the value reflects hash linkage
+  (`verify_chain()`), not cryptographic validity. Consumers of the exporter
+  HTTP API and `get_summary()` must update the field name.
+
 ## [0.8.0] - 2026-06-08
 
 ### Added

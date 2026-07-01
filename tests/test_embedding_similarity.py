@@ -221,6 +221,39 @@ class TestCachePersistence:
         )
         assert len(det._corpus_embeddings) == len(attack_corpus)
 
+    def test_poisoned_pickle_cache_does_not_execute(
+        self, tmp_path: Path, attack_corpus
+    ):
+        """Audit finding H1 regression: the cache is JSON, not pickle.
+
+        A filesystem-write attacker (threat-model T-T2) who drops a
+        malicious pickle at the cache path must NOT achieve code
+        execution on load. We write a pickle whose __reduce__ would
+        run on unpickling and assert the side effect never fires and
+        the cache is treated as corrupt JSON and regenerated.
+        """
+        import pickle
+
+        marker = tmp_path / "pwned"
+        cache = tmp_path / "embed_cache.pkl"
+
+        class _Bomb:
+            def __reduce__(self):
+                return (
+                    __import__("pathlib").Path(str(marker)).write_text,
+                    ("executed",),
+                )
+
+        cache.write_bytes(pickle.dumps({"signature": "x", "embeddings": _Bomb()}))
+
+        det = EmbeddingSimilarityDetector(
+            corpus=attack_corpus, cache_path=cache
+        )
+        # The payload must not have executed...
+        assert not marker.exists()
+        # ...and the detector recovered by regenerating embeddings.
+        assert len(det._corpus_embeddings) == len(attack_corpus)
+
 
 class TestIntegrationWithAdversarialLayer:
     def test_plugs_into_adversarial_layer(self, attack_corpus):

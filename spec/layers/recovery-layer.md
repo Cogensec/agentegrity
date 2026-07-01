@@ -34,9 +34,13 @@ state.
 ```
 
 The recovery layer evaluates after governance, sees the cumulative result,
-and is the last layer that contributes to the composite score. It does not
-itself block actions in the default pipeline — its `escalate` action signals
-that an out-of-band recovery procedure should run.
+and is the last layer that contributes to the composite score. In
+observation mode (`enforce=False`) its `escalate` action is advisory: it
+signals that an out-of-band recovery procedure should run, but does not
+halt the agent. Under `enforce=True`, `escalate` fails closed like every
+other escalate source — the action is denied unless a configured
+`approval_handler` approves it. Wire an `approval_handler` if you want
+escalations to route to human oversight rather than hard-deny.
 
 ## Components
 

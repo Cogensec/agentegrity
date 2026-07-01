@@ -30,9 +30,13 @@ Design notes
   Sync, no I/O contract — the operator wraps any vendor SDK call in
   a sync facade. Embeddings can be batched + cached upstream of the
   facade by the operator.
-* On-disk cache: pickle dict keyed by (corpus_hash, text_sha256) so
+* On-disk cache: JSON dict keyed by (corpus_hash, text_sha256) so
   re-running against the same corpus + same input is a cache hit.
-  Pickle protocol 5; cache file is opt-in via ``cache_path``.
+  JSON (not pickle) because the cache file is an untrusted-input
+  surface: an attacker with filesystem write access (threat-model
+  T-T2) could poison a pickle cache into arbitrary code execution on
+  load. JSON deserializes to inert data only. Cache file is opt-in
+  via ``cache_path``.
 * Threshold semantics: similarity is in [0, 1]. ``threshold=0.85``
   is the calibrated default — lower than typical "is this the same
   text" thresholds (0.95+) and higher than "vaguely related" (0.5).
@@ -43,9 +47,9 @@ Design notes
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
-import pickle
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol, runtime_checkable
@@ -275,15 +279,14 @@ class EmbeddingSimilarityDetector:
         sig = self._corpus_signature()
         if self._cache_path and self._cache_path.exists():
             try:
-                with self._cache_path.open("rb") as f:
-                    blob = pickle.load(f)
+                blob = json.loads(self._cache_path.read_text(encoding="utf-8"))
                 if blob.get("signature") == sig:
                     cached: list[Vector] = blob["embeddings"]
                     return cached
                 logger.info(
                     "EmbeddingSimilarity cache signature mismatch — regenerating"
                 )
-            except (pickle.UnpicklingError, OSError, KeyError) as exc:
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError, KeyError) as exc:
                 logger.warning(
                     "EmbeddingSimilarity cache load failed (%s) — regenerating",
                     exc,
@@ -293,12 +296,10 @@ class EmbeddingSimilarityDetector:
         if self._cache_path:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
             try:
-                with self._cache_path.open("wb") as f:
-                    pickle.dump(
-                        {"signature": sig, "embeddings": embeddings},
-                        f,
-                        protocol=5,
-                    )
+                self._cache_path.write_text(
+                    json.dumps({"signature": sig, "embeddings": embeddings}),
+                    encoding="utf-8",
+                )
             except OSError as exc:
                 logger.warning("EmbeddingSimilarity cache write failed: %s", exc)
         return embeddings

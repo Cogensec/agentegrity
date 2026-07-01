@@ -28,15 +28,70 @@ four-method Protocol and pass the instance to ``RecoveryLayer(checkpoint=...)``.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from os import fsync, replace
+from os import chmod, fsync, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterator, Protocol, runtime_checkable
+
+# Allow-list for any identifier that becomes part of a filesystem path
+# (checkpoint_id, agent_id, role). An allow-list, not a block-list:
+# block-lists ("/", "\\", "..") miss empty strings (which collapse to
+# ".json"), leading dots (dotfiles), NUL bytes, and platform-reserved
+# names. ASCII alphanumeric + underscore + hyphen is safe everywhere.
+_VALID_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def validate_storage_identifier(value: str, *, kind: str = "identifier") -> None:
+    """Reject any identifier unsafe to embed in a filename.
+
+    Raises ``ValueError`` for an empty value or one containing anything
+    outside ASCII alphanumeric / underscore / hyphen. Shared by the
+    file-backed checkpoint and baseline stores so the path-traversal
+    guard lives in exactly one place.
+    """
+    if not value or not _VALID_IDENTIFIER_RE.match(value):
+        raise ValueError(
+            f"invalid {kind} {value!r}: must be non-empty ASCII "
+            f"alphanumeric / underscore / hyphen"
+        )
+
+
+def create_private_dir(path: Path) -> None:
+    """Create ``path`` (and parents), restricting a freshly-created store
+    directory to owner-only (0700).
+
+    Checkpoints and baselines can hold behavioural data that shouldn't be
+    world-listable on a shared host, yet ``mkdir`` under the default
+    umask leaves the directory at 0755. We tighten only directories WE
+    create — a pre-existing directory keeps the mode the operator chose.
+    Best-effort: a ``chmod`` failure (e.g. not the owner) is swallowed.
+    """
+    existed = path.exists()
+    path.mkdir(parents=True, exist_ok=True)
+    if not existed:
+        try:
+            path.chmod(0o700)
+        except OSError:
+            pass
+
+
+def restrict_file(path: str | Path) -> None:
+    """Best-effort tighten a store file to owner read/write (0600).
+
+    ``sqlite3.connect`` creates its database file world-readable under the
+    default umask; the JSON backends already write 0600 temp files via
+    ``NamedTemporaryFile``, so this is for the sqlite path.
+    """
+    try:
+        chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 @dataclass
@@ -150,12 +205,10 @@ class FileCheckpoint:
 
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
-        self._root.mkdir(parents=True, exist_ok=True)
+        create_private_dir(self._root)
 
     def _path_for(self, checkpoint_id: str) -> Path:
-        # Refuse path-traversal attempts in the id.
-        if "/" in checkpoint_id or "\\" in checkpoint_id or ".." in checkpoint_id:
-            raise ValueError(f"invalid checkpoint id: {checkpoint_id!r}")
+        validate_storage_identifier(checkpoint_id, kind="checkpoint id")
         return self._root / f"{checkpoint_id}.json"
 
     def save(self, snapshot: CheckpointSnapshot) -> str:
@@ -179,11 +232,14 @@ class FileCheckpoint:
 
     def load(self, checkpoint_id: str) -> CheckpointSnapshot | None:
         path = self._path_for(checkpoint_id)
-        if not path.exists():
+        # Read directly and catch the missing-file case rather than
+        # exists()-then-read, which races (TOCTOU) if the file is removed
+        # between the two calls.
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             return None
-        return CheckpointSnapshot.from_dict(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
+        return CheckpointSnapshot.from_dict(json.loads(text))
 
     def list_ids(self) -> list[str]:
         # Sort by mtime (oldest first) so insertion-order semantics are
@@ -236,6 +292,8 @@ class SqliteCheckpoint:
             self._persistent.row_factory = sqlite3.Row
         with self._open() as conn:
             conn.executescript(_SQLITE_SCHEMA)
+        if self._path != ":memory:":
+            restrict_file(self._path)
 
     @contextmanager
     def _open(self) -> Iterator[sqlite3.Connection]:

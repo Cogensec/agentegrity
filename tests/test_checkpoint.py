@@ -9,6 +9,8 @@ schema) gets its own targeted tests below.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -137,6 +139,28 @@ class TestFileBackendSpecifics:
         with pytest.raises(ValueError):
             backend.save(snap)
 
+    def test_rejects_empty_id(self, tmp_path: Path):
+        # Audit M5: empty id collapsed to ".json" under the old block-list.
+        backend = FileCheckpoint(tmp_path)
+        snap = _snapshot()
+        snap.checkpoint_id = ""
+        with pytest.raises(ValueError):
+            backend.save(snap)
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX mode bits")
+    def test_freshly_created_root_is_private(self, tmp_path: Path):
+        # Audit L3: a store dir we create is owner-only (no group/other).
+        root = tmp_path / "ckpts"
+        FileCheckpoint(root)
+        mode = stat.S_IMODE(root.stat().st_mode)
+        assert mode & 0o077 == 0
+
+    def test_load_missing_id_returns_none(self, tmp_path: Path):
+        # Audit L4: load reads-then-catches (no exists() race); a missing
+        # id still returns None rather than raising.
+        backend = FileCheckpoint(tmp_path)
+        assert backend.load("does-not-exist") is None
+
     def test_atomic_write_no_partial_files(self, tmp_path: Path):
         # The save() implementation uses temp file + os.replace. After a
         # successful save there should be exactly one *.json per
@@ -177,6 +201,15 @@ class TestSqliteBackendSpecifics:
         loaded = backend2.load(cid)
         assert loaded is not None
         assert loaded.checkpoint_id == cid
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX mode bits")
+    def test_db_file_is_private(self, tmp_path: Path):
+        # Audit L3: sqlite creates the DB world-readable under the default
+        # umask; the backend tightens it to owner-only (0600).
+        db = tmp_path / "ck.db"
+        SqliteCheckpoint(db)
+        mode = stat.S_IMODE(db.stat().st_mode)
+        assert mode & 0o077 == 0
 
     def test_in_memory_db(self):
         backend = SqliteCheckpoint(":memory:")

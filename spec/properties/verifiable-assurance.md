@@ -68,15 +68,19 @@ After every integrity evaluation, produce a signed attestation record. The recor
 
 ### Step 2: Chain Linking
 
-Each new attestation record references the content hash of the previous record. This forms an append-only chain where any modification to a historical record is detectable — changing a record changes its hash, which breaks the chain link in the subsequent record.
+Each new attestation record references the content hash of the previous record, forming an append-only chain.
+
+> **Hash linkage is necessary but NOT sufficient for tamper-evidence.** `content_hash` is an *unkeyed* SHA-256. An attacker who controls the serialized chain can edit any record and recompute every forward link, producing a chain that passes hash-link verification (`verify_chain()`). Hash linkage detects accidental corruption and missing intermediate records; it does **not** detect adversarial modification on its own. Tamper-evidence against an adversary requires Step 3 (signature verification against a trusted key).
 
 ### Step 3: Independent Verification
 
 A third party must be able to verify any attestation record using only:
 - The attestation record itself
-- The evaluator's public key
+- **A trusted (pinned) copy of the evaluator's public key**
 
 No access to the evaluator's infrastructure, the agent, or any other system should be required.
+
+> **The embedded `public_key` field is not a trust anchor.** A record carries its own public key for convenience, but verifying a record's signature against the key embedded *in that same record* proves nothing: a forger generates their own keypair, signs every record, and embeds their public key, so the chain self-verifies. A conformant verifier MUST verify signatures (`verify_signatures(trusted_keys=...)`) against a public key obtained out-of-band and MUST reject records whose `public_key` is not in the pinned set. Verifying only hash linkage, or verifying signatures without a pinned key, does not satisfy condition 2 (Tamper-evidence) or condition 3 (Non-repudiation).
 
 ## Signing
 
