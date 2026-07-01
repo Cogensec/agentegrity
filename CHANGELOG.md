@@ -8,94 +8,164 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
-## [Unreleased]
+## [0.8.1] - 2026-07-01
+
+A security-hardening release. It closes every finding from a full
+adversarial audit of the v0.8.0 surface — the attestation trust model,
+policy enforcement, deserialization, resource bounds, information
+disclosure, credential transport, and on-disk permissions. No new
+capabilities; the API is a drop-in upgrade from 0.8.0 except for the two
+behaviour/wire changes called out under **Breaking changes** and
+**Migration** below. Every fix ships with tests (Python 611 passing,
+full TypeScript suite green, `mypy --strict` clean).
+
+Severity tags below map to the audit: **Critical**, **High**,
+**Medium**, **Low**.
 
 ### Security
-- **Signature-aware chain verification.** `AttestationChain.verify_chain()`
-  only checks the (unkeyed SHA-256) hash linkage between records, which an
-  attacker who controls the serialized chain can recompute — it is not
-  tamper-evidence against an adversary. Added
-  `AttestationChain.verify_signatures(trusted_keys=...)`, which verifies
-  every record's Ed25519 signature and, when a pinned key set is supplied,
-  rejects records that self-vouch with an attacker-embedded `public_key`.
-  The `verify-decisions` CLI now reports signature status, accepts
-  `--trusted-key` to pin a key, prints unsigned records as `unsigned`
-  (previously shown as `verified: yes`), and exits non-zero unless
-  signatures verify.
-- **Enforcement gates on `escalate`, not only `block`.** With `enforce=True`
-  the built-in governance `REQUIRE_APPROVAL` policies (high-risk tool,
-  code-execution boundary, financial threshold, multi-agent), cortical
-  drift, and recovery chain-tamper all emit `escalate`, which the
-  enforcement path previously ignored — so "require approval" silently
-  proceeded. `_BaseAdapter` and `IntegrityMonitor` now take an
-  `approval_handler`: under enforcement `block` always denies and
-  `escalate` denies unless the handler approves it (absent handler ⇒ fail
-  closed; a raising handler ⇒ deny).
-- **Embedding-similarity cache moved from `pickle` to JSON.** A
-  filesystem-write attacker (threat-model T-T2) could poison a pickle cache
-  into arbitrary code execution on load; JSON deserializes to inert data.
-- **Bounded context buffers.** Every accumulating adapter buffer
-  (`tool_calls`, `tool_outputs`, `tool_failures`, `inputs`, `subagents`,
-  `peer_messages`, `shared_memory`, `broadcast_messages`, `tasks`) is now
-  capped at `_BUFFER_CAP` (1000) per session via a shared `_append_capped`
-  helper. Previously only broadcasts were capped, so a malicious peer/tool
-  could flood the buffers and exhaust memory (and bloat exported payloads).
-  Overflow emits a one-time `<channel>_overflow` event per channel.
-- **Exception text no longer leaks into serialized records.** The exported
-  `capture_failure` event dropped its raw `str(exc)` summary (kept
-  `exception_class`), and a crashing governance rule's `reason` (which lands
-  in the audit log and attestation `layer_states`) now carries only the
-  exception class name. Exception messages can embed tokens / URLs / PII;
-  full detail still goes to the local operator log.
-- **TLS-gated Bearer token in the TypeScript reporter.** The
-  `Authorization: Bearer` header is now attached only over a
-  credential-safe transport (HTTPS, or a loopback host); a misconfigured
-  `http://<remote>` `baseUrl` no longer leaks the token in cleartext. The
-  reporter warns once at construction when an `apiKey` is set on an unsafe
-  URL and withholds the header at request time (events still send).
-- **Dependency CVE scanning in CI.** Added a `dependency-audit` job
-  (`pip-audit` + `bun audit`, advisory) and a Dependabot config
-  (`.github/dependabot.yml`) covering pip, npm, and github-actions. The
-  enforcing/remediation path is Dependabot; the CI job is per-PR
-  visibility (non-blocking, since a full-environment audit would otherwise
-  fail `main` on ambient/transitive advisories with no project-side fix).
 
-- **Restrictive permissions on store files (shared-host hardening).**
-  `FileCheckpoint` / `FileBaselineStore` create a freshly-made store
-  directory as owner-only (0700) instead of the umask default (0755), and
-  `SqliteCheckpoint` / `SqliteBaselineStore` tighten their DB file to 0600
-  (sqlite creates it world-readable). Pre-existing directories are left as
-  the operator set them; all changes are best-effort. (The JSON backends
-  already wrote 0600 files via `NamedTemporaryFile`.)
-- **Race-free store reads/deletes.** `FileCheckpoint.load`,
-  `FileBaselineStore.load`, and `FileBaselineStore.delete` now read/unlink
-  and catch `FileNotFoundError` instead of `exists()`-then-act, removing a
-  TOCTOU window.
-- **Allow-list validation for filesystem-bound identifiers.**
+- **[Critical] Signature-aware chain verification with a trust anchor.**
+  `AttestationChain.verify_chain()` only proves hash linkage between
+  records, and `content_hash` is an *unkeyed* SHA-256 — an attacker who
+  controls a serialized chain can edit any record, recompute the forward
+  links, and pass `verify_chain()`. Worse, per-record `verify()` checked
+  the signature against the public key embedded *in that same record*, so
+  a chain forged with an attacker-generated key self-verified. Neither is
+  tamper-evidence. Added `AttestationChain.verify_signatures(trusted_keys=…)`,
+  which verifies every record's Ed25519 signature and — when a pinned key
+  set is supplied — rejects records whose embedded `public_key` is not in
+  it. The docs (`verifiable-assurance`, `decision-provenance`) now state
+  plainly that hash linkage is necessary but not sufficient, and that the
+  embedded public key is not a trust anchor.
+
+- **[Critical] `verify-decisions` CLI no longer blesses unsigned chains.**
+  The CLI previously printed `chain valid: yes` and `verified: yes` for a
+  fully unsigned (or attacker-forged) chain and exited `0`. It now reports
+  signature status, prints unsigned records as `unsigned` (not
+  `verified: yes`), accepts a repeatable `--trusted-key <pub.hex>` to pin
+  the signing key, relabels the hash check as `chain linkage`, and exits
+  non-zero unless signatures verify.
+
+- **[High] Enforcement fails closed on `escalate`, not only `block`.**
+  Under `enforce=True` the built-in governance `REQUIRE_APPROVAL` policies
+  (high-risk tool, code-execution boundary, financial threshold,
+  multi-agent), cortical drift, and recovery chain-tamper all emit
+  `escalate`, which the enforcement path ignored — so "require approval"
+  silently let the action proceed. `_BaseAdapter` and `IntegrityMonitor`
+  now accept an `approval_handler`: under enforcement `block` always
+  denies, and `escalate` denies *unless* the handler approves it. No
+  handler ⇒ fail closed (deny); a raising handler ⇒ deny. A crashing
+  governance rule (which maps to `escalate`) therefore also fails closed.
+
+- **[High] Embedding-similarity cache moved from `pickle` to JSON.** The
+  on-disk cache was unpickled *before* its signature was checked, so a
+  filesystem-write attacker (threat-model T-T2) could poison it into
+  arbitrary code execution on load. JSON deserializes to inert data; a
+  corrupt/binary cache regenerates instead of raising.
+
+- **[High] `chain_valid` no longer overstates the guarantee** — see
+  **Breaking changes**.
+
+- **[Medium] Bounded context buffers (memory-exhaustion).** Every
+  accumulating adapter buffer (`tool_calls`, `tool_outputs`,
+  `tool_failures`, `inputs`, `subagents`, `peer_messages`,
+  `shared_memory`, `broadcast_messages`, `tasks`) is capped at
+  `_BUFFER_CAP` (1000) per session via a shared `_append_capped` helper.
+  Previously only broadcasts were capped, so a malicious peer/tool could
+  flood the buffers, exhaust memory, and bloat every exported payload.
+  Overflow emits a one-time `<channel>_overflow` event per channel (the
+  old broadcast path re-emitted on every drop — itself a flood vector).
+
+- **[Medium] Exception text no longer leaks into serialized records.** The
+  exported `capture_failure` event dropped its raw `str(exc)` summary
+  (keeping `exception_class`), and a crashing governance rule's `reason`
+  (which lands in the audit log and attestation `layer_states`) now
+  carries only the exception class name. Exception messages can embed
+  tokens / URLs / PII; full detail still goes to the local operator log.
+
+- **[Medium] Allow-list validation for filesystem-bound identifiers.**
   `FileCheckpoint` (`checkpoint_id`) and `FileBaselineStore` (`agent_id`,
-  `role`) replaced their `/`,`\`,`..` block-list with a shared
+  `role`) replaced their `/`, `\`, `..` block-list with a shared
   `validate_storage_identifier` allow-list (non-empty ASCII alphanumeric /
-  underscore / hyphen). Closes empty-id collapse to `.json`, dotfiles, NUL
-  bytes, and platform-reserved names. `FileBaselineStore` also rejects
-  `__` in `agent_id`/`role` so the role-key separator stays unambiguous
-  (previously `agent="a"` + `role="b"` could collide on disk with
-  `agent="a__b"` + no role — a baseline-misattribution vector).
+  underscore / hyphen). This closes the empty-id collapse to `.json`,
+  dotfiles, NUL bytes, and platform-reserved names. `FileBaselineStore`
+  also rejects `__` in `agent_id`/`role` so the role-key separator stays
+  unambiguous — previously `agent="a"` + `role="b"` could collide on disk
+  with `agent="a__b"` + no role, a baseline-misattribution vector.
+
+- **[Low] TLS-gated Bearer token in the TypeScript reporter.** The
+  `Authorization: Bearer` header is attached only over a credential-safe
+  transport (HTTPS, or a loopback host). A misconfigured `http://<remote>`
+  `baseUrl` no longer leaks the token in cleartext; the reporter warns
+  once at construction and withholds the header at request time (events
+  still send, fail-open).
+
+- **[Low] Restrictive permissions on store files (shared-host hardening).**
+  `FileCheckpoint` / `FileBaselineStore` create a freshly-made store
+  directory owner-only (0700) instead of the umask default (0755), and
+  `SqliteCheckpoint` / `SqliteBaselineStore` tighten their DB file to 0600
+  (sqlite creates it world-readable). Pre-existing directories keep the
+  mode the operator chose; all changes are best-effort. (The JSON backends
+  already wrote 0600 files via `NamedTemporaryFile`.)
+
+- **[Low] Race-free store reads/deletes.** `FileCheckpoint.load`,
+  `FileBaselineStore.load`, and `FileBaselineStore.delete` now read/unlink
+  and catch `FileNotFoundError` instead of `exists()`-then-act, closing a
+  TOCTOU window.
 
 ### Added
-- **`GovernanceLayer(sensitive_tools=...)`** (and per-call
-  `context["sensitive_tools"]`) to extend the GOV-001 high-risk-tool gate.
-  The built-in set is a documented starting point, not exhaustive; matching
-  is exact-string, so operators must enumerate their own tool names
-  (including framework-namespaced variants). Exposed as
-  `DEFAULT_SENSITIVE_TOOLS`.
+
+- **`AttestationChain.verify_signatures(trusted_keys=…)`** — cryptographic,
+  trust-anchored chain verification (see Security, above).
+- **`approval_handler`** on `_BaseAdapter` and `IntegrityMonitor` — called
+  when an action escalates under enforcement; returns `True` to allow.
+  Absent ⇒ escalations fail closed.
+- **`GovernanceLayer(sensitive_tools=…)`** and per-call
+  `context["sensitive_tools"]` to extend the GOV-001 high-risk-tool gate.
+  Matching is exact-string, so operators must enumerate their own tool
+  names (including framework-namespaced variants). The built-in set is
+  exported as `DEFAULT_SENSITIVE_TOOLS`.
+- **`--trusted-key <pub.hex>`** flag on `python -m agentegrity
+  verify-decisions` (repeatable) to pin the signing key set.
 
 ### Changed
-- **BREAKING: session-summary field `chain_valid` renamed to
+
+- **BREAKING — session-summary field `chain_valid` renamed to
   `chain_hash_linked`** across the Python adapters, the TypeScript client,
   and the exporter JSON Schema (`schemas/exporter/common.json`). The old
-  name overstated the guarantee — the value reflects hash linkage
-  (`verify_chain()`), not cryptographic validity. Consumers of the exporter
-  HTTP API and `get_summary()` must update the field name.
+  name read as a proof of cryptographic integrity; the value only reflects
+  hash linkage (`verify_chain()`). See **Migration**.
+- **Enforcement semantics under `enforce=True`** now treat `escalate` as
+  blocking-pending-approval rather than advisory (see Security). Operators
+  relying on the previous pass-through behaviour must wire an
+  `approval_handler` or expect escalating actions to be denied.
+
+### CI / tooling
+
+- Added a `dependency-audit` CI job (`pip-audit` + `bun audit`) and a
+  Dependabot config (`.github/dependabot.yml`) covering pip, npm, and
+  github-actions. The CI job is advisory (non-blocking): a
+  full-environment audit would otherwise fail `main` on ambient /
+  transitive advisories with no project-side fix. Dependabot is the
+  enforcing/remediation path.
+
+### Migration from 0.8.0
+
+- **`chain_valid` → `chain_hash_linked`.** Update any consumer of the
+  exporter HTTP API or `get_summary()` (Python and TypeScript) that reads
+  the session-summary `chain_valid` field. The value is unchanged; only
+  the key name differs. Backends validating against
+  `schemas/exporter/common.json` must adopt the renamed required field.
+- **`enforce=True` + escalating policies.** If you run with `enforce=True`
+  and depend on the built-in `REQUIRE_APPROVAL` policies (or cortical /
+  recovery escalations) *not* halting the agent, pass an
+  `approval_handler(profile, score, action) -> bool` that returns `True`
+  to approve. With no handler, escalating actions now deny (fail closed).
+- **Signed chains stay valid; unsigned chains are now surfaced as such.**
+  `verify_chain()` is unchanged. Trust-boundary consumers should adopt
+  `verify_signatures(trusted_keys=…)` with an out-of-band key, and the
+  `verify-decisions` CLI now requires `--trusted-key` to report a chain as
+  cryptographically verified.
 
 ## [0.8.0] - 2026-06-08
 
