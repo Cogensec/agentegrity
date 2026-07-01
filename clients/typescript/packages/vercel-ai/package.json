@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/vercel-ai",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Zero-config agentegrity adapter for the Vercel AI SDK (ai). TypeScript-native addition with no Python equivalent.",
   "license": "Apache-2.0",
   "type": "module",
@@ -33,7 +33,7 @@
     "security"
   ],
   "dependencies": {
-    "@agentegrity/client": "0.8.0"
+    "@agentegrity/client": "0.8.1"
   },
   "peerDependencies": {
     "ai": ">=3.0.0"

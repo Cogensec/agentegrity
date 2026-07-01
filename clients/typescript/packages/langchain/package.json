@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/langchain",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Zero-config agentegrity adapter for LangChain JS and LangGraph JS. Mirrors the Python agentegrity.langchain module.",
   "license": "Apache-2.0",
   "type": "module",
@@ -33,7 +33,7 @@
     "observability"
   ],
   "dependencies": {
-    "@agentegrity/client": "0.8.0"
+    "@agentegrity/client": "0.8.1"
   },
   "peerDependencies": {
     "@langchain/core": ">=0.3.0"
