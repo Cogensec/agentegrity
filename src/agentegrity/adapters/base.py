@@ -712,7 +712,12 @@ class _BaseAdapter:
 
         self._append_capped(
             self._buffer.tool_calls,
-            {"tool": tool_name, "type": "tool_call", **tool_input},
+            # Spread the agent-supplied arguments FIRST so the trusted
+            # "tool"/"type" fields always win. This dict becomes
+            # context["action"], which GovernanceLayer's GOV-001 checks
+            # against the sensitive-tool set; letting an argument named
+            # "tool" override the real name would bypass that gate.
+            {**tool_input, "tool": tool_name, "type": "tool_call"},
             "tool_calls",
         )
         self._buffer.tool_usage[tool_name] += 1
