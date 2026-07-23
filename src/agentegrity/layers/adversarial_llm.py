@@ -260,6 +260,26 @@ class AdversarialLLMLayer(AdversarialLayer):
                 )
                 if isinstance(content, str) and content.strip():
                     targets.append(("peer_messages", content))
+        # Multi-agent channels (v0.8). These are the cascade-compromise
+        # surface, and the regex taxonomy scores ~0 on the action-oriented
+        # injections that travel through them, so the LLM classifier must
+        # see them too. Channel labels and content keys match the regex
+        # scanner in AdversarialLayer._detect_channel_threats.
+        topology_ctx = ctx.get("topology_context") or {}
+        for entry in topology_ctx.get("shared_memory", []) or []:
+            if isinstance(entry, dict):
+                content = (
+                    entry.get("content")
+                    or entry.get("summary")
+                    or entry.get("text")
+                )
+                if isinstance(content, str) and content.strip():
+                    targets.append(("shared_memory", content))
+        for entry in topology_ctx.get("broadcast_messages", []) or []:
+            if isinstance(entry, dict):
+                content = entry.get("content") or entry.get("text")
+                if isinstance(content, str) and content.strip():
+                    targets.append(("broadcast_channels", content))
 
         # Existing threat_types per channel — used to skip duplicate
         # ThreatAssessments when the LLM agrees with the regex.
