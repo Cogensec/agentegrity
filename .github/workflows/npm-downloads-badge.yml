@@ -27,7 +27,7 @@ jobs:
         run: |
           git config user.name "requie"
           git config user.email "tarique.smith@gmail.com"
-          if ! git diff --quiet badges/npm-downloads.json; then
+          if [ -n "$(git status --porcelain badges/npm-downloads.json)" ]; then
             git add badges/npm-downloads.json
             git commit -m "chore: update npm downloads badge"
             git push
