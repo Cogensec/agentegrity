@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from agentegrity.core._telemetry_props import chain_shape
+from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture, telemetry_tag
+
 if TYPE_CHECKING:
     from agentegrity.core.decision import DecisionRecord
     from agentegrity.core.topology import AgentTopology, TopologyChange
@@ -285,13 +288,17 @@ class AttestationChain:
             )
         self._records.append(record)
 
+    @scoped_telemetry
     def verify_chain(self) -> bool:
         """Verify the integrity of the full chain.
 
         Returns True iff every record correctly references the hash of
         its predecessor.
         """
+        telemetry_tag("component", "attestation")
+        telemetry_tag("operation", "verify_chain")
         ok, _, _ = self.verify_chain_detailed()
+        telemetry_capture("attestation_verified", properties=chain_shape(self, verified=ok))
         return ok
 
     def verify_cross_agent_links(

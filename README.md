@@ -5,6 +5,7 @@
 <p align="center">
 <a href="https://npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/v/@agentegrity/client" alt="npm"></a>
 <a href="https://npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/dm/@agentegrity/client" alt="npm"></a>
+<a href="https://www.npmjs.com/org/agentegrity"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCogensec%2Fagentegrity%2Fmain%2Fbadges%2Fnpm-downloads.json" alt="npm downloads"></a>
 <a href="https://pepy.tech/projects/agentegrity"><img src="https://static.pepy.tech/personalized-badge/agentegrity?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
 <a href="https://deepwiki.com/Cogensec/agentegrity"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 <a href="https://opensource.org/licenses/Apache-2.0">
@@ -104,6 +105,26 @@ pip install "agentegrity[google-adk]"      # Google Agent Development Kit
 ```
 
 Other extras: `[crypto]` (Ed25519 attestation signing), `[llm]` (LLM-backed cortical checks via the Anthropic API), `[all]` (everything).
+
+### Telemetry (and how to opt out)
+
+Agentegrity collects **anonymous, shape-only usage analytics**: adapter names, enum values, counts, and rounded scores. It never collects prompts, model inputs or outputs, tool arguments, file paths, agent names, or any other content. No event is sent on import; a random, resettable UUID at `~/.agentegrity/id` is the only identifier.
+
+Opt out any time, no code changes needed:
+
+```bash
+export DO_NOT_TRACK=1                      # the cross-tool standard, or:
+export AGENTEGRITY_TELEMETRY_DISABLED=1    # agentegrity-specific
+```
+
+Or at runtime:
+
+```python
+import agentegrity
+agentegrity.disable_telemetry()
+```
+
+When disabled, nothing is written, no thread starts, and no network is touched. Every event and property is documented in [docs/telemetry.md](docs/telemetry.md), and all payload construction is auditable in one file: [`_telemetry_props.py`](src/agentegrity/core/_telemetry_props.py).
 
 ### Instrument an existing Claude Agent SDK agent
 
@@ -469,6 +490,7 @@ agentegrity/
 | [Cortical Layer](spec/layers/cortical-layer.md) | Self-stability verification architecture |
 | [Governance Layer](spec/layers/governance-layer.md) | Policy enforcement and audit architecture |
 | [Recovery Layer](spec/layers/recovery-layer.md) | Self-recovery verification architecture |
+| [Telemetry](docs/telemetry.md) | Anonymous usage analytics: every event documented, opt-out |
 
 ---
 

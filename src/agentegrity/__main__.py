@@ -18,6 +18,7 @@ from agentegrity import __version__
 from agentegrity.core.attestation import AttestationChain
 from agentegrity.core.decision import DecisionRecord
 from agentegrity.core.profile import AgentProfile
+from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture
 from agentegrity.sdk.client import AgentegrityClient
 
 
@@ -168,11 +169,14 @@ def _verify_decisions(path: str, trusted_key_paths: list[str]) -> int:
     return 1
 
 
+@scoped_telemetry
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
+        telemetry_capture("cli_run", properties={"command": "info"})
         return _info()
     if args[0] == "doctor":
+        telemetry_capture("cli_run", properties={"command": "doctor"})
         return _doctor()
     if args[0] == "verify-decisions":
         rest = args[1:]
@@ -196,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        telemetry_capture("cli_run", properties={"command": "verify-decisions"})
         return _verify_decisions(positional[0], trusted_key_paths)
     if args[0] in ("-h", "--help", "help"):
         print("usage: python -m agentegrity [doctor | verify-decisions <path>]")
