@@ -7,3 +7,5 @@ uvicorn[standard]>=0.27
 jsonschema>=4.21
 referencing>=0.34
 httpx>=0.25         # for the smoke test below; FastAPI TestClient depends on it
+posthog>=3.0.0
+pydantic-settings>=2.0.0

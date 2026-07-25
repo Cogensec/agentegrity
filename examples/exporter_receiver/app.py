@@ -30,17 +30,22 @@ Then point any agentegrity adapter at it::
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import sys
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import posthog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
+
+from .config import get_settings
 
 logger = logging.getLogger("agentegrity.exporter_receiver")
 logging.basicConfig(
@@ -48,6 +53,37 @@ logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
     stream=sys.stdout,
 )
+
+_ph: posthog.Posthog | None = None
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    global _ph
+    settings = get_settings()
+    if not settings.posthog_disabled and settings.posthog_project_token != "<ph_project_token>":
+        _ph = posthog.Posthog(
+            project_api_key=settings.posthog_project_token,
+            host=settings.posthog_host,
+            enable_exception_autocapture=True,
+        )
+        atexit.register(_ph.shutdown)
+    elif settings.debug:
+        logger.error(
+            "POSTHOG_PROJECT_TOKEN variable required by PostHog is missing or un-configured, "
+            "this causes events to be silently missed. This error stops appearing once "
+            "POSTHOG_PROJECT_TOKEN is configured"
+        )
+    yield
+    if _ph is not None:
+        _ph.shutdown()
+
+
+def _ph_capture(distinct_id: str, event: str, properties: dict[str, Any]) -> None:
+    """Capture a PostHog event if the client is configured."""
+    if _ph is None:
+        return
+    _ph.capture(distinct_id=distinct_id, event=event, properties=properties)
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +163,7 @@ app = FastAPI(
         "Validates every payload against schemas/exporter/*.json. "
         "Sessions are in-memory only — restart wipes everything."
     ),
+    lifespan=lifespan,
 )
 
 
@@ -163,7 +200,16 @@ async def _read_json(request: Request) -> dict[str, Any]:
 @app.post("/sessions", status_code=202)
 async def start_session(request: Request) -> JSONResponse:
     payload = await _read_json(request)
-    _validate(_session_start_validator, payload)
+    try:
+        _validate(_session_start_validator, payload)
+    except HTTPException as exc:
+        error_count = len(exc.detail.get("errors", [])) if isinstance(exc.detail, dict) else 1
+        _ph_capture(
+            "agentegrity-receiver",
+            "schema_validation_failed",
+            {"endpoint": "session_start", "error_count": error_count},
+        )
+        raise
     session = _Session(payload)
     _sessions[session.session_id] = session
     logger.info(
@@ -173,13 +219,30 @@ async def start_session(request: Request) -> JSONResponse:
         session.profile.get("agent_id", "?"),
     )
     print(json.dumps({"event": "session_start", "payload": payload}))
+    _ph_capture(
+        session.profile.get("agent_id", session.session_id),
+        "session_started",
+        {
+            "adapter_name": session.adapter_name,
+            "has_agent_id": bool(session.profile.get("agent_id")),
+        },
+    )
     return JSONResponse({"accepted": True}, status_code=202)
 
 
 @app.post("/sessions/{session_id}/events", status_code=202)
 async def append_event(session_id: str, request: Request) -> JSONResponse:
     payload = await _read_json(request)
-    _validate(_event_validator, payload)
+    try:
+        _validate(_event_validator, payload)
+    except HTTPException as exc:
+        error_count = len(exc.detail.get("errors", [])) if isinstance(exc.detail, dict) else 1
+        _ph_capture(
+            "agentegrity-receiver",
+            "schema_validation_failed",
+            {"endpoint": "append_event", "error_count": error_count},
+        )
+        raise
     if payload.get("session_id") != session_id:
         raise HTTPException(
             status_code=400,
@@ -189,6 +252,7 @@ async def append_event(session_id: str, request: Request) -> JSONResponse:
             ),
         )
     session = _sessions.get(session_id)
+    is_orphan = session is None
     if session is None:
         # Tolerate out-of-order events — accept them but tag the session
         # as orphaned so the operator can spot it. Mirrors what a real
@@ -210,13 +274,33 @@ async def append_event(session_id: str, request: Request) -> JSONResponse:
         _event_counts[session_id],
     )
     print(json.dumps({"event": "on_event", "payload": payload}))
+    distinct_id = session.profile.get("agent_id", session_id)
+    _ph_capture(
+        distinct_id,
+        "event_received",
+        {
+            "event_type": payload["event"].get("event_type"),
+            "is_orphan": is_orphan,
+            "adapter_name": session.adapter_name,
+            "event_count": _event_counts[session_id],
+        },
+    )
     return JSONResponse({"accepted": True}, status_code=202)
 
 
 @app.post("/sessions/{session_id}/end", status_code=202)
 async def end_session(session_id: str, request: Request) -> JSONResponse:
     payload = await _read_json(request)
-    _validate(_session_end_validator, payload)
+    try:
+        _validate(_session_end_validator, payload)
+    except HTTPException as exc:
+        error_count = len(exc.detail.get("errors", [])) if isinstance(exc.detail, dict) else 1
+        _ph_capture(
+            "agentegrity-receiver",
+            "schema_validation_failed",
+            {"endpoint": "end_session", "error_count": error_count},
+        )
+        raise
     if payload.get("session_id") != session_id:
         raise HTTPException(
             status_code=400,
@@ -226,6 +310,7 @@ async def end_session(session_id: str, request: Request) -> JSONResponse:
             ),
         )
     session = _sessions.get(session_id)
+    had_known_session = session is not None
     if session is None:
         logger.warning("session_end for unknown session %s — ignoring", session_id)
     else:
@@ -238,6 +323,19 @@ async def end_session(session_id: str, request: Request) -> JSONResponse:
             session.summary.get("chain_hash_linked", "?"),
         )
     print(json.dumps({"event": "session_end", "payload": payload}))
+    summary = payload.get("summary", {})
+    distinct_id = (session.profile.get("agent_id", session_id) if session else session_id)
+    _ph_capture(
+        distinct_id,
+        "session_ended",
+        {
+            "events_count": summary.get("events", 0),
+            "evaluations_count": summary.get("evaluations", 0),
+            "chain_hash_linked": summary.get("chain_hash_linked"),
+            "had_known_session": had_known_session,
+            "adapter_name": session.adapter_name if session else None,
+        },
+    )
     return JSONResponse({"accepted": True}, status_code=202)
 
 

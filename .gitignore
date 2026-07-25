@@ -34,3 +34,4 @@ Thumbs.db
 # Distribution
 *.whl
 *.tar.gz
+.env
