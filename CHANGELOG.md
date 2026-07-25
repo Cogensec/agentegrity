@@ -8,6 +8,21 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [Unreleased]
+
+### Added
+
+- **Anonymous, shape-only usage telemetry.** The client, monitor, chain
+  verification, and CLI now emit anonymous usage events (enum values,
+  counts, rounded scores, durations — never prompts, tool arguments,
+  names, or any agent content) to guide adapter and evaluation-surface
+  priorities. Stdlib-only sender, zero new dependencies, and telemetry
+  failures can never reach the host process. Opt out with
+  `DO_NOT_TRACK=1`, `AGENTEGRITY_TELEMETRY_DISABLED=1`, or
+  `agentegrity.disable_telemetry()`; every event and property is
+  documented in [docs/telemetry.md](docs/telemetry.md), and all payload
+  construction is auditable in `src/agentegrity/core/_telemetry_props.py`.
+
 ## [0.8.1] - 2026-07-01
 
 A security-hardening release. It closes every finding from a full

@@ -106,6 +106,8 @@ pip install "agentegrity[google-adk]"      # Google Agent Development Kit
 
 Other extras: `[crypto]` (Ed25519 attestation signing), `[llm]` (LLM-backed cortical checks via the Anthropic API), `[all]` (everything).
 
+**Telemetry:** agentegrity collects anonymous usage analytics (adapter names, score shapes, counts — never prompts, tool arguments, or any agent content). Opt out with `DO_NOT_TRACK=1`; see [docs/telemetry.md](docs/telemetry.md#5-how-to-disable) for everything it sends.
+
 ### Instrument an existing Claude Agent SDK agent
 
 Three lines of agentegrity, zero configuration. `hooks()` lazily builds a default adapter with a sensible `AgentProfile`, the full four-layer evaluator, and measure-only semantics (it never blocks tool calls).
@@ -470,6 +472,7 @@ agentegrity/
 | [Cortical Layer](spec/layers/cortical-layer.md) | Self-stability verification architecture |
 | [Governance Layer](spec/layers/governance-layer.md) | Policy enforcement and audit architecture |
 | [Recovery Layer](spec/layers/recovery-layer.md) | Self-recovery verification architecture |
+| [Telemetry](docs/telemetry.md) | Anonymous usage analytics: every event documented, opt-out |
 
 ---
 
