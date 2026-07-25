@@ -273,29 +273,51 @@ class AdversarialLLMLayer(AdversarialLayer):
 
     async def _classify_targets(
         self, targets: list[tuple[str, str]]
-    ) -> list[tuple[tuple[str, str], LLMAdversarialAssessment]]:
-        """Classify targets with bounded concurrency, reusing cached
-        verdicts. Returns (target, verdict) pairs in target order."""
+    ) -> tuple[list[tuple[tuple[str, str], LLMAdversarialAssessment]], int]:
+        """Classify targets with bounded concurrency, one LLM call per
+        unique (channel, text) — repeats are served from the verdict
+        cache or deduplicated within the batch. Returns (target,
+        verdict) pairs in target order, plus the number of targets
+        resolved without a fresh LLM call.
+        """
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
-        async def classify(target: tuple[str, str]) -> LLMAdversarialAssessment:
-            channel, text = target
-            cached = self._verdict_cache.get(self._cache_key(channel, text))
+        resolved: dict[tuple[str, str], LLMAdversarialAssessment] = {}
+        pending: dict[tuple[str, str], tuple[str, str]] = {}
+        for target in targets:
+            key = self._cache_key(*target)
+            cached = self._verdict_cache.get(key)
             if cached is not None:
-                return cached
+                resolved[key] = cached
+            elif key not in pending:
+                pending[key] = target
+
+        async def classify(key: tuple[str, str], target: tuple[str, str]) -> None:
+            _channel, text = target
             async with semaphore:
                 verdict = await _call_claude_classify(self._llm_config, text)
             # Never cache a fail-open verdict: it records an outage, not
             # a judgment, and pinning it would blind every later pass
             # over the same text.
             if not verdict.failed:
-                self._verdict_cache[self._cache_key(channel, text)] = verdict
+                self._verdict_cache[key] = verdict
                 while len(self._verdict_cache) > self._max_cache:
                     self._verdict_cache.popitem(last=False)
-            return verdict
+            resolved[key] = verdict
 
-        verdicts = await asyncio.gather(*(classify(t) for t in targets))
-        return list(zip(targets, verdicts))
+        await asyncio.gather(*(classify(k, t) for k, t in pending.items()))
+
+        reused = len(targets) - len(pending)
+        if reused:
+            logger.debug(
+                "adversarial LLM scan reused %d of %d verdicts "
+                "(cache or in-batch duplicate); %d fresh calls",
+                reused,
+                len(targets),
+                len(pending),
+            )
+        pairs = [(t, resolved[self._cache_key(*t)]) for t in targets]
+        return pairs, reused
 
     async def aevaluate(
         self,
@@ -384,8 +406,9 @@ class AdversarialLLMLayer(AdversarialLayer):
                 t.get("threat_type", "")
             )
 
+        classified, reused_verdicts = await self._classify_targets(targets)
         llm_threats: list[ThreatAssessment] = []
-        for (channel, _text), verdict in await self._classify_targets(targets):
+        for (channel, _text), verdict in classified:
             if not verdict.is_attack:
                 continue
             # Don't duplicate an attack the regex taxonomy already
@@ -409,6 +432,8 @@ class AdversarialLLMLayer(AdversarialLayer):
                 "new_threats": 0,
                 "targets_scanned": len(targets),
                 "targets_dropped": dropped,
+                "reused_verdicts": reused_verdicts,
+                "llm_calls": len(targets) - reused_verdicts,
             }
             return base_result
 
@@ -423,6 +448,8 @@ class AdversarialLLMLayer(AdversarialLayer):
             "new_families": sorted({t.threat_type for t in llm_threats}),
             "targets_scanned": len(targets),
             "targets_dropped": dropped,
+            "reused_verdicts": reused_verdicts,
+            "llm_calls": len(targets) - reused_verdicts,
         }
 
         # Recompute coherence score from the union of pattern + LLM

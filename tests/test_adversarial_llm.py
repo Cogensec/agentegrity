@@ -403,10 +403,49 @@ class TestCostBounds:
         await layer.aevaluate(_profile(), ctx)
         assert calls == 1
 
-        # Second pass: same entry plus a new one. Only the new one bills.
+        # Second pass: same entry plus a new one. Only the new one bills,
+        # and the reuse is reported so the skip is never invisible.
         ctx["topology_context"]["shared_memory"].append({"content": "entry two"})
-        await layer.aevaluate(_profile(), ctx)
+        result = await layer.aevaluate(_profile(), ctx)
         assert calls == 2
+        assert result.details["llm_classifier"]["reused_verdicts"] == 1
+        assert result.details["llm_classifier"]["llm_calls"] == 1
+
+    @pytest.mark.asyncio
+    async def test_duplicate_text_in_one_batch_bills_once(self, layer, monkeypatch):
+        # The same text repeated within a single evaluation (e.g. a
+        # message mirrored into shared memory twice) is one unique
+        # (channel, text) question — one call, not N.
+        from agentegrity.layers import adversarial_llm
+
+        calls = 0
+
+        async def counting_classify(_config, _text):
+            nonlocal calls
+            calls += 1
+            return adversarial_llm.LLMAdversarialAssessment(
+                is_attack=False,
+                family="benign",
+                severity=0.0,
+                confidence=0.9,
+                description="benign",
+            )
+
+        monkeypatch.setattr(
+            adversarial_llm, "_call_claude_classify", counting_classify
+        )
+
+        result = await layer.aevaluate(
+            _profile(),
+            {
+                "topology_context": {
+                    "shared_memory": [{"content": "same text"}] * 5,
+                }
+            },
+        )
+        assert calls == 1
+        assert result.details["llm_classifier"]["reused_verdicts"] == 4
+        assert result.details["llm_classifier"]["llm_calls"] == 1
 
     @pytest.mark.asyncio
     async def test_verdict_cache_is_bounded(self, monkeypatch):

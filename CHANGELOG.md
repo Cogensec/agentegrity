@@ -59,9 +59,11 @@ in beta until the v1.0 stability criteria documented in
   200). Truncation is logged and reported as
   `details["llm_classifier"]["targets_dropped"]`, so a capped scan never
   reads as full coverage. Verdicts are cached per (channel, content
-  hash) so the growing buffers don't re-bill already-classified text;
-  fail-open verdicts are never cached, since they record an outage
-  rather than a judgment.
+  hash) so the growing buffers don't re-bill already-classified text,
+  duplicate text within one evaluation is classified once, and every
+  reuse is reported (`reused_verdicts`, `llm_calls`) so skipped calls
+  are visible too; fail-open verdicts are never cached, since they
+  record an outage rather than a judgment.
 
 ### Migration from 0.8.1
 
