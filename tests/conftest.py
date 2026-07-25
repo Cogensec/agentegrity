@@ -7,6 +7,13 @@ import types
 
 import pytest
 
+from agentegrity.core.telemetry import disable_telemetry
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The test suite must never emit telemetry."""
+    disable_telemetry()
+
 
 @pytest.fixture
 def stub_langchain(monkeypatch: pytest.MonkeyPatch) -> None:
