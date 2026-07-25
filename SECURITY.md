@@ -121,6 +121,12 @@ critical by default.
 * **Fail-open exporter fan-out.** A broken `SessionExporter` cannot
   break the instrumented agent — every callback runs through
   `_safe_await` / `safeCall` and exceptions are logged and dropped.
+* **Shape-only telemetry.** Anonymous usage telemetry payloads carry only
+  enum values, counts, and rounded scores — never prompts, tool
+  arguments, names, or agent content. All payload construction is
+  centralized and auditable in `src/agentegrity/core/_telemetry_props.py`,
+  and the `DO_NOT_TRACK` / `AGENTEGRITY_TELEMETRY_DISABLED` opt-outs are
+  honored before any file or network I/O.
 * **Tamper recovery.** `RecoveryLayer.restore_to(checkpoint_id)`
   rebuilds the chain from a stored snapshot preserving original link
   hashes — `verify_chain()` returns True post-restore.

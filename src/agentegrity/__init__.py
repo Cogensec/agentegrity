@@ -33,6 +33,7 @@ from agentegrity.core.decision import (
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.monitor import IntegrityMonitor
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.core.telemetry import disable_telemetry
 from agentegrity.core.topology import (
     AgentMember,
     AgentRole,
@@ -90,6 +91,7 @@ __all__ = [
     "TopologyChange",
     "IntegrityMonitor",
     "AgentegrityClient",
+    "disable_telemetry",
     "FrameworkEvent",
     "SessionExporter",
     "AdversarialLayer",

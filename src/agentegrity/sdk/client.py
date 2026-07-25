@@ -8,12 +8,20 @@ This is the recommended entry point for most users.
 from __future__ import annotations
 
 import importlib
+import time
 from typing import Any
 
+from agentegrity.core._telemetry_props import (
+    adapter_shape,
+    profile_shape,
+    record_shape,
+    score_shape,
+)
 from agentegrity.core.attestation import AttestationRecord, build_attestation_record
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.monitor import IntegrityMonitor, ViolationAction
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture, telemetry_tag
 from agentegrity.layers.adversarial import AdversarialLayer
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.governance import GovernanceLayer
@@ -119,6 +127,7 @@ class AgentegrityClient:
             **kwargs,
         )
 
+    @scoped_telemetry
     def evaluate(
         self,
         profile: AgentProfile,
@@ -139,7 +148,20 @@ class AgentegrityClient:
         IntegrityScore
             Composite score with per-property and per-layer breakdown.
         """
-        return self._evaluator.evaluate(profile, context)
+        telemetry_tag("component", "client")
+        telemetry_tag("operation", "evaluate")
+        telemetry_capture("client_evaluate_started", properties=profile_shape(profile))
+        started = time.perf_counter()
+        score = self._evaluator.evaluate(profile, context)
+        telemetry_capture(
+            "client_evaluate_finished",
+            properties={
+                **profile_shape(profile),
+                **score_shape(score),
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+            },
+        )
+        return score
 
     def monitor(
         self,
@@ -171,6 +193,7 @@ class AgentegrityClient:
             on_violation=ViolationAction(on_violation),
         )
 
+    @scoped_telemetry
     def attest(
         self,
         profile: AgentProfile,
@@ -192,8 +215,13 @@ class AgentegrityClient:
             An unsigned attestation record. Call .sign() with a
             private key to produce a verifiable attestation.
         """
-        return build_attestation_record(profile, score)
+        telemetry_tag("component", "client")
+        telemetry_tag("operation", "attest")
+        record = build_attestation_record(profile, score)
+        telemetry_capture("client_attest", properties=record_shape(record))
+        return record
 
+    @scoped_telemetry
     def create_adapter(
         self,
         name: str,
@@ -227,14 +255,29 @@ class AgentegrityClient:
             raise ValueError(
                 f"Unknown adapter '{name}'. Valid: {valid}"
             ) from None
-        module = importlib.import_module(module_path)
-        adapter_cls = getattr(module, class_name)
-        return adapter_cls(
-            profile=profile,
-            evaluator=self._evaluator,
-            enforce=enforce,
-            api_key=api_key,
+        telemetry_tag("component", "client")
+        telemetry_tag("operation", "create_adapter")
+        try:
+            module = importlib.import_module(module_path)
+            adapter_cls = getattr(module, class_name)
+            adapter = adapter_cls(
+                profile=profile,
+                evaluator=self._evaluator,
+                enforce=enforce,
+                api_key=api_key,
+            )
+        except ImportError:
+            # Framework not installed — still the highest-value signal we have.
+            telemetry_capture(
+                "adapter_created",
+                properties={**adapter_shape(name), "framework_available": False},
+            )
+            raise
+        telemetry_capture(
+            "adapter_created",
+            properties={**adapter_shape(name), "framework_available": True},
         )
+        return adapter
 
     @property
     def evaluator(self) -> IntegrityEvaluator:
