@@ -179,8 +179,14 @@ def _rule_code_execution_boundary(
 def _rule_financial_threshold(
     profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
 ) -> bool:
-    """Flag financial transactions above threshold."""
-    amount = action.get("amount", 0)
+    """Flag financial transactions above threshold.
+
+    Reads ``action["arguments"]["amount"]``. Untrusted call arguments
+    are nested under ``arguments`` so they can never shadow the trusted
+    top-level ``tool``/``type`` fields; callers passing actions directly
+    must use the nested shape.
+    """
+    amount = (action.get("arguments") or {}).get("amount", 0)
     threshold = context.get("financial_threshold", 1000)
     return action.get("type") == "financial" and amount > threshold
 

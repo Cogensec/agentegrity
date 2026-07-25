@@ -30,9 +30,12 @@ pattern-based path.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +48,17 @@ from agentegrity.layers.adversarial import (
 logger = logging.getLogger("agentegrity.layers.adversarial_llm")
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+# Classification is one API call per (channel, text) target, and the
+# adapter's multi-agent buffers cap at 1000 entries per channel. Left
+# unbounded, one evaluation over an attacker-writable channel becomes
+# thousands of sequential calls — a latency tail and a cost-amplification
+# lever. Bound both the parallelism and the per-evaluation target count.
+DEFAULT_MAX_CONCURRENCY = 8
+DEFAULT_MAX_TARGETS = 200
+# Verdict cache bound. A layer instance can outlive many sessions, so
+# the cache needs its own ceiling — oldest entries are evicted first.
+DEFAULT_VERDICT_CACHE_SIZE = 4096
 
 
 @dataclass
@@ -98,6 +112,10 @@ class LLMAdversarialAssessment:
     severity: float
     confidence: float
     description: str
+    # True only for fail-open verdicts (network error, missing key,
+    # malformed response). These are outages, not judgments — the
+    # verdict cache must never pin them.
+    failed: bool = False
 
     @classmethod
     def neutral(cls) -> "LLMAdversarialAssessment":
@@ -109,6 +127,7 @@ class LLMAdversarialAssessment:
             severity=0.0,
             confidence=0.0,
             description="LLM check failed open",
+            failed=True,
         )
 
 
@@ -189,6 +208,18 @@ class AdversarialLLMLayer(AdversarialLayer):
       severity, and confidence. The aggregate ``coherence_score`` is
       recomputed to reflect both signals.
 
+      It covers the same seven channels the regex scanner does,
+      including the v0.8 multi-agent ones (``shared_memory``,
+      ``broadcast_channels``) where the regex taxonomy is weakest.
+
+      Cost is bounded on two axes: at most ``max_concurrency`` calls
+      in flight, and at most ``max_targets_per_evaluation`` targets
+      per pass (truncation is logged and reported in
+      ``details["llm_classifier"]["targets_dropped"]``). Verdicts are
+      cached per (channel, content-hash), so the growing adapter
+      buffers don't re-bill text already classified. Fail-open
+      verdicts are never cached.
+
     Failures are fail-open — the layer reverts to pattern-based
     behaviour on any LLM-side error (network, missing key, malformed
     JSON, timeout).
@@ -211,6 +242,9 @@ class AdversarialLLMLayer(AdversarialLayer):
         block_on_critical: bool = True,
         patterns: list[DetectorPattern] | None = None,
         extra_patterns: list[DetectorPattern] | None = None,
+        max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+        max_targets_per_evaluation: int = DEFAULT_MAX_TARGETS,
+        verdict_cache_size: int = DEFAULT_VERDICT_CACHE_SIZE,
     ) -> None:
         super().__init__(
             coherence_threshold=coherence_threshold,
@@ -220,6 +254,48 @@ class AdversarialLLMLayer(AdversarialLayer):
             extra_patterns=extra_patterns,
         )
         self._llm_config = _LLMConfig(api_key=api_key, model=model, timeout=timeout)
+        self._max_concurrency = max(1, max_concurrency)
+        self._max_targets = max(1, max_targets_per_evaluation)
+        # Content-addressed verdict cache. Adapter buffers only grow, so
+        # every evaluation re-presents text already classified in an
+        # earlier pass; re-billing it is pure waste. Keyed on
+        # (channel, sha256(text)) because the same text on a different
+        # channel is a different question. Insertion-ordered, evicted
+        # oldest-first at verdict_cache_size.
+        self._max_cache = max(1, verdict_cache_size)
+        self._verdict_cache: OrderedDict[
+            tuple[str, str], LLMAdversarialAssessment
+        ] = OrderedDict()
+
+    @staticmethod
+    def _cache_key(channel: str, text: str) -> tuple[str, str]:
+        return (channel, hashlib.sha256(text.encode("utf-8")).hexdigest())
+
+    async def _classify_targets(
+        self, targets: list[tuple[str, str]]
+    ) -> list[tuple[tuple[str, str], LLMAdversarialAssessment]]:
+        """Classify targets with bounded concurrency, reusing cached
+        verdicts. Returns (target, verdict) pairs in target order."""
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+
+        async def classify(target: tuple[str, str]) -> LLMAdversarialAssessment:
+            channel, text = target
+            cached = self._verdict_cache.get(self._cache_key(channel, text))
+            if cached is not None:
+                return cached
+            async with semaphore:
+                verdict = await _call_claude_classify(self._llm_config, text)
+            # Never cache a fail-open verdict: it records an outage, not
+            # a judgment, and pinning it would blind every later pass
+            # over the same text.
+            if not verdict.failed:
+                self._verdict_cache[self._cache_key(channel, text)] = verdict
+                while len(self._verdict_cache) > self._max_cache:
+                    self._verdict_cache.popitem(last=False)
+            return verdict
+
+        verdicts = await asyncio.gather(*(classify(t) for t in targets))
+        return list(zip(targets, verdicts))
 
     async def aevaluate(
         self,
@@ -260,6 +336,44 @@ class AdversarialLLMLayer(AdversarialLayer):
                 )
                 if isinstance(content, str) and content.strip():
                     targets.append(("peer_messages", content))
+        # Multi-agent channels (v0.8). These are the cascade-compromise
+        # surface, and the regex taxonomy scores ~0 on the action-oriented
+        # injections that travel through them, so the LLM classifier must
+        # see them too. Channel labels and content keys match the regex
+        # scanner in AdversarialLayer._detect_channel_threats — the label
+        # asymmetry (broadcast_messages key, broadcast_channels label) is
+        # deliberate: the dedup map below is keyed on the label.
+        topology_ctx = ctx.get("topology_context") or {}
+        for entry in topology_ctx.get("shared_memory", []) or []:
+            if isinstance(entry, dict):
+                content = (
+                    entry.get("content")
+                    or entry.get("summary")
+                    or entry.get("text")
+                )
+                if isinstance(content, str) and content.strip():
+                    targets.append(("shared_memory", content))
+        for entry in topology_ctx.get("broadcast_messages", []) or []:
+            if isinstance(entry, dict):
+                content = entry.get("content") or entry.get("text")
+                if isinstance(content, str) and content.strip():
+                    targets.append(("broadcast_channels", content))
+
+        # Bound the per-evaluation cost. Truncation is logged and
+        # surfaced in details so a capped scan never reads as full
+        # coverage.
+        dropped = 0
+        if len(targets) > self._max_targets:
+            dropped = len(targets) - self._max_targets
+            logger.warning(
+                "adversarial LLM scan truncated: %d of %d targets "
+                "classified (max_targets_per_evaluation=%d); %d unscanned",
+                self._max_targets,
+                len(targets),
+                self._max_targets,
+                dropped,
+            )
+            targets = targets[: self._max_targets]
 
         # Existing threat_types per channel — used to skip duplicate
         # ThreatAssessments when the LLM agrees with the regex.
@@ -271,8 +385,7 @@ class AdversarialLLMLayer(AdversarialLayer):
             )
 
         llm_threats: list[ThreatAssessment] = []
-        for channel, text in targets:
-            verdict = await _call_claude_classify(self._llm_config, text)
+        for (channel, _text), verdict in await self._classify_targets(targets):
             if not verdict.is_attack:
                 continue
             # Don't duplicate an attack the regex taxonomy already
@@ -292,7 +405,11 @@ class AdversarialLLMLayer(AdversarialLayer):
             )
 
         if not llm_threats:
-            base_result.details["llm_classifier"] = {"new_threats": 0}
+            base_result.details["llm_classifier"] = {
+                "new_threats": 0,
+                "targets_scanned": len(targets),
+                "targets_dropped": dropped,
+            }
             return base_result
 
         # Append LLM-detected threats and recompute coherence + action.
@@ -304,6 +421,8 @@ class AdversarialLLMLayer(AdversarialLayer):
         base_result.details["llm_classifier"] = {
             "new_threats": len(llm_threats),
             "new_families": sorted({t.threat_type for t in llm_threats}),
+            "targets_scanned": len(targets),
+            "targets_dropped": dropped,
         }
 
         # Recompute coherence score from the union of pattern + LLM

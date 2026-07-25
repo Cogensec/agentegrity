@@ -712,7 +712,12 @@ class _BaseAdapter:
 
         self._append_capped(
             self._buffer.tool_calls,
-            {"tool": tool_name, "type": "tool_call", **tool_input},
+            # Agent-supplied arguments are untrusted and live under
+            # "arguments" — never spread flat, or an argument named
+            # "tool"/"type" would shadow the fields governance rules
+            # (GOV-001's sensitive-tool gate) match on. Mirrors the
+            # nesting the decision-record path already uses.
+            {"tool": tool_name, "type": "tool_call", "arguments": tool_input},
             "tool_calls",
         )
         self._buffer.tool_usage[tool_name] += 1
