@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 
+from agentegrity.core._telemetry_props import lowest_property
 from agentegrity.core.attestation import (
     AttestationChain,
     build_attestation_record,
@@ -25,6 +26,7 @@ from agentegrity.core.decision import (
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
+from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture, telemetry_tag
 
 logger = logging.getLogger("agentegrity.monitor")
 
@@ -124,6 +126,7 @@ class IntegrityMonitor:
         self._violations: list[ViolationEvent] = []
         self._evaluation_count: int = 0
 
+    @scoped_telemetry
     def evaluate(self, context: dict[str, Any] | None = None) -> IntegrityScore:
         """
         Run an integrity evaluation and handle the result.
@@ -131,6 +134,8 @@ class IntegrityMonitor:
         Returns the IntegrityScore. Triggers violation handling
         if the score falls below threshold.
         """
+        telemetry_tag("component", "monitor")
+        telemetry_tag("operation", "evaluate")
         score = self.evaluator.evaluate(self.profile, context)
         self._evaluation_count += 1
 
@@ -251,6 +256,14 @@ class IntegrityMonitor:
             context=context or {},
         )
         self._violations.append(event)
+
+        telemetry_capture(
+            "monitor_violation",
+            properties={
+                "action": self.on_violation.value,
+                "property": lowest_property(score),
+            },
+        )
 
         # Log
         logger.warning(
