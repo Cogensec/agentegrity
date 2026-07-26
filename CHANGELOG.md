@@ -8,7 +8,30 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
-## [Unreleased]
+## [0.9.0] - 2026-07-26
+
+Adds anonymous usage telemetry and closes two injection paths into the
+enforcement surface. The version is a **minor**, not a patch: telemetry is
+a new capability that is enabled by default and makes the library's first
+outbound network call, and the tool-call action shape changes in a way
+that can silently stop a custom `PolicyRule` from matching. Both are
+called out under **Migration from 0.8.1** below.
+
+Telemetry is shape-only by construction: enum values, counts, rounded
+scores, and durations, never prompts, tool arguments, agent names, or any
+other content. Every event and property is documented in
+[docs/telemetry.md](docs/telemetry.md), all payload construction is
+auditable in one file, and it is disabled by the cross-tool standard
+`DO_NOT_TRACK=1`. If you would rather not send it, opt out before
+upgrading.
+
+The security fixes matter independently of the telemetry: the **Critical**
+one let a prompt-injected agent bypass the governance approval gate
+entirely while the signed attestation recorded `governance: pass` for a
+check that never ran.
+
+Severity tags below map to the audit: **Critical**, **High**,
+**Medium**, **Low**.
 
 ### Added
 
