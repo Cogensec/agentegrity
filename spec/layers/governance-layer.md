@@ -101,6 +101,29 @@ No rules. All actions pass. Suitable for development and testing only.
 
 All tool access requires human approval. Suitable for initial deployment of high-risk agents.
 
+## The Action Dict
+
+Rules receive the action under evaluation as a dict. For an
+adapter-captured tool call its shape is:
+
+```python
+{"tool": "payment_execute", "type": "tool_call", "arguments": {...}}
+```
+
+`tool` and `type` are set by the framework and are trusted. Everything
+the agent supplied for the call lives under `arguments` and is
+**untrusted** — it may be attacker-influenced through prompt injection.
+
+The nesting is a security boundary, not a style choice. Arguments were
+previously spread flat over the same dict, so a call argument named
+`tool` overwrote the real tool name and GOV-001's sensitive-tool gate
+matched the forgery instead of the actual tool. Keeping arguments in
+their own namespace makes that collision impossible.
+
+Rules matching on `tool` or `type` read them from the top level. Rules
+matching on anything the caller supplied must read it from
+`action["arguments"]`.
+
 ## Custom Policy Rules
 
 Organizations define custom rules using the `PolicyRule` interface:
@@ -113,7 +136,9 @@ rule = PolicyRule(
     name="PII Access Control",
     description="Block agents from accessing PII without classification clearance",
     condition=lambda profile, action, ctx: (
-        action.get("data_classification") == "pii"
+        # Call arguments are untrusted input and live under "arguments";
+        # reading this key off the top level silently never matches.
+        action.get("arguments", {}).get("data_classification") == "pii"
         and "pii_clearance" not in profile.capabilities
     ),
     decision=PolicyDecision.DENY,
@@ -122,6 +147,11 @@ rule = PolicyRule(
 
 governance = GovernanceLayer(policy_set="enterprise-default", custom_rules=[rule])
 ```
+
+A rule condition that reads an argument key off the top level does not
+raise — it just stops matching. When migrating rules written against the
+pre-`arguments` shape, check each one against a call you expect it to
+catch.
 
 ## Governance Scoring
 

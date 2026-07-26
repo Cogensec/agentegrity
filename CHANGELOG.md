@@ -23,6 +23,60 @@ in beta until the v1.0 stability criteria documented in
   documented in [docs/telemetry.md](docs/telemetry.md), and all payload
   construction is auditable in `src/agentegrity/core/_telemetry_props.py`.
 
+### Security
+
+- **[Critical] Tool arguments could shadow the fields governance matches
+  on.** The `pre_tool_use` buffer entry was built by spreading the
+  agent's own arguments over the trusted fields
+  (`{"tool": tool_name, "type": "tool_call", **tool_input}`). That entry
+  becomes `context["action"]`, so an argument named `tool` overwrote the
+  real tool name and GOV-001's sensitive-tool gate evaluated the forgery:
+  a prompt-injected agent calling `payment_execute` with
+  `{"tool": "noop"}` skipped approval entirely. Under `enforce=True` the
+  dangerous tool ran; in observe-only mode the signed attestation
+  recorded `governance: pass` for a check that never happened. The same
+  trick overrode `type`. Untrusted arguments now nest under
+  `action["arguments"]`, where no agent-controlled key can collide with
+  a trusted field.
+- **[High] The LLM classifier skipped the two multi-agent channels.**
+  The regex scanner covers seven channels; `AdversarialLLMLayer.aevaluate`
+  fed only five to the classifier, so `shared_memory` and
+  `broadcast_messages` reached neither strong detector — the regex
+  taxonomy scores ~0 on the action-oriented injections that travel
+  through them. A compromised peer's injection into shared memory passed
+  clean, which is the cross-agent cascade (T-CASCADE) the v0.8 channels
+  exist to defend. Both channels are now classified, using the same
+  content keys and channel labels as the regex scanner.
+
+### Changed
+
+- **LLM classification cost is bounded.** `aevaluate` issued one
+  sequential API call per target with no ceiling, while the multi-agent
+  buffers cap at 1000 entries per channel — a latency tail and a
+  cost-amplification lever on attacker-writable content. Calls now run
+  with bounded concurrency (`max_concurrency`, default 8) and a
+  per-evaluation target ceiling (`max_targets_per_evaluation`, default
+  200). Truncation is logged and reported as
+  `details["llm_classifier"]["targets_dropped"]`, so a capped scan never
+  reads as full coverage. Verdicts are cached per (channel, content
+  hash) so the growing buffers don't re-bill already-classified text,
+  duplicate text within one evaluation is classified once, and every
+  reuse is reported (`reused_verdicts`, `llm_calls`) so skipped calls
+  are visible too; fail-open verdicts are never cached, since they
+  record an outage rather than a judgment.
+
+### Migration from 0.8.1
+
+- **Tool-call actions nest their arguments.** `context["action"]` for a
+  tool call is now
+  `{"tool": …, "type": "tool_call", "arguments": {…}}` instead of the
+  arguments spread flat. Custom `PolicyRule` conditions reading
+  call-derived keys off the top level must read them from
+  `action["arguments"]`. The built-in GOV-003 financial rule was updated
+  accordingly: it reads `action["arguments"]["amount"]` and no longer
+  honors a top-level `amount`. Rules matching only `tool` or `type` are
+  unaffected.
+
 ## [0.8.1] - 2026-07-01
 
 A security-hardening release. It closes every finding from a full
