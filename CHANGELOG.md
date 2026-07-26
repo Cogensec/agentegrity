@@ -8,6 +8,47 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [Unreleased]
+
+### Added
+
+- **OpenTelemetry session exporter (`[otel]` extra).**
+  `agentegrity.exporters.otel.OTelSessionExporter` implements the
+  `SessionExporter` protocol, so registering it on any adapter streams
+  live session data to any OTLP backend with no adapter changes. Each
+  session becomes one trace (`agentegrity.session` root + a child span
+  per evaluated event); integrity data lives under the stable
+  `agentegrity.*` namespace, with `gen_ai.*` attributes emitted
+  opportunistically for interop (the GenAI semantic conventions are
+  still in development, so they are never load-bearing). Metrics cover
+  evaluations, enforcement denials, instrumentation-health events,
+  composite/per-layer score histograms, evaluation latency, and active
+  sessions. Per-agent grouping rides the standard `service.name`
+  resource attribute rather than a high-cardinality metric label.
+  - Chain integrity is reported as two distinct signals, matching the
+    0.8.1 trust model: `agentegrity.chain.hash_linked` (linkage only —
+    never marks a span as errored by itself) and, when a
+    `chain_provider` is supplied, `agentegrity.chain.signatures_verified`
+    from `verify_signatures()`, which is the actual tamper-evidence and
+    does set an error status. The signature attribute is omitted rather
+    than defaulted when no check ran, so "not checked" stays
+    distinguishable from "failed".
+  - Raw prompt and tool content is hashed into attributes, never stored
+    verbatim (storing it is a named GenAI anti-pattern: attributes are
+    indexed, size-limited, and leak PII). `capture_content=True`
+    opts into truncated content as span events, droppable at the
+    collector.
+  - Enforcement denials count both `block` and `escalate`, since 0.8.1
+    made escalate fail closed. Instrumentation-health counting covers
+    `capture_failure`, `subagent_orphan`, and the dynamic
+    `<channel>_overflow` family added by the 0.8.1 buffer caps.
+  - Topologies are dimensioned by member count and flagged
+    `multi_agent` only at >= 2 members, so a degenerate single-member
+    topology does not inflate multi-agent counts in a fleet view.
+  - A dedicated OTLP logs signal is deferred until the OpenTelemetry
+    Python logs SDK leaves experimental status; enforcement and health
+    events are recorded as span events plus counters in the meantime.
+
 ## [0.9.0] - 2026-07-26
 
 Adds anonymous usage telemetry and closes two injection paths into the
