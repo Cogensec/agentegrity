@@ -12,6 +12,31 @@ in beta until the v1.0 stability criteria documented in
 
 ### Added
 
+- **Built-in `HTTPExporter`, env auto-attach, and the `agentegrity pro`
+  quick-connect CLI.** Connecting an instrumented agent to an
+  `agentegrity-pro` dashboard no longer requires hand-writing an exporter
+  class. Setting `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` (alias
+  `AGENTEGRITY_URL`) self-attaches a stdlib-only exporter at adapter
+  construction, which is what lets `agentegrity pro … -- <command>` stream an
+  agent it did not write. Delivery is FIFO on a background daemon thread
+  (the ingest API rejects an event for a session it has not seen, so ordering
+  is a correctness requirement) with an `atexit` flush, and fail-open
+  throughout. `agentegrity` is now a real console script.
+
+- **Attached network sinks are disclosed.** An exporter streams *full event
+  content* (prompts, tool arguments, tool outputs), not the shape-only data
+  the telemetry sender emits, and two environment variables are enough to turn
+  that on. Attaching is therefore never silent: the adapter logs the
+  destination origin at INFO when it attaches, and `get_summary()` (what
+  `report()` returns) gained an `exporters` entry listing every attached sink
+  as `{"type": …, "target": …}`. An empty list is the proof a run stayed
+  local, which is the part a log line alone cannot give you — Python's default
+  level is WARNING and would swallow the INFO message. Neither surface ever
+  carries the bearer token. Exporters may implement an optional
+  `describe() -> dict[str, str]`; it is a convention rather than a
+  `SessionExporter` Protocol member, so existing custom exporters keep working
+  and are reported by class name.
+
 - **OpenTelemetry session exporter (`[otel]` extra).**
   `agentegrity.exporters.otel.OTelSessionExporter` implements the
   `SessionExporter` protocol, so registering it on any adapter streams

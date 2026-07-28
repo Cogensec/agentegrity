@@ -243,6 +243,8 @@ The first form checks the token and prints which workspace it belongs to. The se
 
 Delivery runs on a background daemon thread: ordered (the ingest API rejects an event for a session it has not seen yet), stdlib-only, and fail-open — a dashboard outage never surfaces in the agent.
 
+Attaching is never silent. Unlike telemetry, an exporter streams **full event content** (prompts, tool arguments, tool outputs) to the URL you configure, so the SDK logs the destination at INFO when it attaches and lists every attached sink under `exporters` in `report()`. An empty `exporters` list is the proof a run stayed local. Neither surface ever contains the token.
+
 ### Export session data to any sink
 
 Every adapter exposes `register_exporter(exporter)`. Implement three async methods — `on_session_start`, `on_event`, `on_session_end` — and every evaluated event streams to your exporter as JSON-ready dicts. Exporter exceptions are caught and logged so a broken sink can never break the agent.

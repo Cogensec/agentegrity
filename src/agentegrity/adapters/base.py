@@ -68,6 +68,13 @@ class SessionExporter(Protocol):
     All methods are async. Exceptions raised by an exporter are caught
     and logged by ``_BaseAdapter._notify_exporters`` — an exporter must
     never be able to break the instrumented agent.
+
+    Optionally, an exporter may implement ``describe() -> dict[str, str]``
+    returning at least a ``type`` key (and a ``target`` when it streams to a
+    nameable destination). It is a convention rather than a required member, so
+    custom exporters keep working without it; ``get_summary()["exporters"]``
+    falls back to the class name. Whatever ``describe()`` returns is serialized
+    into the session summary, so it must never include credentials.
     """
 
     async def on_session_start(
@@ -309,13 +316,45 @@ class _BaseAdapter:
         construction.
         """
         try:
-            from agentegrity.exporters.http import from_env
+            from agentegrity.exporters.http import ENV_URL, from_env
 
             exporter = from_env()
             if exporter is not None:
                 self.register_exporter(exporter)
+                # Attaching a network sink is never silent. Two env vars turn
+                # on full-content egress (events carry prompts and tool
+                # arguments), so say so and name the destination. The origin is
+                # safe to print; the bearer token is never logged. This INFO
+                # line is a convenience — the durable disclosure is the
+                # ``exporters`` entry in get_summary(), because Python's default
+                # log level is WARNING and would swallow this entirely.
+                logger.info(
+                    "agentegrity: streaming session data to %s (configured by %s)",
+                    exporter.base,
+                    ENV_URL,
+                )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("env exporter auto-attach failed: %s", exc)
+
+    def _describe_exporters(self) -> list[dict[str, str]]:
+        """Describe every attached sink for the session summary.
+
+        ``describe()`` is an optional convention, not a member of the
+        :class:`SessionExporter` Protocol — requiring it would break every
+        custom exporter written before it existed. Exporters that omit it are
+        reported by class name.
+        """
+        described: list[dict[str, str]] = []
+        for exporter in self._exporters:
+            describe = getattr(exporter, "describe", None)
+            if callable(describe):
+                try:
+                    described.append(describe())
+                    continue
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("exporter describe() failed: %s", exc)
+            described.append({"type": type(exporter).__name__})
+        return described
 
     def _notify_exporters(self, method_name: str, *args: Any) -> None:
         """Fan out a callback to every registered exporter, fail-open.
@@ -1022,4 +1061,7 @@ class _BaseAdapter:
             "chain_records": len(records),
             "chain_hash_linked": self._chain.verify_chain(),
             "enforce_mode": self._enforce,
+            # Which network sinks (if any) this session streamed to. Empty is
+            # the proof a run stayed local.
+            "exporters": self._describe_exporters(),
         }

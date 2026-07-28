@@ -131,6 +131,7 @@ def report() -> dict[str, Any]:
             "attestation_records": 0,
             "chain_hash_linked": True,
             "enforce_mode": False,
+            "exporters": [],
         }
     return _default.get_summary()
 

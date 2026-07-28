@@ -4,9 +4,18 @@ This is what lets ``agentegrity pro … -- <command>`` stream an agent it did no
 write: the adapter self-attaches an HTTP exporter when the environment supplies
 a token and URL, so no user code changes. Absent those vars the SDK must stay
 entirely local and send nothing anywhere.
+
+Because two env vars are enough to turn on **full-content** egress (events carry
+prompts and tool arguments, unlike the shape-only telemetry sender), attaching
+must never be silent. It has to be discoverable two ways: an INFO log at attach
+time, and an ``exporters`` entry in the session summary that ``report()``
+returns. The log is the convenience; the summary is the durable surface, since
+Python's default log level is WARNING and would swallow the INFO line entirely.
 """
 
 from __future__ import annotations
+
+import logging
 
 from agentegrity import AgentegrityClient
 from agentegrity.exporters.http import HTTPExporter
@@ -52,3 +61,70 @@ def test_session_id_is_32_hex(monkeypatch):
     sid = _adapter().session_id
     assert len(sid) == 32
     assert all(c in "0123456789abcdef" for c in sid)
+
+
+# --- disclosure: attaching a network sink must never be silent ---
+
+
+def test_attach_logs_the_destination(monkeypatch, caplog):
+    _clear(monkeypatch)
+    monkeypatch.setenv("AGENTEGRITY_TOKEN", "agk_live_x")
+    monkeypatch.setenv("AGENTEGRITY_EXPORTER_URL", "https://dash.test")
+
+    with caplog.at_level(logging.INFO, logger="agentegrity.adapters"):
+        _adapter()
+
+    assert any("https://dash.test" in r.getMessage() for r in caplog.records)
+
+
+def test_attach_log_never_leaks_the_token(monkeypatch, caplog):
+    """The URL is safe to print. The bearer token is not."""
+    _clear(monkeypatch)
+    monkeypatch.setenv("AGENTEGRITY_TOKEN", "agk_live_supersecret")
+    monkeypatch.setenv("AGENTEGRITY_EXPORTER_URL", "https://dash.test")
+
+    with caplog.at_level(logging.DEBUG):
+        _adapter()
+
+    assert all("agk_live_supersecret" not in r.getMessage() for r in caplog.records)
+
+
+def test_no_env_logs_nothing(monkeypatch, caplog):
+    _clear(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="agentegrity.adapters"):
+        _adapter()
+    assert all("streaming session data" not in r.getMessage() for r in caplog.records)
+
+
+def test_summary_reports_the_attached_sink(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("AGENTEGRITY_TOKEN", "agk_live_x")
+    monkeypatch.setenv("AGENTEGRITY_EXPORTER_URL", "https://dash.test")
+
+    summary = _adapter().get_summary()
+    assert summary["exporters"] == [
+        {"type": "HTTPExporter", "target": "https://dash.test"}
+    ]
+    # The summary is serialized to the sink and to logs; it must stay token-free.
+    assert "agk_live_x" not in str(summary)
+
+
+def test_summary_reports_empty_when_local(monkeypatch):
+    """A local-only run must be able to *prove* it is not streaming."""
+    _clear(monkeypatch)
+    assert _adapter().get_summary()["exporters"] == []
+
+
+def test_exporter_without_describe_still_reported(monkeypatch):
+    """describe() is an optional convention, not a Protocol requirement — a
+    custom exporter predating it must not break the summary."""
+    _clear(monkeypatch)
+
+    class Custom:
+        async def on_session_start(self, session_id, adapter_name, profile): ...
+        async def on_event(self, session_id, event): ...
+        async def on_session_end(self, session_id, summary): ...
+
+    adapter = _adapter()
+    adapter.register_exporter(Custom())
+    assert adapter.get_summary()["exporters"] == [{"type": "Custom"}]

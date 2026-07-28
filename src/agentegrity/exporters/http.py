@@ -106,6 +106,15 @@ class HTTPExporter:
             {"session_id": session_id, "summary": summary},
         )
 
+    def describe(self) -> dict[str, str]:
+        """Identify this sink for ``get_summary()["exporters"]``.
+
+        Reports the destination origin so an operator can see *where* session
+        data is going. Never includes the bearer token: the summary is
+        serialized to the sink itself and into logs.
+        """
+        return {"type": type(self).__name__, "target": self.base}
+
     # -- delivery ----------------------------------------------------------
     def _enqueue(self, path: str, body: dict[str, Any]) -> None:
         """Hand off to the worker. Never blocks the caller's event loop."""
