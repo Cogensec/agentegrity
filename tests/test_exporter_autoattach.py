@@ -74,7 +74,14 @@ def test_attach_logs_the_destination(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="agentegrity.adapters"):
         _adapter()
 
-    assert any("https://dash.test" in r.getMessage() for r in caplog.records)
+    attached = [r for r in caplog.records if "streaming session data" in r.getMessage()]
+    assert len(attached) == 1
+    # Assert on the structured log args by equality rather than substring-matching
+    # the formatted message. Equality is the stronger claim, and a URL substring
+    # check is exactly the pattern CodeQL flags
+    # (py/incomplete-url-substring-sanitization): a hostile URL can carry a
+    # trusted-looking string at an arbitrary position, so `in` proves little.
+    assert attached[0].args == ("https://dash.test", "AGENTEGRITY_EXPORTER_URL")
 
 
 def test_attach_log_never_leaks_the_token(monkeypatch, caplog):
