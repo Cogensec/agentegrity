@@ -43,6 +43,7 @@ from agentegrity.core.topology import (
 )
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
+from agentegrity.exporters.http import HTTPExporter
 from agentegrity.google_adk import instrument as google_adk_instrument
 from agentegrity.google_adk import report as google_adk_report
 from agentegrity.langchain import instrument_chain as langchain_instrument_chain
@@ -94,6 +95,7 @@ __all__ = [
     "disable_telemetry",
     "FrameworkEvent",
     "SessionExporter",
+    "HTTPExporter",
     "AdversarialLayer",
     "CorticalLayer",
     "GovernanceLayer",

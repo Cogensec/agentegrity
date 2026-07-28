@@ -75,6 +75,9 @@ dev = [
     "jsonschema>=4.0",
 ]
 
+[project.scripts]
+agentegrity = "agentegrity.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/cogensec/agentegrity"
 Documentation = "https://github.com/cogensec/agentegrity/tree/main/spec"

@@ -249,6 +249,7 @@ class _BaseAdapter:
         self._evaluation_count = 0
         self._session_id = uuid4().hex
         self._exporters: list[SessionExporter] = []
+        self._attach_env_exporter()
         self._session_started = False
         self._session_ended = False
         self._pending_topology_change: Any = None  # TopologyChange | None
@@ -296,6 +297,25 @@ class _BaseAdapter:
         """
         if exporter not in self._exporters:
             self._exporters.append(exporter)
+
+    def _attach_env_exporter(self) -> None:
+        """Self-attach an HTTP exporter when the environment configures one.
+
+        Set ``AGENTEGRITY_TOKEN`` and ``AGENTEGRITY_EXPORTER_URL`` and an
+        already-instrumented agent streams to a backend with no code change —
+        which is what lets ``agentegrity pro … -- <command>`` wrap an agent it
+        did not write. Absent those vars nothing is attached and the SDK stays
+        entirely local. Never raises: failing to attach must not break
+        construction.
+        """
+        try:
+            from agentegrity.exporters.http import from_env
+
+            exporter = from_env()
+            if exporter is not None:
+                self.register_exporter(exporter)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("env exporter auto-attach failed: %s", exc)
 
     def _notify_exporters(self, method_name: str, *args: Any) -> None:
         """Fan out a callback to every registered exporter, fail-open.

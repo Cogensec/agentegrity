@@ -227,7 +227,23 @@ ok = adapter.attestation_chain.verify_cross_agent_links({
 
 Claude Agent SDK is single-agent at the framework level — no topology is declared, and the conformance suite pins the absence. Multi-agent layer checks (cascade detection, peer-authority, `GOV-004` gating, role-conformant drift via per-role `BaselineStore` keys) silently no-op for single-agent deployments.
 
-### Export session data to a dashboard or external sink
+### Stream to a dashboard in one command
+
+Point an already-instrumented agent at an [**`agentegrity-pro`**](https://github.com/cogensec/agentegrity-pro) dashboard with no code changes:
+
+```bash
+# verify the connection
+agentegrity pro --ingest-token agk_live_… --url https://your-dashboard --push
+
+# run your agent with streaming enabled
+agentegrity pro --ingest-token agk_live_… --url https://your-dashboard -- python my_agent.py
+```
+
+The first form checks the token and prints which workspace it belongs to. The second sets `AGENTEGRITY_TOKEN` / `AGENTEGRITY_EXPORTER_URL` and execs your command; adapters constructed inside it self-attach the built-in `HTTPExporter`, so nothing in your agent changes. Setting those two variables yourself has the same effect.
+
+Delivery runs on a background daemon thread: ordered (the ingest API rejects an event for a session it has not seen yet), stdlib-only, and fail-open — a dashboard outage never surfaces in the agent.
+
+### Export session data to any sink
 
 Every adapter exposes `register_exporter(exporter)`. Implement three async methods — `on_session_start`, `on_event`, `on_session_end` — and every evaluated event streams to your exporter as JSON-ready dicts. Exporter exceptions are caught and logged so a broken sink can never break the agent.
 

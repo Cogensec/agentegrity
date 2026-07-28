@@ -169,12 +169,124 @@ def _verify_decisions(path: str, trusted_key_paths: list[str]) -> int:
     return 1
 
 
+def _pro(rest: list[str]) -> int:
+    """Connect an instrumented agent to an agentegrity-pro dashboard.
+
+        agentegrity pro --ingest-token <TOKEN> [--url <URL>] [--push]
+        agentegrity pro --ingest-token <TOKEN> --url <URL> -- python my_agent.py
+
+    Verifies the token, then either reports the connection or execs the given
+    command with the exporter env set so the SDK self-attaches inside it.
+    """
+    import json
+    import os
+    import urllib.error
+    import urllib.request
+
+    from agentegrity.exporters.http import ENV_TOKEN, ENV_URL, ENV_URL_ALIAS
+
+    token = os.environ.get(ENV_TOKEN)
+    url = os.environ.get(ENV_URL) or os.environ.get(ENV_URL_ALIAS)
+    push = False
+    command: list[str] = []
+
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg == "--":
+            command = rest[i + 1 :]
+            break
+        if arg in ("--ingest-token", "--token"):
+            if i + 1 >= len(rest):
+                print(f"error: {arg} requires a value", file=sys.stderr)
+                return 2
+            token = rest[i + 1]
+            i += 2
+            continue
+        if arg == "--url":
+            if i + 1 >= len(rest):
+                print("error: --url requires a value", file=sys.stderr)
+                return 2
+            url = rest[i + 1]
+            i += 2
+            continue
+        if arg == "--push":
+            push = True
+            i += 1
+            continue
+        print(f"error: unknown option {arg!r}", file=sys.stderr)
+        return 2
+
+    if not token:
+        print(
+            "error: no ingest token. Pass --ingest-token or set "
+            f"{ENV_TOKEN}. Mint one in Settings -> Ingest Tokens.",
+            file=sys.stderr,
+        )
+        return 2
+    if not url:
+        print(f"error: no dashboard URL. Pass --url or set {ENV_URL}.", file=sys.stderr)
+        return 2
+    url = url.rstrip("/")
+
+    # Verify first: turns an opaque token into visible proof it points at the
+    # workspace the user expects, before anything is streamed.
+    request = urllib.request.Request(
+        f"{url}/ingest/verify", headers={"Authorization": f"Bearer {token}"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as resp:
+            info = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            print(
+                "error: token rejected. Mint a fresh one in Settings -> Ingest Tokens.",
+                file=sys.stderr,
+            )
+        elif exc.code == 404:
+            print(
+                f"error: {url} has no /ingest/verify — is this an "
+                "agentegrity-pro backend, and is it up to date?",
+                file=sys.stderr,
+            )
+        else:
+            print(f"error: HTTP {exc.code} from {url}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: cannot reach {url}: {exc}", file=sys.stderr)
+        return 1
+
+    workspace = info.get("org_name") or "unknown workspace"
+    print(f"connected to {url} (workspace: {workspace})")
+
+    if not command:
+        if push:
+            print(f"exporter env ready: {ENV_URL}={url} {ENV_TOKEN}=<token>")
+            print("re-run with '-- <your agent command>' to stream a session.")
+        else:
+            print("pass --push to stream, or '-- <command>' to run your agent.")
+        return 0
+
+    os.environ[ENV_TOKEN] = token
+    os.environ[ENV_URL] = url
+    print(f"running: {' '.join(command)}")
+    try:
+        os.execvp(command[0], command)
+    except FileNotFoundError:
+        print(f"error: command not found: {command[0]}", file=sys.stderr)
+        return 127
+    return 0  # pragma: no cover - execvp replaces the process
+
+
 @scoped_telemetry
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
         telemetry_capture("cli_run", properties={"command": "info"})
         return _info()
+    if args[0] == "pro":
+        telemetry_capture("cli_run", properties={"command": "pro"})
+        return _pro(args[1:])
     if args[0] == "doctor":
         telemetry_capture("cli_run", properties={"command": "doctor"})
         return _doctor()
@@ -203,9 +315,13 @@ def main(argv: list[str] | None = None) -> int:
         telemetry_capture("cli_run", properties={"command": "verify-decisions"})
         return _verify_decisions(positional[0], trusted_key_paths)
     if args[0] in ("-h", "--help", "help"):
-        print("usage: python -m agentegrity [doctor | verify-decisions <path>]")
+        print("usage: agentegrity [pro | doctor | verify-decisions <path>]")
         print()
         print("  (no args)                       print version + adapter availability")
+        print("  pro --ingest-token <TOKEN>      connect to an agentegrity-pro dashboard")
+        print("    --url <URL>                   backend origin (or AGENTEGRITY_EXPORTER_URL)")
+        print("    --push                        verify and report the connection")
+        print("    -- <command>...               run <command> with streaming enabled")
         print("  doctor                          run an end-to-end self-check")
         print("  verify-decisions <chain.json>   verify a serialized chain")
         print("    --trusted-key <pub.hex>       pin a signing key (repeatable);")
