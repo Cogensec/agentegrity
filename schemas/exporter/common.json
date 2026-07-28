@@ -15,53 +15,127 @@
         "risk_tier"
       ],
       "properties": {
-        "agent_id": { "type": "string" },
-        "name": { "type": "string" },
-        "agent_type": { "type": "string" },
-        "capabilities": { "type": "array", "items": { "type": "string" } },
-        "deployment_context": { "type": "string" },
-        "risk_tier": { "type": "string" },
-        "framework": { "type": ["string", "null"] },
-        "model_provider": { "type": ["string", "null"] },
-        "model_id": { "type": ["string", "null"] },
-        "metadata": { "type": "object" },
-        "created_at": { "type": "string", "format": "date-time" }
+        "agent_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "agent_type": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deployment_context": {
+          "type": "string"
+        },
+        "risk_tier": {
+          "type": "string"
+        },
+        "framework": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "additionalProperties": true
     },
     "IntegrityScore": {
       "type": "object",
-      "required": ["composite", "properties", "layer_results"],
+      "required": [
+        "composite",
+        "properties",
+        "layer_results"
+      ],
       "properties": {
-        "composite": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "composite": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
         "properties": {
           "type": "object",
-          "additionalProperties": { "type": "number" }
+          "additionalProperties": {
+            "type": "number"
+          }
         },
         "layer_results": {
           "type": "array",
-          "items": { "$ref": "#/$defs/LayerResult" }
+          "items": {
+            "$ref": "#/$defs/LayerResult"
+          }
         },
-        "action": { "type": "string" }
+        "action": {
+          "type": "string"
+        }
       },
       "additionalProperties": true
     },
     "LayerResult": {
       "type": "object",
-      "required": ["layer_name", "score", "passed", "action"],
+      "required": [
+        "layer_name",
+        "score",
+        "passed",
+        "action"
+      ],
       "properties": {
-        "layer_name": { "type": "string" },
-        "score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-        "passed": { "type": "boolean" },
-        "action": { "type": "string" },
-        "details": { "type": "object", "additionalProperties": true },
-        "latency_ms": { "type": "number" }
+        "layer_name": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "latency_ms": {
+          "type": "number"
+        }
       },
       "additionalProperties": true
     },
     "FrameworkEvent": {
       "type": "object",
-      "required": ["event_type", "timestamp", "adapter_name", "data"],
+      "required": [
+        "event_type",
+        "timestamp",
+        "adapter_name",
+        "data"
+      ],
       "properties": {
         "event_type": {
           "type": "string",
@@ -76,13 +150,25 @@
             "pre_compact"
           ]
         },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "adapter_name": { "type": "string" },
-        "data": { "type": "object", "additionalProperties": true },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "adapter_name": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "evaluation_result": {
           "oneOf": [
-            { "$ref": "#/$defs/IntegrityScore" },
-            { "type": "null" }
+            {
+              "$ref": "#/$defs/IntegrityScore"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -100,13 +186,51 @@
         "enforce_mode"
       ],
       "properties": {
-        "adapter": { "type": "string" },
-        "agent_id": { "type": ["string", "null"] },
-        "evaluations": { "type": "integer", "minimum": 0 },
-        "events": { "type": "integer", "minimum": 0 },
-        "attestation_records": { "type": "integer", "minimum": 0 },
-        "chain_hash_linked": { "type": "boolean" },
-        "enforce_mode": { "type": "boolean" }
+        "adapter": {
+          "type": "string"
+        },
+        "agent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evaluations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attestation_records": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chain_hash_linked": {
+          "type": "boolean"
+        },
+        "enforce_mode": {
+          "type": "boolean"
+        },
+        "exporters": {
+          "type": "array",
+          "description": "Network sinks this session streamed to. Empty means the run stayed local. Each entry carries a 'type' and, when the sink has a nameable destination, a 'target' origin. Never contains credentials.",
+          "items": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            }
+          }
+        }
       },
       "additionalProperties": true
     }

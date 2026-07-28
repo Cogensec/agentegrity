@@ -223,6 +223,16 @@ class OTelSessionExporter:
             description="Active instrumented sessions.",
         )
 
+    def describe(self) -> dict[str, str]:
+        """Identify this sink for ``get_summary()["exporters"]``.
+
+        No ``target``: the OTLP destination is owned by the OpenTelemetry SDK's
+        own configuration (``OTEL_EXPORTER_OTLP_ENDPOINT`` and the process's
+        provider), not by this class, so reporting one here could contradict
+        where spans actually go.
+        """
+        return {"type": type(self).__name__}
+
     # --- SessionExporter protocol ---
 
     async def on_session_start(self,
