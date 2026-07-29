@@ -88,6 +88,74 @@ We believe in being explicit about what the library is and is not, because a sec
 
 **What it does not do.** The adversarial layer ships a regex pattern taxonomy across six attack families (prompt_injection, jailbreak, role_confusion, system_prompt_extraction, data_exfiltration, prompt_obfuscation) — calibrated 1.000 TPR / 0.000 FPR on the in-repo synthetic suite, but **0.000 TPR on the InjecAgent benchmark** (N=2,108) because action-oriented injections embedded in tool responses don't match the regex patterns. Closing that gap requires either an embedding-similarity check or an LLM-backed semantic classifier — both planned for the next release. The cortical layer uses Jensen-Shannon distance with Laplace smoothing for drift detection (replaces the older asymmetric KL approximation) and structural memory-provenance inspection. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.9.0 the library ships fourteen framework adapters — eight in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK, AutoGen, Agno, AWS Bedrock Agents) and six in TypeScript (the original five plus Vercel AI SDK). The Semantic Kernel adapter is deferred pending Microsoft Agent Framework GA (Q2 2026); one MAF adapter will cover both.
 
+## Supported Frameworks
+
+Fourteen zero-config adapters — same three-line instrumentation, same signed attestation chain.
+
+<table>
+  <tr>
+    <td align="center" width="110">
+      <a href="https://github.com/anthropics/claude-agent-sdk-python">
+        <img src="https://github.com/anthropics.png" width="48" alt="Claude Agent SDK"/><br/>
+        <sub><b>Claude Agent SDK</b></sub>
+      </a><br/><sub>Python · TS</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/langchain-ai/langchain">
+        <img src="https://github.com/langchain-ai.png" width="48" alt="LangChain / LangGraph"/><br/>
+        <sub><b>LangChain / LangGraph</b></sub>
+      </a><br/><sub>Python · TS</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/openai/openai-agents-python">
+        <img src="https://github.com/openai.png" width="48" alt="OpenAI Agents SDK"/><br/>
+        <sub><b>OpenAI Agents SDK</b></sub>
+      </a><br/><sub>Python · TS</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/crewAIInc/crewAI">
+        <img src="https://github.com/crewAIInc.png" width="48" alt="CrewAI"/><br/>
+        <sub><b>CrewAI</b></sub>
+      </a><br/><sub>Python · TS</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/google/adk-python">
+        <img src="https://github.com/google.png" width="48" alt="Google ADK"/><br/>
+        <sub><b>Google ADK</b></sub>
+      </a><br/><sub>Python · TS</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="110">
+      <a href="https://github.com/microsoft/autogen">
+        <img src="https://github.com/microsoft.png" width="48" alt="AutoGen"/><br/>
+        <sub><b>AutoGen</b></sub>
+      </a><br/><sub>Python</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/agno-agi/agno">
+        <img src="https://github.com/agno-agi.png" width="48" alt="Agno"/><br/>
+        <sub><b>Agno</b></sub>
+      </a><br/><sub>Python</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/awslabs">
+        <img src="https://github.com/aws.png" width="48" alt="AWS Bedrock Agents"/><br/>
+        <sub><b>AWS Bedrock Agents</b></sub>
+      </a><br/><sub>Python</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="https://github.com/vercel/ai">
+        <img src="https://github.com/vercel.png" width="48" alt="Vercel AI SDK"/><br/>
+        <sub><b>Vercel AI SDK</b></sub>
+      </a><br/><sub>TypeScript</sub>
+    </td>
+    <td align="center" width="110"></td>
+  </tr>
+</table>
+
+<sub>All product names, logos, and brands are property of their respective owners and are used for identification purposes only. Use does not imply endorsement.</sub>
+
 **What it deliberately is not.** It is not a guardrail. It does not block agent actions on its own — when an action is blocked, that is the result of explicit governance policy, not inferred risk. It is not a runtime enforcement layer trying to compete with WAF-style products. It is not a hosted service. It is a measurement and verification library, and everything it does is in service of producing evidence that an agent has (or lacks) the structural properties of a self-securing system.
 
 ---
