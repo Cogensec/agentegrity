@@ -1,6 +1,6 @@
 {
   "name": "@agentegrity/google-adk",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Zero-config agentegrity adapter for the Google ADK JS. Mirrors the Python agentegrity.google_adk module.",
   "license": "Apache-2.0",
   "type": "module",
@@ -33,7 +33,7 @@
     "observability"
   ],
   "dependencies": {
-    "@agentegrity/client": "0.9.0"
+    "@agentegrity/client": "0.10.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

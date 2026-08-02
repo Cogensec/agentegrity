@@ -8,7 +8,31 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
-## [Unreleased]
+## [0.10.0] - 2026-07-28
+
+Session export. The SDK could always evaluate locally; this release adds two
+supported ways to get that data off the agent, both riding the existing
+`SessionExporter` seam with no adapter changes: **OpenTelemetry** to any OTLP
+backend, and **direct HTTP** to an `agentegrity-pro` dashboard via a new
+`agentegrity pro` command.
+
+Both are additive, and no public API changed. One behaviour change is worth
+reading before you upgrade, though.
+
+**`AGENTEGRITY_TOKEN` + `AGENTEGRITY_URL` are no longer inert.** The README has
+told people to set them for some time, but in the OSS package nothing consumed
+them. As of 0.10.0 they self-attach an `HTTPExporter` at adapter construction,
+which is what lets `agentegrity pro … -- <command>` stream an agent it did not
+write. If those variables are already set in an environment, that process
+starts streaming **full event content** — prompts, tool arguments, tool
+outputs — to the configured URL on upgrade. That is the documented behaviour
+finally working rather than a regression, but it is a real change in what
+leaves the process, so unset them if you did not mean it.
+
+Because of that, attaching a sink is deliberately never silent: the
+destination is logged at INFO and every attached sink is listed under
+`exporters` in `report()`. An empty list is what lets a run prove it stayed
+local.
 
 ### Added
 
@@ -73,6 +97,30 @@ in beta until the v1.0 stability criteria documented in
   - A dedicated OTLP logs signal is deferred until the OpenTelemetry
     Python logs SDK leaves experimental status; enforcement and health
     events are recorded as span events plus counters in the meantime.
+
+### Changed
+
+- **The README's egress claim is accurate again.** The "What it does"
+  paragraph said no agent content "ever leaves your process" and that
+  telemetry was the library's one and only outbound call. Shipping an
+  exporter that streams prompts and tool arguments made both halves false.
+  It now describes the two *classes* of egress and how to control each —
+  shape-only telemetry, on by default and killed by `DO_NOT_TRACK=1`, and a
+  full-content session exporter that runs only when you configure one —
+  rather than counting outbound calls. This is the second consecutive
+  release in which that paragraph needed a correctness fix, hence the
+  rewrite to something a new sink cannot invalidate.
+
+### Migration from 0.9.0
+
+- **Nothing to change in code.** No public API changed and
+  `get_summary()` only gained a key.
+- **Check your environment.** If `AGENTEGRITY_TOKEN` and `AGENTEGRITY_URL`
+  (or `AGENTEGRITY_EXPORTER_URL`) are set anywhere an instrumented agent
+  runs, that agent begins streaming full event content on upgrade. Unset
+  them to stay local, or confirm the destination is the one you expect:
+  `report()["exporters"]` names every attached sink, and `[]` means nothing
+  is streaming.
 
 ## [0.9.0] - 2026-07-26
 
