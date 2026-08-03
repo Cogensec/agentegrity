@@ -117,6 +117,9 @@ class TestInitLifecycle:
 
 class TestInstrumentDispatch:
     def test_langchain_runnable_dispatches_to_instrument_chain(self):
+        # Adapter construction is lazy, but instrument_chain builds a
+        # real callback handler, which needs langchain-core installed.
+        pytest.importorskip("langchain_core")
         runtime = agentegrity.init(frameworks=["langchain"])
         chain = _FakeRunnable()
         instrumented = runtime.instrument(chain)
