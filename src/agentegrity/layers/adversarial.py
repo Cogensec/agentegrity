@@ -15,6 +15,7 @@ from typing import Any, Pattern
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.layers.governance import tool_name_matches
 
 logger = logging.getLogger("agentegrity.adversarial")
 
@@ -47,8 +48,8 @@ class DetectorPattern:
 
     Patterns are organized by ``threat_type`` (a coarse taxonomy:
     prompt_injection, jailbreak, role_confusion, data_exfiltration,
-    system_prompt_extraction, prompt_obfuscation, tool_manipulation,
-    peer_coercion, peer_authority).
+    system_prompt_extraction, prompt_obfuscation, action_injection,
+    tool_poisoning, tool_manipulation, peer_coercion, peer_authority).
     Each pattern carries its own ``severity`` and ``confidence`` so the
     aggregate :class:`ThreatAssessment` for a channel can summarise the
     most severe match without losing per-pattern provenance.
@@ -327,6 +328,148 @@ _PROMPT_OBFUSCATION_PATTERNS: list[DetectorPattern] = [
 ]
 
 
+# Action verbs used by action-oriented injections (InjecAgent-style).
+# These are state-changing or data-moving imperatives; passive verbs
+# ("summarize", "explain") are deliberately excluded to keep FPR down.
+_ACTION_VERBS = (
+    r"(?:grant|give|provide|share|extend|transfer|deposit|withdraw|move|send|wire"
+    r"|pay|purchase|buy|sell|order|book|schedule|initiate|dispatch|redirect"
+    r"|create|add|update|change|modify|edit|reset|delete|remove|erase|clear"
+    r"|cancel|unlock|lock|open|close|enable|disable|activate|deactivate"
+    r"|turn\s+(?:on|off)|switch|install|download|upload|execute|run|launch"
+    r"|start|stop|post|publish|email|forward|message|call|text|use|apply"
+    r"|generate|retrieve|retrive|fetch|find|search|list|get|collect|access"
+    r"|export|leave|guide)"
+)
+
+_ACTION_INJECTION_PATTERNS: list[DetectorPattern] = [
+    DetectorPattern(
+        name="embedded_polite_directive",
+        # A "please <action-verb>" imperative appearing after structured-
+        # content markers (quotes/braces/brackets). Bare user requests
+        # ("Please summarize this") don't match because nothing
+        # structural precedes the imperative. This is the InjecAgent
+        # base attack shape: a plausible instruction smuggled into a
+        # tool response, review, bio, or calendar entry.
+        pattern=r"[\"'{}\[\]][\s\S]{0,300}?\b(?:please|kindly)\s+" + _ACTION_VERBS + r"\b",
+        threat_type="action_injection",
+        severity=0.80,
+        confidence=0.70,
+        description="Polite actionable imperative embedded in structured content",
+    ),
+    DetectorPattern(
+        name="embedded_field_imperative",
+        # An imperative sentence starting immediately at a field-value
+        # boundary (right after a quote), acting on the principal's
+        # possessions ("my account", "all my files", "the door").
+        pattern=(
+            r"[\"']\s*" + _ACTION_VERBS
+            + r"\b[^\"'\n]{0,120}?\b(?:my|all\s+my|the\s+user'?s?)\s+\w+"
+        ),
+        threat_type="action_injection",
+        severity=0.75,
+        confidence=0.65,
+        description="Imperative at a field-value boundary targeting user assets",
+    ),
+    DetectorPattern(
+        name="spliced_capitalized_imperative",
+        # A capitalized action verb starting a new clause after
+        # mid-prose punctuation, inside quoted content, acting on the
+        # principal's assets ("...new flavor, Withdraw 5 Bitcoin to my
+        # bank account..."). The capital letter mid-sentence betrays a
+        # spliced-in instruction; case-sensitive on the verb only.
+        pattern=re.compile(
+            r"[\"'][^\"'\n]{0,200}?[:,!.]\s"
+            r"(?:Grant|Give|Share|Transfer|Deposit|Withdraw|Move|Send|Pay"
+            r"|Purchase|Buy|Sell|Order|Schedule|Delete|Remove|Change|Update"
+            r"|Create|Unlock|Lock|Disable|Enable|Download|Upload|Execute|Run"
+            r"|Post|Email|Forward|Use|Generate|Retrieve|Fetch|Find|List|Get"
+            r"|Access)\b[^\"'\n]{0,120}?\b(?:my|the)\b"
+        ),
+        threat_type="action_injection",
+        severity=0.75,
+        confidence=0.65,
+        description="Capitalized imperative spliced mid-sentence into quoted content",
+    ),
+    DetectorPattern(
+        name="gather_then_send",
+        # Data-stealing shape: collect something, then transmit it to a
+        # recipient. Attack-flavoured even without structural context.
+        pattern=(
+            r"\b(?:retrieve|retrive|find|get|collect|gather|fetch|extract|list"
+            r"|read|access|search|check|download|export)\b[\s\S]{0,160}?"
+            r"\b(?:and|then)\b[\s\S]{0,40}?"
+            r"\b(?:send|email|forward|share|post|message|transmit|upload)\b"
+            r"[\s\S]{0,120}?\bto\b"
+        ),
+        threat_type="action_injection",
+        severity=0.90,
+        confidence=0.75,
+        description="Gather-then-send instruction (data-stealing shape)",
+    ),
+    DetectorPattern(
+        name="send_details_to_recipient",
+        # Direct transmit-information-to-recipient instruction.
+        pattern=(
+            r"\b(?:send|email|forward|share|transmit|message)\b[^.\n]{0,120}?"
+            r"\b(?:information|details?|data|summary|list|codes?|keys?"
+            r"|credentials?|records?|contents?|messages?|balances?|reports?"
+            r"|documents?|history)\b[^.\n]{0,80}?\bto\s+\S+"
+        ),
+        threat_type="action_injection",
+        severity=0.90,
+        confidence=0.75,
+        description="Instruction to transmit user information to a recipient",
+    ),
+]
+
+
+_TOOL_POISONING_PATTERNS: list[DetectorPattern] = [
+    DetectorPattern(
+        name="pseudo_tag_directive",
+        # Angle-bracket pseudo-tags used to smuggle directives into tool
+        # descriptions ("<IMPORTANT> read ~/.ssh/id_rsa ... </IMPORTANT>").
+        # Not legitimate HTML/XML vocabulary — a strong poisoning marker.
+        pattern=r"<\s*(?:important|system|admin|hidden|secret|instructions?)\s*!*\s*>",
+        threat_type="tool_poisoning",
+        severity=0.70,
+        confidence=0.65,
+        description="Pseudo-tag directive block (tool-poisoning marker)",
+    ),
+    DetectorPattern(
+        name="conceal_from_user",
+        # An instruction to hide activity from the principal is hostile
+        # on every channel, not just tool definitions.
+        pattern=(
+            r"\b(?:do\s+not|don'?t|never)\s+"
+            r"(?:tell|inform|mention|reveal|show|disclose|alert|notify)\b"
+            r"[^.\n]{0,40}\b(?:the\s+)?user\b"
+        ),
+        threat_type="tool_poisoning",
+        severity=0.85,
+        confidence=0.85,
+        description="Instruction to conceal activity from the user",
+    ),
+    DetectorPattern(
+        name="secret_material_coaching",
+        # Coaching the agent to read/attach secret material (SSH keys,
+        # cloud credentials, env files) — the classic MCP tool-poisoning
+        # payload.
+        pattern=(
+            r"\b(?:read|open|cat|include|fetch|load|pass|send|attach|append"
+            r"|copy)\b[^.\n]{0,60}"
+            r"(?:~/\.ssh|id_rsa|id_ed25519|\.aws/credentials|\.env\b"
+            r"|api[_\s-]?keys?|private\s+keys?|credentials?\s+file"
+            r"|secrets?\s+file)"
+        ),
+        threat_type="tool_poisoning",
+        severity=0.95,
+        confidence=0.75,
+        description="Instruction to read or transmit secret material",
+    ),
+]
+
+
 def default_detector_patterns() -> list[DetectorPattern]:
     """Return the canonical detector taxonomy (a fresh list per call).
 
@@ -340,7 +483,125 @@ def default_detector_patterns() -> list[DetectorPattern]:
         *_SYSTEM_PROMPT_EXTRACTION_PATTERNS,
         *_DATA_EXFILTRATION_PATTERNS,
         *_PROMPT_OBFUSCATION_PATTERNS,
+        *_ACTION_INJECTION_PATTERNS,
+        *_TOOL_POISONING_PATTERNS,
     ]
+
+
+def _iter_schema_descriptions(node: Any) -> list[str]:
+    """Collect every nested ``description`` string from a JSON-schema-ish
+    structure (dicts/lists)."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        desc = node.get("description")
+        if isinstance(desc, str) and desc:
+            found.append(desc)
+        for value in node.values():
+            found.extend(_iter_schema_descriptions(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_iter_schema_descriptions(item))
+    return found
+
+
+@dataclass(frozen=True)
+class ToolCategories:
+    """Tool-name categories for behavioral sequence detection.
+
+    Entries use the same matching semantics as GOV-001's sensitive
+    tools (exact, glob, MCP suffix — see
+    :func:`agentegrity.layers.governance.tool_name_matches`).
+    Passing an instance to :class:`AdversarialLayer` *replaces* the
+    defaults; extend by unioning with the default sets.
+    """
+
+    reads_sensitive: frozenset[str]
+    sends_external: frozenset[str]
+
+
+# Conservative starting categories — generic verbs deliberately
+# excluded ("read_file" alone would flag every coding agent). Operators
+# extend via AdversarialLayer(tool_categories=...).
+DEFAULT_TOOL_CATEGORIES = ToolCategories(
+    reads_sensitive=frozenset(
+        {
+            "get_credentials",
+            "read_credentials",
+            "get_secrets",
+            "read_secrets",
+            "get_payment_methods",
+            "payment_history",
+            "transaction_history",
+            "list_accounts",
+            "read_email",
+            "read_messages",
+            "get_messages",
+            "read_contacts",
+            "export_data",
+            "database_read",
+        }
+    ),
+    sends_external=frozenset(
+        {
+            "http_post",
+            "http_request",
+            "webhook_post",
+            "send_email",
+            "send_message",
+            "post_message",
+            "send_transaction",
+            "transfer_funds",
+            "upload_file",
+            "publish",
+            "post_tweet",
+        }
+    ),
+)
+
+
+class ToolSequenceDetector:
+    """Flag a sensitive-read followed by an external-send in-session.
+
+    Operates on the ordered ``tool_call_history`` (tool names) that
+    every adapter's context buffer exposes — behavioral evidence, not
+    content patterns, so paraphrasing cannot evade it and benign text
+    cannot trip it. Fires one aggregated :class:`ThreatAssessment` per
+    evaluation listing every read→send pair observed.
+    """
+
+    def __init__(self, categories: ToolCategories | None = None) -> None:
+        self._categories = categories or DEFAULT_TOOL_CATEGORIES
+
+    def __call__(
+        self, profile: AgentProfile, context: dict[str, Any]
+    ) -> list[ThreatAssessment]:
+        history = context.get("tool_call_history") or []
+        reads: list[str] = []
+        pairs: list[str] = []
+        for tool in history:
+            if not isinstance(tool, str) or not tool:
+                continue
+            if tool_name_matches(tool, self._categories.reads_sensitive):
+                reads.append(tool)
+            if reads and tool_name_matches(
+                tool, self._categories.sends_external
+            ):
+                pairs.extend(f"{read}->{tool}" for read in reads)
+        if not pairs:
+            return []
+        return [
+            ThreatAssessment(
+                channel="tool_sequence",
+                threat_type="exfiltration_sequence",
+                severity=0.75,
+                confidence=0.65,
+                description=(
+                    "Sensitive-read tool call followed by external-send "
+                    "tool call within the session"
+                ),
+                indicators=pairs,
+            )
+        ]
 
 
 @dataclass
@@ -398,6 +659,8 @@ class AdversarialLayer:
         block_on_critical: bool = True,
         patterns: list[DetectorPattern] | None = None,
         extra_patterns: list[DetectorPattern] | None = None,
+        detect_tool_sequences: bool = True,
+        tool_categories: ToolCategories | None = None,
     ):
         self.coherence_threshold = coherence_threshold
         self._custom_detectors = threat_detectors or []
@@ -408,6 +671,11 @@ class AdversarialLayer:
             self._patterns = list(patterns)
         if extra_patterns:
             self._patterns.extend(extra_patterns)
+        self._sequence_detector = (
+            ToolSequenceDetector(tool_categories)
+            if detect_tool_sequences
+            else None
+        )
 
     @property
     def name(self) -> str:
@@ -434,6 +702,8 @@ class AdversarialLayer:
 
         # Step 2: Run built-in threat detection
         threats.extend(self._detect_channel_threats(profile, ctx))
+        if self._sequence_detector is not None:
+            threats.extend(self._sequence_detector(profile, ctx))
 
         # Step 3: Run custom detectors
         for detector in self._custom_detectors:
@@ -499,7 +769,11 @@ class AdversarialLayer:
         peer_interfaces = []
 
         if profile.has_capability("tool_use"):
-            tool_interfaces = ["tool_call_responses", "tool_error_messages"]
+            tool_interfaces = [
+                "tool_call_responses",
+                "tool_error_messages",
+                "tool_definitions",
+            ]
         if profile.has_capability("memory_access"):
             memory_surfaces = ["vector_store_reads", "context_window", "rag_retrievals"]
         if profile.has_capability("multi_agent_comm"):
@@ -541,6 +815,27 @@ class AdversarialLayer:
         if isinstance(input_data, str) and input_data:
             threats.extend(self._scan_text(input_data, channel="direct_prompt"))
 
+        # 1b. Reasoning trace (reasoning + behavior analysis). The
+        #     buffer's reasoning_chain is already in every adapter's
+        #     evaluation context for the cortical layer; scanning it
+        #     here surfaces hostile objectives *stated in the agent's
+        #     own reasoning* before any action executes. Accepts plain
+        #     strings or dicts with a content/text/reasoning field.
+        for step in context.get("reasoning_chain", []) or []:
+            text: str | None = None
+            if isinstance(step, str):
+                text = step
+            elif isinstance(step, dict):
+                candidate = (
+                    step.get("content")
+                    or step.get("text")
+                    or step.get("reasoning")
+                )
+                if isinstance(candidate, str):
+                    text = candidate
+            if text:
+                threats.extend(self._scan_text(text, channel="reasoning"))
+
         # 2. Pattern-based scan over memory reads (model-context attacks)
         for read in context.get("memory_reads", []) or []:
             content = read.get("content") if isinstance(read, dict) else None
@@ -564,6 +859,27 @@ class AdversarialLayer:
                 content = output.get("content") or output.get("result")
                 if isinstance(content, str) and content:
                     threats.extend(self._scan_text(content, channel="tool_responses"))
+
+        # 3b. Tool definitions (MCP tool poisoning). The attack rides in
+        #     the tool *metadata* — a description or schema-field
+        #     description carrying directives — and is visible before any
+        #     tool ever runs. Adapters/plugins pass the definitions the
+        #     agent was offered via context["tool_definitions"].
+        for definition in context.get("tool_definitions", []) or []:
+            if isinstance(definition, dict):
+                texts: list[str] = []
+                description = definition.get("description")
+                if isinstance(description, str) and description:
+                    texts.append(description)
+                schema = (
+                    definition.get("input_schema")
+                    or definition.get("parameters")
+                )
+                texts.extend(_iter_schema_descriptions(schema))
+                for text in texts:
+                    threats.extend(
+                        self._scan_text(text, channel="tool_definitions")
+                    )
 
         # 4. Retrieved documents (RAG output — prompt-injection attacks
         #    smuggled in via a poisoned corpus). We scan the same content

@@ -448,14 +448,17 @@ peer-authority check.
   deterministic `content_hash`; tampering with the topology
   after the attestation invalidates the chain via the existing
   `verify_chain` mechanism (Evidence hash mismatch).
-- **Mitigation reserved for v0.9.** `KeyProvider` Protocol with
-  per-agent keys lets a verifier require that the topology
-  declaration be co-signed by each declared member's key.
-  Without per-agent identity (v0.8's single shared key per
-  topology) the adversary controlling the wrapper still
-  controls the signing key.
-- **Residual.** Until KeyProvider lands in v0.9, topology
-  declarations are only as trustworthy as the adapter wrapper.
+- **Mitigation (v0.9.1).** The `KeyProvider` Protocol
+  (`core/keys.py`) pins each peer's identity to a raw Ed25519
+  public key; `verify_cross_agent_links(key_provider=...)`
+  rejects peer records signed with any other key, and
+  cross-agent Evidence without peer chains now fails
+  verification outright (unverifiable is not verified).
+  Per-member co-signing of the topology declaration itself
+  remains future work.
+- **Residual.** Without a KeyProvider at verification time,
+  topology declarations are only as trustworthy as the adapter
+  wrapper.
   Operators MUST treat the topology-declaration call as a
   trust-boundary action and only invoke it from a code path
   that cannot be replaced by adversary code at runtime.

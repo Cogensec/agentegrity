@@ -14,7 +14,11 @@ four layers.
 """
 
 from agentegrity.core.evaluator import Layer
-from agentegrity.layers.adversarial import AdversarialLayer
+from agentegrity.layers.adversarial import (
+    AdversarialLayer,
+    ToolCategories,
+    ToolSequenceDetector,
+)
 from agentegrity.layers.baseline_store import (
     BaselineStore,
     FileBaselineStore,
@@ -93,6 +97,8 @@ def default_layers(
 
 __all__ = [
     "AdversarialLayer",
+    "ToolCategories",
+    "ToolSequenceDetector",
     "CorticalLayer",
     "GovernanceLayer",
     "RecoveryLayer",

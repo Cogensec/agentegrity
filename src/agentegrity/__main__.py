@@ -11,8 +11,10 @@ if it prints a number, the install is wired correctly.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from agentegrity import __version__
 from agentegrity.core.attestation import AttestationChain
@@ -86,6 +88,230 @@ def _load_trusted_keys(paths: list[str]) -> set[bytes] | None:
     for p in paths:
         keys.add(bytes.fromhex(Path(p).read_text().strip()))
     return keys
+
+
+def _load_chain(path: str) -> "AttestationChain | None":
+    """Read and parse a serialized chain, printing errors to stderr."""
+    try:
+        text = Path(path).read_text()
+    except OSError as exc:
+        print(f"error: cannot read {path!r}: {exc}", file=sys.stderr)
+        return None
+    try:
+        return AttestationChain.from_json(text)
+    except (ValueError, KeyError) as exc:
+        print(f"error: cannot parse chain JSON: {exc}", file=sys.stderr)
+        return None
+
+
+def _chain_status(
+    chain: "AttestationChain", trusted_keys: set[bytes] | None
+) -> dict[str, Any]:
+    """Run every chain verification and return a structured status."""
+    chain_ok, broken_idx, broken_kind = chain.verify_chain_detailed()
+    links_ok = chain.verify_decision_links()
+    sigs_ok, sig_bad_idx = chain.verify_signatures(trusted_keys)
+    return {
+        "chain_linkage": chain_ok,
+        "broken_index": broken_idx,
+        "broken_kind": broken_kind,
+        "decision_links": links_ok,
+        "signatures": sigs_ok,
+        "signature_bad_index": sig_bad_idx,
+        "anchor": "pinned" if trusted_keys is not None else "self-vouched",
+        "all_ok": chain_ok and links_ok and sigs_ok,
+    }
+
+
+def _approval_summary(record: Any) -> dict[str, Any]:
+    """Project an approval DecisionRecord's provenance steps to fields."""
+    fields = dict(
+        step.split(":", 1)
+        for step in record.reasoning_chain
+        if ":" in step
+    )
+    return {
+        "decision_point": record.decision_point,
+        "outcome": fields.get("outcome", "unknown"),
+        "approver": fields.get("approver", "unknown"),
+        "timed_out": fields.get("timed_out", "unknown"),
+        "tool": (record.candidate_action or {}).get("tool", ""),
+    }
+
+
+def _report_data(
+    chain: "AttestationChain", path: str, trusted_keys: set[bytes] | None
+) -> dict[str, Any]:
+    status = _chain_status(chain, trusted_keys)
+    records = []
+    approvals = []
+    for i, r in enumerate(chain.records):
+        row: dict[str, Any] = {
+            "index": i,
+            "kind": r.record_kind,
+            "signed": r.signature is not None,
+            "content_hash": r.content_hash,
+        }
+        if isinstance(r, DecisionRecord):
+            row["decision_point"] = r.decision_point
+            row["capture_tier"] = r.capture_tier.value
+            if r.decision_point == "approval":
+                approvals.append(_approval_summary(r))
+        records.append(row)
+    return {
+        "source": path,
+        "generated_by": f"agentegrity {__version__}",
+        "records": len(chain.records),
+        "verification": status,
+        "timeline": records,
+        "approvals": approvals,
+        "final_hash": (
+            chain.records[-1].content_hash if chain.records else None
+        ),
+    }
+
+
+_CONTROL_MAPPING = """\
+## Compliance Evidence Mapping
+
+This section maps the session's verifiable artifacts to common control
+frameworks. It is supporting evidence for an assessment, and it is
+**not a compliance determination**: control applicability and
+sufficiency are judgements only an assessor can make.
+
+| Framework | Control | Evidence in this report |
+|---|---|---|
+""" + "\n".join(
+    "| " + " | ".join(row) + " |"
+    for row in (
+        (
+            "EU AI Act",
+            "Art. 12 (Record-keeping)",
+            "Hash-linked record timeline; per-record content hashes; "
+            "final chain hash",
+        ),
+        (
+            "EU AI Act",
+            "Art. 14 (Human oversight)",
+            "Human Approvals section: approver identity, outcome, "
+            "timeout behaviour per escalation",
+        ),
+        (
+            "NIST AI RMF",
+            "GOVERN 1.2 (Policies)",
+            "Governance layer states embedded in attestation records",
+        ),
+        (
+            "NIST AI RMF",
+            "MEASURE 2.7 (Security & resilience evaluated)",
+            "Integrity evaluations per boundary event (Record Timeline)",
+        ),
+        (
+            "NIST AI RMF",
+            "MANAGE 4.1 (Post-deployment monitoring)",
+            "Continuous per-event attestation across the session",
+        ),
+    )
+)
+
+
+def _render_markdown(data: dict[str, Any]) -> str:
+    v = data["verification"]
+
+    def yn(flag: bool) -> str:
+        return "yes" if flag else "**NO (FAILED)**"
+
+    lines = [
+        "# Agentegrity Session Audit Report",
+        "",
+        f"- Source: `{data['source']}`",
+        f"- Generated by: {data['generated_by']}",
+        f"- Records: {data['records']}",
+        f"- Final chain hash: `{data['final_hash']}`",
+        "",
+        "## Verification",
+        "",
+        f"- Hash linkage: {yn(v['chain_linkage'])}",
+        f"- Decision links: {yn(v['decision_links'])}",
+        f"- Signatures: {yn(v['signatures'])} [{v['anchor']}]",
+    ]
+    if v["anchor"] == "self-vouched":
+        lines.append(
+            "  - Signatures are unanchored: pass `--trusted-key` to pin "
+            "the signing identity. A self-vouched chain proves internal "
+            "consistency, not authorship."
+        )
+    lines += [
+        "",
+        "## Record Timeline",
+        "",
+        "| # | Kind | Boundary | Tier | Signed | Content hash |",
+        "|---:|---|---|---|---|---|",
+    ]
+    for row in data["timeline"]:
+        lines.append(
+            f"| {row['index']} | {row['kind']} "
+            f"| {row.get('decision_point', 'attestation')} "
+            f"| {row.get('capture_tier', '-')} "
+            f"| {'yes' if row['signed'] else 'no'} "
+            f"| `{row['content_hash'][:16]}…` |"
+        )
+    lines += ["", "## Human Approvals", ""]
+    if data["approvals"]:
+        lines += [
+            "| Tool | Outcome | Approver | Timed out |",
+            "|---|---|---|---|",
+        ]
+        lines.extend(
+            f"| {a['tool']} | {a['outcome']} | {a['approver']} "
+            f"| {a['timed_out']} |"
+            for a in data["approvals"]
+        )
+    else:
+        lines.append(
+            "No escalations required human approval in this session."
+        )
+    lines += ["", _CONTROL_MAPPING]
+    return "\n".join(lines)
+
+
+def _report(
+    path: str,
+    trusted_key_paths: list[str],
+    fmt: str,
+    out_path: str | None,
+) -> int:
+    """Render a serialized chain into an audit report."""
+    chain = _load_chain(path)
+    if chain is None:
+        return 2
+    try:
+        trusted_keys = _load_trusted_keys(trusted_key_paths)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot read trusted key: {exc}", file=sys.stderr)
+        return 2
+
+    data = _report_data(chain, path, trusted_keys)
+    if fmt == "json":
+        rendered = json.dumps(data, indent=2)
+    else:
+        rendered = _render_markdown(data)
+
+    if out_path:
+        Path(out_path).write_text(rendered, encoding="utf-8")
+        print(f"report written to {out_path}")
+    else:
+        print(rendered)
+    # Exit semantics: structural tamper (hash linkage, decision links)
+    # always fails. Signatures gate the exit code only when the caller
+    # pinned keys — an unsigned self-vouched chain is disclosed in the
+    # report, not treated as tampered, because without an anchor no
+    # cryptographic claim was requested.
+    v = data["verification"]
+    ok = v["chain_linkage"] and v["decision_links"]
+    if trusted_keys is not None:
+        ok = ok and v["signatures"]
+    return 0 if ok else 1
 
 
 def _verify_decisions(path: str, trusted_key_paths: list[str]) -> int:
@@ -314,8 +540,49 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         telemetry_capture("cli_run", properties={"command": "verify-decisions"})
         return _verify_decisions(positional[0], trusted_key_paths)
+    if args[0] == "report":
+        rest = args[1:]
+        trusted_key_paths = []
+        positional = []
+        fmt = "markdown"
+        out_path: str | None = None
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--trusted-key":
+                if i + 1 >= len(rest):
+                    print("error: --trusted-key requires a path", file=sys.stderr)
+                    return 2
+                trusted_key_paths.append(rest[i + 1])
+                i += 2
+            elif rest[i] == "--format":
+                if i + 1 >= len(rest) or rest[i + 1] not in ("markdown", "json"):
+                    print(
+                        "error: --format requires 'markdown' or 'json'",
+                        file=sys.stderr,
+                    )
+                    return 2
+                fmt = rest[i + 1]
+                i += 2
+            elif rest[i] in ("-o", "--output"):
+                if i + 1 >= len(rest):
+                    print("error: -o requires a path", file=sys.stderr)
+                    return 2
+                out_path = rest[i + 1]
+                i += 2
+            else:
+                positional.append(rest[i])
+                i += 1
+        if not positional:
+            print(
+                "usage: python -m agentegrity report [--format markdown|json] "
+                "[--trusted-key <pub.hex>]... [-o <path>] <chain.json>",
+                file=sys.stderr,
+            )
+            return 2
+        telemetry_capture("cli_run", properties={"command": "report"})
+        return _report(positional[0], trusted_key_paths, fmt, out_path)
     if args[0] in ("-h", "--help", "help"):
-        print("usage: agentegrity [pro | doctor | verify-decisions <path>]")
+        print("usage: agentegrity [pro | doctor | verify-decisions <path> | report <path>]")
         print()
         print("  (no args)                       print version + adapter availability")
         print("  pro --ingest-token <TOKEN>      connect to an agentegrity-pro dashboard")
@@ -326,6 +593,10 @@ def main(argv: list[str] | None = None) -> int:
         print("  verify-decisions <chain.json>   verify a serialized chain")
         print("    --trusted-key <pub.hex>       pin a signing key (repeatable);")
         print("                                  without it, signatures are self-vouched")
+        print("  report <chain.json>             render a session audit report")
+        print("    --format markdown|json        output format (default markdown)")
+        print("    -o <path>                     write to a file instead of stdout")
+        print("    --trusted-key <pub.hex>       pin signing keys; gates the exit code")
         return 0
     print(f"unknown command: {args[0]!r} (try 'python -m agentegrity help')", file=sys.stderr)
     return 2

@@ -18,6 +18,7 @@ from agentegrity.bedrock_agents import report as bedrock_agents_report
 from agentegrity.bedrock_agents import wrap_client as bedrock_agents_wrap_client
 from agentegrity.claude import hooks as claude_hooks
 from agentegrity.claude import report as claude_report
+from agentegrity.core.approval import ApprovalDecision, ApprovalWorkflow
 from agentegrity.core.attestation import (
     AttestationChain,
     AttestationRecord,
@@ -31,6 +32,7 @@ from agentegrity.core.decision import (
     RejectedAlternative,
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
+from agentegrity.core.keys import FileKeyProvider, KeyProvider, StaticKeyProvider
 from agentegrity.core.monitor import IntegrityMonitor
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.core.telemetry import disable_telemetry
@@ -43,6 +45,7 @@ from agentegrity.core.topology import (
 )
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
+from agentegrity.exporters.alerts import SlackAlertExporter, WebhookAlertExporter
 from agentegrity.exporters.http import HTTPExporter
 from agentegrity.google_adk import instrument as google_adk_instrument
 from agentegrity.google_adk import report as google_adk_report
@@ -63,13 +66,25 @@ from agentegrity.layers import (
     RecoveryLayer,
     SqliteBaselineStore,
     SqliteCheckpoint,
+    ToolCategories,
+    ToolSequenceDetector,
     default_layers,
 )
 from agentegrity.openai_agents import report as openai_agents_report
 from agentegrity.openai_agents import run_hooks as openai_agents_run_hooks
 from agentegrity.sdk.client import AgentegrityClient
+from agentegrity.sdk.runtime import (
+    AgentegrityRuntime,
+    detect_frameworks,
+    init,
+    shutdown,
+)
 
 __all__ = [
+    "AgentegrityRuntime",
+    "detect_frameworks",
+    "init",
+    "shutdown",
     "AgentProfile",
     "AgentType",
     "DeploymentContext",
@@ -96,7 +111,16 @@ __all__ = [
     "FrameworkEvent",
     "SessionExporter",
     "HTTPExporter",
+    "WebhookAlertExporter",
+    "SlackAlertExporter",
+    "ApprovalDecision",
+    "ApprovalWorkflow",
+    "KeyProvider",
+    "StaticKeyProvider",
+    "FileKeyProvider",
     "AdversarialLayer",
+    "ToolCategories",
+    "ToolSequenceDetector",
     "CorticalLayer",
     "GovernanceLayer",
     "RecoveryLayer",

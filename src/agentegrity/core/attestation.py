@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from agentegrity.core._telemetry_props import chain_shape
 from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture, telemetry_tag
+
+logger = logging.getLogger("agentegrity.attestation")
 
 if TYPE_CHECKING:
     from agentegrity.core.decision import DecisionRecord
@@ -302,53 +305,83 @@ class AttestationChain:
         return ok
 
     def verify_cross_agent_links(
-        self, peer_chains: dict[str, "AttestationChain"] | None = None
+        self,
+        peer_chains: dict[str, "AttestationChain"] | None = None,
+        *,
+        key_provider: Any | None = None,
     ) -> bool:
         """Verify ``peer_message`` and ``handoff`` Evidence references
         in this chain resolve to real records in peer chains.
 
-        In v0.8 this is a permissive stub returning ``True`` when no
-        peer chains are supplied. The full implementation lands in
-        v0.9 alongside the :class:`KeyProvider` Protocol and per-agent
-        chains (pattern b). The signature exists now so adapters can
-        wire it into their multi-agent verification path without
-        another API churn next release.
+        Strict semantics (v0.10.0): a chain that *carries* cross-agent
+        Evidence cannot verify without the peer chains — unverifiable
+        is not verified. The v0.8 stub returned ``True`` in that case;
+        it no longer does. A chain with no cross-agent Evidence
+        trivially verifies.
 
         Parameters
         ----------
         peer_chains : dict[str, AttestationChain], optional
-            Map of ``agent_id`` to its chain. When provided, every
-            ``peer_message`` / ``handoff`` Evidence in this chain
-            must point at a real record in the corresponding peer
-            chain whose ``content_hash`` matches.
+            Map of ``agent_id`` to its chain. Every ``peer_message`` /
+            ``handoff`` Evidence in this chain must point at a real
+            record in the corresponding peer chain whose
+            ``content_hash`` matches.
+        key_provider : KeyProvider, optional
+            Trust anchor mapping ``agent_id`` to a pinned raw Ed25519
+            public key (see :mod:`agentegrity.core.keys`). When
+            provided, every referenced peer record must be signed with
+            exactly the pinned key and its signature must verify —
+            without this, a forged peer chain signed with an
+            attacker-generated key self-verifies, since records embed
+            their own public keys.
         """
-        if peer_chains is None:
+        cross_evidence = [
+            (r, ev)
+            for r in self._records
+            if isinstance(r, AttestationRecord)
+            for ev in r.evidence
+            if ev.evidence_type in ("peer_message", "handoff")
+        ]
+        if not cross_evidence:
             return True
-        for r in self._records:
-            if not isinstance(r, AttestationRecord):
-                continue
-            for ev in r.evidence:
-                if ev.evidence_type not in ("peer_message", "handoff"):
-                    continue
-                # The Evidence.source format for cross-agent links is
-                # "<peer_agent_id>:<record_id>" so we can find the
-                # right peer chain to walk.
-                if ":" not in ev.source:
+        if peer_chains is None:
+            logger.warning(
+                "chain carries %d cross-agent Evidence entries but no "
+                "peer chains were supplied; unverifiable is not verified",
+                len(cross_evidence),
+            )
+            return False
+        for _record, ev in cross_evidence:
+            # The Evidence.source format for cross-agent links is
+            # "<peer_agent_id>:<record_id>" so we can find the
+            # right peer chain to walk.
+            if ":" not in ev.source:
+                return False
+            peer_id, peer_record_id = ev.source.split(":", 1)
+            peer_chain = peer_chains.get(peer_id)
+            if peer_chain is None:
+                return False
+            # Look for the referenced record in the peer chain.
+            matched = None
+            for peer_record in peer_chain.records:
+                rid = getattr(peer_record, "record_id", None)
+                if rid == peer_record_id:
+                    if peer_record.content_hash != ev.content_hash:
+                        return False
+                    matched = peer_record
+                    break
+            if matched is None:
+                return False
+            if key_provider is not None:
+                pinned = key_provider.get_public_key(peer_id)
+                if pinned is None:
+                    logger.warning(
+                        "no pinned key for peer %r; rejecting", peer_id
+                    )
                     return False
-                peer_id, peer_record_id = ev.source.split(":", 1)
-                peer_chain = peer_chains.get(peer_id)
-                if peer_chain is None:
+                if getattr(matched, "public_key", None) != pinned:
                     return False
-                # Look for the referenced record in the peer chain.
-                matched = False
-                for peer_record in peer_chain.records:
-                    rid = getattr(peer_record, "record_id", None)
-                    if rid == peer_record_id:
-                        if peer_record.content_hash != ev.content_hash:
-                            return False
-                        matched = True
-                        break
-                if not matched:
+                if not matched.verify():
                     return False
         return True
 

@@ -8,33 +8,227 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
-## [0.10.0] - 2026-07-28
+## [0.10.0] - 2026-08-03
 
-Session export. The SDK could always evaluate locally; this release adds two
-supported ways to get that data off the agent, both riding the existing
+Session export and detection hardening, shipped together as one release.
+
+**Session export.** The SDK could always evaluate locally; this release adds
+two supported ways to get that data off the agent, both riding the existing
 `SessionExporter` seam with no adapter changes: **OpenTelemetry** to any OTLP
 backend, and **direct HTTP** to an `agentegrity-pro` dashboard via a new
 `agentegrity pro` command.
 
-Both are additive, and no public API changed. One behaviour change is worth
-reading before you upgrade, though.
+**Detection hardening.** The adversarial layer closes the
+action-oriented-injection gap it disclosed in 0.6.0 (InjecAgent TPR 0.000 to
+1.000, calibrated on that suite and labelled as such), gains MCP
+tool-poisoning and behavioral sequence detection, and scans the agent's own
+reasoning trace. Around it: a two-line `agentegrity.init()`, a Claude Code
+plugin with a verifiable per-session decision chain, a first-class HITL
+approval workflow that fails closed on timeout, webhook/Slack alerting, the
+`KeyProvider` trust anchor for multi-agent verification, and an
+`agentegrity report` audit-report command.
 
-**`AGENTEGRITY_TOKEN` + `AGENTEGRITY_URL` are no longer inert.** The README has
-told people to set them for some time, but in the OSS package nothing consumed
-them. As of 0.10.0 they self-attach an `HTTPExporter` at adapter construction,
-which is what lets `agentegrity pro … -- <command>` stream an agent it did not
-write. If those variables are already set in an environment, that process
-starts streaming **full event content** — prompts, tool arguments, tool
-outputs — to the configured URL on upgrade. That is the documented behaviour
-finally working rather than a regression, but it is a real change in what
-leaves the process, so unset them if you did not mean it.
+Two behaviour changes deserve reading before you upgrade.
 
+**`AGENTEGRITY_TOKEN` + `AGENTEGRITY_URL` are no longer inert.** The README
+has told people to set them for some time, but in the OSS package nothing
+consumed them. As of 0.10.0 they self-attach an `HTTPExporter` at adapter
+construction, which is what lets `agentegrity pro … -- <command>` stream an
+agent it did not write. If those variables are already set in an environment,
+that process starts streaming **full event content** — prompts, tool
+arguments, tool outputs — to the configured URL on upgrade. That is the
+documented behaviour finally working rather than a regression, but it is a
+real change in what leaves the process, so unset them if you did not mean it.
 Because of that, attaching a sink is deliberately never silent: the
 destination is logged at INFO and every attached sink is listed under
 `exporters` in `report()`. An empty list is what lets a run prove it stayed
 local.
 
+**Cross-agent verification is stricter** and can flip a result from True to
+False on upgrade; see Changed.
+
 ### Added
+
+- **Two-line entry point: `agentegrity.init()` / `agentegrity.shutdown()`.**
+  `init()` probes the environment for every framework in the adapter
+  registry (`importlib.util.find_spec`, no imports paid for absent
+  frameworks), builds one adapter per detected framework on a shared
+  `AgentegrityClient`, and auto-subscribes CrewAI's global event bus.
+  The returned `AgentegrityRuntime` dispatches
+  `runtime.instrument(obj)` on the object's class module (LangChain
+  runnables, LangGraph compiled graphs, Agno agents/teams, Strands
+  agents, Google ADK agents, CrewAI crews), exposes hook-style
+  adapters via `runtime.adapters[...]`, and aggregates per-adapter
+  summaries in `runtime.report()`. `init()` is idempotent until
+  `shutdown()`, which fires every adapter's session end so exporters
+  flush. AutoGen is deliberately not auto-attached: its
+  `instrument()` installs a global OTel TracerProvider, which stays
+  an explicit choice.
+
+- **`agentegrity report` — session audit reports from a chain file.**
+  Renders a serialized chain into a markdown or JSON audit report:
+  verification status (hash linkage, decision links, signatures with
+  pinned/self-vouched anchor disclosure), the full record timeline
+  with content hashes, a Human Approvals table (approver, outcome,
+  timeout behaviour per escalation), and a compliance-evidence mapping
+  to EU AI Act Art. 12/14 and NIST AI RMF controls — framed explicitly
+  as supporting evidence, not a compliance determination. Exit code:
+  structural tamper always fails; signatures gate the exit only when
+  `--trusted-key` anchors are supplied.
+
+- **`GET_STARTED_AI_GUIDE.md` — installation guide for coding
+  agents.** Step-by-step self-install instructions with mandatory
+  human-review checkpoints: minimal-diff instrumentation, wiring
+  verification, telemetry disclosure, and hard rules (never enable
+  enforcement or register network exporters without explicit user
+  approval).
+
+- **`KeyProvider` Protocol and strict cross-agent verification.**
+  `agentegrity.core.keys` ships the `KeyProvider` Protocol
+  (`get_public_key(agent_id) -> bytes | None`) with `StaticKeyProvider`
+  and `FileKeyProvider` (hex `.pub` files, same format as the CLI's
+  `--trusted-key`) reference implementations.
+  `verify_cross_agent_links()` loses its permissive stub semantics: a
+  chain carrying `peer_message`/`handoff` Evidence now **fails**
+  verification when no peer chains are supplied — unverifiable is not
+  verified — and passing `key_provider=` additionally pins every
+  referenced peer record to that agent's registered key and verifies
+  its signature, closing the forged-peer-chain hole where an
+  attacker-generated key self-verifies. Chains without cross-agent
+  Evidence are unaffected.
+
+- **Behavioral sequence detection (`ToolSequenceDetector`).**
+  Multi-step exfiltration is benign at every step — "read the
+  transaction history", then three steps later "post to a webhook" —
+  so no content pattern can see it. The adversarial layer now watches
+  the ordered `tool_call_history` every adapter's buffer exposes and
+  flags a sensitive-read tool call followed by an external-send tool
+  call within the session (`exfiltration_sequence`, one aggregated
+  assessment listing each read→send pair). Categories use the same
+  exact/glob/MCP-suffix matching as GOV-001 (the matcher is now the
+  public `governance.tool_name_matches`) and ship conservative
+  defaults — generic verbs like `read_file` deliberately excluded;
+  replace via `AdversarialLayer(tool_categories=ToolCategories(...))`
+  or disable with `detect_tool_sequences=False`. This is behavioral
+  evidence, not text matching: paraphrasing cannot evade it and
+  benign text cannot trip it.
+
+- **Opt-in session context for the classifier layers.**
+  `AdversarialLLMLayer(include_session_context=True)` (inherited by
+  `AdversarialSLMLayer`) prefixes every classification target with a
+  compact session header — recent tool-call *names* only, never
+  content — so the classifier can judge "was this action part of what
+  the session was doing?". Opt-in because the header churns the
+  verdict cache (each new tool call changes the prefix).
+
+- **Reasoning-trace scanning (reasoning + behavior analysis).** The
+  adversarial layer (and the LLM/SLM classifier layers) now scan the
+  evaluation context's `reasoning_chain` — already populated by every
+  adapter for the cortical layer — as a `reasoning` channel. A hostile
+  objective stated in the agent's own reasoning ("collect the saved
+  credentials and then send them to...") surfaces before any action
+  executes, instead of only when the behavior materialises as a tool
+  call. Accepts plain strings or dicts with a
+  `content`/`text`/`reasoning` field.
+
+- **First-class HITL approval workflow
+  (`agentegrity.core.approval`).** The `approval_handler` seam is
+  promoted into a documented workflow. Handlers may now return a rich
+  `ApprovalDecision` (who decided, when, why, timed out or not)
+  instead of a bare bool, and `ApprovalWorkflow` wraps any handler
+  with a timeout policy — **deny on timeout by default**; fail-open is
+  the explicit `timeout_action="allow"` choice, never a silent
+  default. Under enforcement, every consulted approval is recorded as
+  a `DecisionRecord` on the attestation chain (signed when the adapter
+  has a signing key), so "who approved this action and when" is part
+  of the verifiable session provenance. Bool handlers keep working
+  unchanged and now also produce provenance.
+
+- **Webhook alert exporters (`agentegrity.exporters.alerts`).**
+  `WebhookAlertExporter` POSTs a JSON alert whenever an evaluated
+  event's action reaches the configured severity (default `block` /
+  `escalate`); `SlackAlertExporter` shapes the same alert for Slack
+  incoming webhooks (Discord/Teams-compatible endpoints accept it
+  too). Stdlib-only, background-thread delivery, fail-open, flushed
+  on session end. The payload carries verdict shape only — action,
+  scores, layer names, event type, tool name — never prompts or tool
+  arguments, and `describe()` strips the query string so webhook
+  tokens never surface in `get_summary()`.
+
+- **Claude Code plugin (`integrations/claude-code/`).** A `PreToolUse`
+  hook evaluates every tool call in-process before it executes — no
+  backend, no network, no GPU. The adversarial layer scans tool
+  arguments (structure-cue action_injection patterns excluded, since
+  tool arguments are structured by construction and ordinary code
+  would trip them); the governance layer gates sensitive tool names
+  MCP-aware. Verdicts map onto Claude Code's permission flow (allow /
+  ask / deny), and every evaluated call appends a hash-linked
+  `DecisionRecord` to a per-session chain that
+  `agentegrity verify-decisions` verifies afterwards — `alert` mode
+  records the same evidence without blocking. Fail-open on missing
+  library, malformed payload, or persistence failure. Ships with an
+  `/agentegrity-status` command and a root
+  `.claude-plugin/marketplace.json` so
+  `/plugin marketplace add cogensec/agentegrity` works directly.
+
+- **MCP support: governance name matching and tool-poisoning
+  detection.** GOV-001's sensitive-tool matching understands MCP
+  namespacing: entries containing `*`/`?` are fnmatch globs
+  (`"mcp__db__*"` gates a whole server), and `mcp__<server>__<tool>`
+  names also match an entry naming the bare tool ("file_delete" now
+  gates "mcp__filesystem__file_delete" — the prefix is transport
+  namespacing, not a different tool). Unlisted names remain ungated,
+  preserving the audit-M2 explicit-enumeration semantics. The
+  adversarial layer gains a `tool_definitions` channel — pass the tool
+  definitions the agent was offered (descriptions + nested schema
+  `description` fields are scanned) — and a 3-pattern `tool_poisoning`
+  family: pseudo-tag directive blocks (`<IMPORTANT>`), instructions to
+  conceal activity from the user (channel-agnostic), and coaching to
+  read/transmit secret material (`~/.ssh`, `.aws/credentials`, `.env`,
+  API keys). Default taxonomy grows 29 → 32 patterns across eight
+  families.
+
+- **`action_injection` detector family (5 patterns).** The regex
+  taxonomy previously targeted pattern-style injections ("ignore
+  previous instructions", "DAN mode") and scored TPR 0.000 on UIUC
+  InjecAgent's action-oriented attacks — plausible imperatives
+  ("Please deposit 2000 USD…") smuggled into tool responses, reviews,
+  bios, and calendar entries. The new family targets that shape
+  directly: polite imperatives embedded in structured content,
+  imperatives at field-value boundaries acting on the principal's
+  assets, capitalized imperatives spliced mid-sentence into quoted
+  prose, gather-then-send instructions, and transmit-information-to-
+  recipient instructions. Measured on InjecAgent base (dh+ds,
+  N=2,108): TPR 1.000, FPR 0.000 — calibrated on that suite, so read
+  it as in-distribution recall, not generalization (STATUS.md states
+  the caveat). The benchmark floor in
+  `tests/test_benchmarks.py::TestInjecAgentBenchmark` rose from the
+  0.000 no-regression placeholder to TPR ≥ 0.95. Default taxonomy
+  grows from 24 to 29 patterns across seven families.
+
+- **`AdversarialSLMLayer` — local small-model semantic classifier.**
+  `agentegrity.layers.adversarial_slm.AdversarialSLMLayer` is
+  `AdversarialLLMLayer` with the transport swapped for the
+  OpenAI-compatible chat-completions protocol, so any local inference
+  server works (Ollama, llama.cpp, vLLM, LM Studio) on CPU or GPU with
+  zero added dependencies — the transport is stdlib urllib on a worker
+  thread. Verdict composition, the regex floor, bounded concurrency,
+  the (channel, content-hash) verdict cache, and fail-open semantics
+  are inherited unchanged; sync `evaluate()` still never touches the
+  network. Enabling this required extracting a `_classify_text`
+  transport hook and a shared `parse_verdict` helper in
+  `adversarial_llm.py` (behaviour unchanged, all existing tests pass
+  unmodified).
+
+- **AgentDojo benchmark run and published.**
+  `scripts/dump_agentdojo_tasks.py` projects the `agentdojo` PyPI
+  package's task suites (v1.2.1) into the shape `load_agentdojo()`
+  reads, making the suite reproducible. Measured (regex taxonomy,
+  N=132): TPR 0.286 / FPR 0.113 — a structurally low ceiling for
+  content-only detection, since the projection keeps only the injected
+  goal text and bare goals overlap heavily with legitimate user tasks
+  (analysis in STATUS.md). The aspirational TPR ≥ 0.50 assertion
+  became a calibrated no-regression floor (TPR ≥ 0.25, FPR ≤ 0.15).
 
 - **Built-in `HTTPExporter`, env auto-attach, and the `agentegrity pro`
   quick-connect CLI.** Connecting an instrumented agent to an
@@ -100,6 +294,13 @@ local.
 
 ### Changed
 
+- **BREAKING (multi-agent verifiers only):**
+  `AttestationChain.verify_cross_agent_links()` with no arguments now
+  returns `False` for chains that carry cross-agent Evidence (it
+  returned `True` in v0.8-v0.9.0). Unverifiable is not verified.
+  Single-agent chains and calls that already passed `peer_chains` are
+  unchanged.
+
 - **The README's egress claim is accurate again.** The "What it does"
   paragraph said no agent content "ever leaves your process" and that
   telemetry was the library's one and only outbound call. Shipping an
@@ -113,14 +314,25 @@ local.
 
 ### Migration from 0.9.0
 
-- **Nothing to change in code.** No public API changed and
-  `get_summary()` only gained a key.
+- **Single-agent deployments: nothing to change in code.** Every
+  addition is opt-in or additive; existing APIs behave as before,
+  apart from the stricter cross-agent verification covered below.
 - **Check your environment.** If `AGENTEGRITY_TOKEN` and `AGENTEGRITY_URL`
   (or `AGENTEGRITY_EXPORTER_URL`) are set anywhere an instrumented agent
   runs, that agent begins streaming full event content on upgrade. Unset
   them to stay local, or confirm the destination is the one you expect:
   `report()["exporters"]` names every attached sink, and `[]` means nothing
   is streaming.
+- **Multi-agent verifiers:** audit every `verify_cross_agent_links()`
+  call site. A call without `peer_chains` on a chain that carries
+  `peer_message`/`handoff` Evidence now returns `False`. Supply the
+  peer chains, and pin identities with
+  `key_provider=StaticKeyProvider({...})` or `FileKeyProvider(dir)` so
+  a forged peer chain cannot self-verify.
+- **Governance operators:** GOV-001 now also gates MCP-namespaced
+  variants of listed tools ("file_delete" gates
+  "mcp__filesystem__file_delete") and supports glob entries. Review
+  your `sensitive_tools` set if you relied on MCP names being exempt.
 
 ## [0.9.0] - 2026-07-26
 
@@ -979,7 +1191,10 @@ Severity tags below map to the audit: **Critical**, **High**,
 - Three working examples (`basic_evaluation.py`,
   `runtime_monitoring.py`, `custom_validator.py`).
 
-[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.10.0
+[0.9.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.9.0
+[0.8.1]: https://github.com/cogensec/agentegrity/releases/tag/v0.8.1
 [0.8.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.8.0
 [0.7.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.7.0
 [0.6.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.6.0

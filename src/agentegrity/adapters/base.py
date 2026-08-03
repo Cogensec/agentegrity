@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
+from agentegrity.core.approval import ApprovalDecision
 from agentegrity.core.attestation import (
     AttestationChain,
     build_attestation_record,
@@ -180,6 +181,12 @@ class _ContextBuffer:
             "action": (
                 self.tool_calls[-1] if self.tool_calls else {"type": "respond"}
             ),
+            # Ordered tool names for behavioral sequence detection
+            # (sensitive-read → external-send). Already capped by
+            # _append_capped on tool_calls.
+            "tool_call_history": [
+                c.get("tool", "") for c in self.tool_calls
+            ],
             "peer_messages": self.peer_messages,
         }
         if (
@@ -744,24 +751,47 @@ class _BaseAdapter:
             )
         if action == "escalate":
             if self._approval_handler is not None:
-                try:
-                    approved = bool(
-                        self._approval_handler(
-                            self._profile, score, candidate_action
-                        )
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "approval_handler raised (%s); denying fail-closed", exc
-                    )
-                    approved = False
-                if approved:
+                decision = self._resolve_approval(score, candidate_action)
+                # Every consulted approval becomes signed provenance:
+                # who decided, when, and whether the request timed out.
+                self.record_decision(
+                    decision_point="approval",
+                    candidate_action=candidate_action,
+                    reasoning_chain=decision.provenance_steps(),
+                )
+                if decision.approved:
                     return {}
             return self._deny_payload(
                 f"Agentegrity integrity score {score.composite:.3f} "
                 f"triggered escalate action without approval"
             )
         return {}
+
+    def _resolve_approval(
+        self, score: Any, candidate_action: dict[str, Any]
+    ) -> ApprovalDecision:
+        """Consult the approval handler and normalise its result.
+
+        Handlers may return a bool (the original seam) or a rich
+        :class:`ApprovalDecision` (e.g. via
+        :class:`agentegrity.core.approval.ApprovalWorkflow`, which adds
+        a timeout policy). A raising handler denies fail-closed.
+        """
+        try:
+            raw = self._approval_handler(  # type: ignore[misc]
+                self._profile, score, candidate_action
+            )
+        except Exception as exc:
+            logger.warning(
+                "approval_handler raised (%s); denying fail-closed", exc
+            )
+            return ApprovalDecision(
+                approved=False,
+                reason=f"handler raised {type(exc).__name__}",
+            )
+        if isinstance(raw, ApprovalDecision):
+            return raw
+        return ApprovalDecision(approved=bool(raw))
 
     # --- Framework-agnostic event handlers ---
 

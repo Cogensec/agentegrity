@@ -1,0 +1,14 @@
+{
+  "name": "agentegrity",
+  "owner": {
+    "name": "Cogensec Research",
+    "url": "https://github.com/cogensec"
+  },
+  "plugins": [
+    {
+      "name": "agentegrity",
+      "source": "./integrations/claude-code",
+      "description": "In-process integrity verification for every tool call: injection and exfiltration scanning, MCP-aware sensitive-tool gating, and a verifiable per-session decision chain."
+    }
+  ]
+}

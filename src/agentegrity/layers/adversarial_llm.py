@@ -131,6 +131,35 @@ class LLMAdversarialAssessment:
         )
 
 
+def parse_verdict(raw: str) -> LLMAdversarialAssessment:
+    """Parse a classifier's raw text reply (optionally fenced JSON)
+    into an assessment. Fails open on malformed content. Shared by the
+    Claude transport here and the OpenAI-compatible transport in
+    :mod:`agentegrity.layers.adversarial_slm`."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    try:
+        data = json.loads(raw)
+        return LLMAdversarialAssessment(
+            is_attack=bool(data.get("is_attack", False)),
+            family=str(data.get("family", "benign")),
+            severity=round(
+                max(0.0, min(1.0, float(data.get("severity", 0.0)))), 4
+            ),
+            confidence=round(
+                max(0.0, min(1.0, float(data.get("confidence", 0.0)))), 4
+            ),
+            description=str(data.get("description", ""))[:200],
+        )
+    except (ValueError, TypeError, AttributeError) as exc:
+        logger.warning("Malformed LLM adversarial response: %s", exc)
+        return LLMAdversarialAssessment.neutral()
+
+
 async def _call_claude_classify(
     config: _LLMConfig, text: str
 ) -> LLMAdversarialAssessment:
@@ -163,32 +192,11 @@ async def _call_claude_classify(
             for block in response.content
             if getattr(block, "type", "") == "text"
         )
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`")
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-        data = json.loads(raw)
     except Exception as exc:  # noqa: BLE001 — fail-open on any error
         logger.warning("LLM classify failed (%s); fail-open", exc)
         return LLMAdversarialAssessment.neutral()
 
-    try:
-        return LLMAdversarialAssessment(
-            is_attack=bool(data.get("is_attack", False)),
-            family=str(data.get("family", "benign")),
-            severity=round(
-                max(0.0, min(1.0, float(data.get("severity", 0.0)))), 4
-            ),
-            confidence=round(
-                max(0.0, min(1.0, float(data.get("confidence", 0.0)))), 4
-            ),
-            description=str(data.get("description", ""))[:200],
-        )
-    except (ValueError, TypeError) as exc:
-        logger.warning("Malformed LLM adversarial response: %s", exc)
-        return LLMAdversarialAssessment.neutral()
+    return parse_verdict(raw)
 
 
 class AdversarialLLMLayer(AdversarialLayer):
@@ -245,6 +253,7 @@ class AdversarialLLMLayer(AdversarialLayer):
         max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
         max_targets_per_evaluation: int = DEFAULT_MAX_TARGETS,
         verdict_cache_size: int = DEFAULT_VERDICT_CACHE_SIZE,
+        include_session_context: bool = False,
     ) -> None:
         super().__init__(
             coherence_threshold=coherence_threshold,
@@ -262,6 +271,14 @@ class AdversarialLLMLayer(AdversarialLayer):
         # (channel, sha256(text)) because the same text on a different
         # channel is a different question. Insertion-ordered, evicted
         # oldest-first at verdict_cache_size.
+        # Opt-in: prefix every classification target with a compact
+        # session header (recent tool-call names) so the classifier
+        # can judge "was this action part of what the session was
+        # doing?" — the signal content-only classification lacks.
+        # Opt-in because the header churns the verdict cache: each new
+        # tool call changes the prefix, so cached verdicts stop
+        # deduplicating across evaluation passes.
+        self._include_session_context = include_session_context
         self._max_cache = max(1, verdict_cache_size)
         self._verdict_cache: OrderedDict[
             tuple[str, str], LLMAdversarialAssessment
@@ -270,6 +287,30 @@ class AdversarialLLMLayer(AdversarialLayer):
     @staticmethod
     def _cache_key(channel: str, text: str) -> tuple[str, str]:
         return (channel, hashlib.sha256(text.encode("utf-8")).hexdigest())
+
+    async def _classify_text(self, text: str) -> LLMAdversarialAssessment:
+        """Transport hook — subclasses swap the classifier backend by
+        overriding this (see :class:`AdversarialSLMLayer`)."""
+        return await _call_claude_classify(self._llm_config, text)
+
+    @staticmethod
+    def _session_header(ctx: dict[str, Any]) -> str:
+        """Compact session summary prepended to classification targets
+        when ``include_session_context=True``. Tool names only — never
+        prompt or tool-output content, which already arrives via its
+        own channel target."""
+        history = [
+            tool
+            for tool in (ctx.get("tool_call_history") or [])
+            if isinstance(tool, str) and tool
+        ]
+        if not history:
+            return ""
+        recent = history[-30:]
+        return (
+            f"Session context: {len(history)} tool calls so far, most "
+            f"recent: {', '.join(recent)}"
+        )
 
     async def _classify_targets(
         self, targets: list[tuple[str, str]]
@@ -295,7 +336,7 @@ class AdversarialLLMLayer(AdversarialLayer):
         async def classify(key: tuple[str, str], target: tuple[str, str]) -> None:
             _channel, text = target
             async with semaphore:
-                verdict = await _call_claude_classify(self._llm_config, text)
+                verdict = await self._classify_text(text)
             # Never cache a fail-open verdict: it records an outage, not
             # a judgment, and pinning it would blind every later pass
             # over the same text.
@@ -337,6 +378,17 @@ class AdversarialLLMLayer(AdversarialLayer):
         prompt = ctx.get("input")
         if isinstance(prompt, str) and prompt.strip():
             targets.append(("direct_prompt", prompt))
+        for step in ctx.get("reasoning_chain", []) or []:
+            if isinstance(step, str) and step.strip():
+                targets.append(("reasoning", step))
+            elif isinstance(step, dict):
+                content = (
+                    step.get("content")
+                    or step.get("text")
+                    or step.get("reasoning")
+                )
+                if isinstance(content, str) and content.strip():
+                    targets.append(("reasoning", content))
         for read in ctx.get("memory_reads", []) or []:
             content = read.get("content") if isinstance(read, dict) else None
             if isinstance(content, str) and content.strip():
@@ -380,6 +432,14 @@ class AdversarialLLMLayer(AdversarialLayer):
                 content = entry.get("content") or entry.get("text")
                 if isinstance(content, str) and content.strip():
                     targets.append(("broadcast_channels", content))
+
+        if self._include_session_context:
+            header = self._session_header(ctx)
+            if header:
+                targets = [
+                    (channel, f"{header}\n---\n{text}")
+                    for channel, text in targets
+                ]
 
         # Bound the per-evaluation cost. Truncation is logged and
         # surfaced in details so a capped scan never reads as full
@@ -490,4 +550,5 @@ __all__ = [
     "DEFAULT_MODEL",
     "AdversarialLLMLayer",
     "LLMAdversarialAssessment",
+    "parse_verdict",
 ]

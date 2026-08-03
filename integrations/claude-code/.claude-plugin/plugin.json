@@ -1,0 +1,10 @@
+{
+  "name": "agentegrity",
+  "description": "In-process integrity verification for every tool call: injection and exfiltration scanning, MCP-aware sensitive-tool gating, and a hash-linked decision chain you can verify after the session. No backend, no network, no GPU.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Cogensec Research"
+  },
+  "homepage": "https://github.com/cogensec/agentegrity",
+  "license": "Apache-2.0"
+}

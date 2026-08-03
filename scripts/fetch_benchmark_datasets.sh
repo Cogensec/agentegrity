@@ -16,8 +16,9 @@
 #   * Lakera PINT — full dataset is gated; only an example file is
 #     in the public repo. Set AGENTEGRITY_BENCH_PINT yourself if
 #     you have access.
-#   * AgentDojo — install the python package and use its tasks API
-#     directly; this script doesn't shim that.
+#   * AgentDojo — install the python package (pip install agentdojo)
+#     and run scripts/dump_agentdojo_tasks.py, which writes the
+#     directory-of-tasks.json shape the loader reads.
 #
 # The script is idempotent: rerunning skips files that are already
 # present unless --force is passed.

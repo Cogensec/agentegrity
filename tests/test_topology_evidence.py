@@ -469,8 +469,9 @@ class TestToEvaluationContextMultiAgent:
 
 
 class TestVerifyCrossAgentLinksStub:
-    """v0.8 stub returns True permissively (no peer chains supplied).
-    Full implementation lands in v0.9 with KeyProvider."""
+    """Hash-resolution semantics with peer chains supplied. Strict
+    no-peer-chains and key-pinned semantics live in
+    test_key_provider.py."""
 
     def test_no_peer_chains_returns_true(self):
         chain = AttestationChain()

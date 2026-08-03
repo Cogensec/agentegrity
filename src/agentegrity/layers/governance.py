@@ -9,13 +9,14 @@ layer, closest to action execution.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable
+from typing import Any, Callable, Collection
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile, RiskTier
@@ -138,16 +139,41 @@ class AuditEntry:
 
 
 # Built-in policy rules
-# Default set of tool names treated as sensitive by GOV-001. Matching is
-# exact-string by design: a name-based policy can only gate names it
-# knows. This is a starting set, NOT an exhaustive one — operators MUST
-# enumerate their own sensitive tools (including framework-namespaced
-# variants like "mcp__db__delete" and any aliases) via
-# GovernanceLayer(sensitive_tools=...) or per-call
-# context["sensitive_tools"]. Anything not listed is not gated.
+# Default set of tool names treated as sensitive by GOV-001. This is a
+# starting set, NOT an exhaustive one — operators should enumerate their
+# deployment's sensitive tools via GovernanceLayer(sensitive_tools=...)
+# or per-call context["sensitive_tools"]. Matching (see
+# tool_name_matches):
+#   * exact string, as always;
+#   * glob patterns — an entry containing "*" or "?" is matched with
+#     fnmatch, so "mcp__db__*" gates a whole MCP server;
+#   * MCP suffix — "mcp__<server>__<tool>" also matches an entry naming
+#     the bare <tool>, since the prefix is transport namespacing, not a
+#     different tool ("file_delete" gates "mcp__filesystem__file_delete").
+# Anything that matches none of these is not gated.
 DEFAULT_SENSITIVE_TOOLS: frozenset[str] = frozenset(
     {"database_write", "file_delete", "payment_execute", "admin_api"}
 )
+
+
+def tool_name_matches(tool: str, patterns: Collection[str]) -> bool:
+    """Match a tool name against a pattern set (exact, glob, MCP suffix).
+
+    Shared matching semantics for every name-based policy surface:
+    GOV-001 sensitive tools and the adversarial layer's tool-sequence
+    categories."""
+    if not tool:
+        return False
+    if tool in patterns:
+        return True
+    for entry in patterns:
+        if ("*" in entry or "?" in entry) and fnmatch.fnmatchcase(tool, entry):
+            return True
+    if tool.startswith("mcp__"):
+        parts = tool.split("__", 2)
+        if len(parts) == 3 and parts[2] in patterns:
+            return True
+    return False
 
 
 def _rule_high_risk_tool_access(
@@ -158,14 +184,15 @@ def _rule_high_risk_tool_access(
     The sensitive-tool set is the operator-supplied
     ``context["sensitive_tools"]`` (injected from the layer's
     constructor) and falls back to ``DEFAULT_SENSITIVE_TOOLS``. Matching
-    is exact-string, so the set must list every sensitive tool name the
-    deployment exposes.
+    is exact-string, glob (entries containing ``*``/``?``), or MCP
+    suffix (``mcp__<server>__<tool>`` matches an entry naming the bare
+    tool) — see :func:`tool_name_matches`.
     """
     sensitive_tools = context.get("sensitive_tools") or DEFAULT_SENSITIVE_TOOLS
     action_tool = action.get("tool", "")
     return (
         profile.risk_tier in (RiskTier.HIGH, RiskTier.CRITICAL)
-        and action_tool in sensitive_tools
+        and tool_name_matches(action_tool, sensitive_tools)
     )
 
 
@@ -285,11 +312,12 @@ class GovernanceLayer:
         Function called when a policy requires human approval.
         Receives (AgentProfile, action, PolicyEvaluation).
     sensitive_tools : set[str], optional
-        Tool names the GOV-001 high-risk rule gates (exact-string
-        match). Defaults to ``DEFAULT_SENSITIVE_TOOLS``. Supply the full
-        set your deployment exposes — including framework-namespaced
-        names and aliases — since unlisted tools are not gated. A
-        per-call ``context["sensitive_tools"]`` overrides this.
+        Tool names the GOV-001 high-risk rule gates. Entries match
+        exactly, as globs when they contain ``*``/``?`` (e.g.
+        ``"mcp__db__*"``), or against the bare tool part of
+        MCP-namespaced names. Defaults to ``DEFAULT_SENSITIVE_TOOLS``;
+        unmatched tools are not gated. A per-call
+        ``context["sensitive_tools"]`` overrides this.
     """
 
     def __init__(
