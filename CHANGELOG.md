@@ -8,6 +8,31 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [Unreleased]
+
+### Added
+
+- **Claude Code plugin: SessionStart safety banner and `/agentegrity-init`.**
+  Readying the plugin for public marketplace distribution. A new
+  `SessionStart` hook probes library importability once per session (in a
+  subprocess with the same interpreter, faithful to what the PreToolUse
+  hook does and immune to a native-dependency crash that `find_spec`
+  would miss) and raises a user-visible `systemMessage` banner when
+  `agentegrity` does not import or the plugin is disabled — closing the
+  gap where a marketplace install with no `pip install` looked active but
+  silently protected nothing. `/agentegrity-init` guides same-interpreter
+  installation and verifies with `agentegrity doctor`.
+
+### Changed
+
+- **Claude Code plugin version tracks the library release.** The plugin
+  manifest and its marketplace entry now pin `0.10.0` (was `0.1.0`), and
+  `scripts/check_versions.py` gates both against `pyproject.toml`. Claude
+  Code caches plugins by their version string, so an un-bumped manifest
+  would have silently withheld shipped hook fixes from installed users.
+  The marketplace entry also gains discovery metadata (category, keywords,
+  license, homepage) for directory listing.
+
 ## [0.10.0] - 2026-08-03
 
 Session export and detection hardening, shipped together as one release.

@@ -29,18 +29,26 @@ Every tool call passes through a `PreToolUse` hook before it executes:
 
 ## Install
 
-```bash
-pip install agentegrity          # the hook imports it at evaluation time
-```
-
-Then, inside Claude Code:
+Inside Claude Code:
 
 ```
 /plugin marketplace add cogensec/agentegrity
 /plugin install agentegrity@agentegrity
 ```
 
-Check the wiring with `/agentegrity-status`.
+The hook imports `agentegrity` from the `python3` on your PATH at
+evaluation time, so the library must be installed for that interpreter:
+
+```bash
+pip install "agentegrity[crypto]"   # [crypto] signs the decision chain
+```
+
+Run `/agentegrity-init` for guided setup (it installs for the right
+interpreter and verifies with `agentegrity doctor`), and
+`/agentegrity-status` to check the wiring any time. If the library is not
+importable, a banner at session start tells you the session is **not**
+being verified — the plugin never silently pretends to protect an
+unprotected session.
 
 ## Configuration
 
@@ -57,11 +65,13 @@ Environment variables, all optional:
 
 Fail-open by design: if `agentegrity` is not importable for the
 `python3` on PATH, the payload is malformed, or chain persistence
-fails, the hook stays silent and Claude Code's normal permission flow
-decides. A fail-open event is logged to stderr, and
-`/agentegrity-status` reports it. The decision chain records what the
-verdict *would have been* in `alert` mode, so a dry run produces the
-same auditable evidence as enforcement.
+fails, the PreToolUse hook stays silent and Claude Code's normal
+permission flow decides. Fail-open is never *silent at the session
+level*, though: the SessionStart hook raises a visible banner when the
+library does not import, so you always know when a session is
+unprotected. `/agentegrity-status` reports it too. The decision chain
+records what the verdict *would have been* in `alert` mode, so a dry
+run produces the same auditable evidence as enforcement.
 
 ## What this is not
 

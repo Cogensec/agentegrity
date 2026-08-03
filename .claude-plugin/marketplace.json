@@ -1,5 +1,6 @@
 {
   "name": "agentegrity",
+  "description": "Self-securing AI agents: in-process integrity verification with tamper-evident audit trails.",
   "owner": {
     "name": "Cogensec Research",
     "url": "https://github.com/cogensec"
@@ -8,7 +9,31 @@
     {
       "name": "agentegrity",
       "source": "./integrations/claude-code",
-      "description": "In-process integrity verification for every tool call: injection and exfiltration scanning, MCP-aware sensitive-tool gating, and a verifiable per-session decision chain."
+      "description": "In-process integrity verification for every tool call: injection and exfiltration scanning, MCP-aware sensitive-tool gating, and a verifiable per-session decision chain.",
+      "version": "0.10.0",
+      "author": {
+        "name": "Cogensec Research"
+      },
+      "homepage": "https://github.com/cogensec/agentegrity",
+      "repository": "https://github.com/cogensec/agentegrity",
+      "license": "Apache-2.0",
+      "category": "security",
+      "keywords": [
+        "security",
+        "prompt-injection",
+        "guardrails",
+        "mcp",
+        "audit",
+        "compliance",
+        "integrity"
+      ],
+      "tags": [
+        "security",
+        "prompt-injection",
+        "tool-poisoning",
+        "audit-trail",
+        "verification"
+      ]
     }
   ]
 }

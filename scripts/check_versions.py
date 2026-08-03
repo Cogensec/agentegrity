@@ -17,6 +17,7 @@ Exit code 0 on parity, 1 on drift, 2 on missing canonical version.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -105,6 +106,35 @@ def check_readme_prose(version: str) -> bool:
     return True
 
 
+def check_plugin_manifests(version: str) -> bool:
+    """The Claude Code plugin manifest and its marketplace entry pin a
+    version string Claude Code caches on. If it does not track the library
+    release, a shipped hook fix never reaches installed users. Keep both
+    in lockstep with pyproject."""
+    ok_all = True
+    manifests = {
+        "integrations/claude-code/.claude-plugin/plugin.json": ("version",),
+        ".claude-plugin/marketplace.json": ("plugins", 0, "version"),
+    }
+    for rel, path_keys in manifests.items():
+        path = ROOT / rel
+        try:
+            data: object = json.loads(read(path))
+        except (OSError, json.JSONDecodeError) as exc:
+            fail(f"{rel} unreadable: {exc}")
+            ok_all = False
+            continue
+        node = data
+        for key in path_keys:
+            node = node[key]  # type: ignore[index]
+        if node != version:
+            fail(f"{rel} version={node!r} != pyproject {version}")
+            ok_all = False
+        else:
+            ok(f"{rel} version={version}")
+    return ok_all
+
+
 def main() -> int:
     version = canonical_version()
     print(f"canonical version: {version}\n")
@@ -112,6 +142,7 @@ def main() -> int:
         check_init(version),
         check_readme_badge(version),
         check_readme_prose(version),
+        check_plugin_manifests(version),
     ]
     if not all(checks):
         print("\nVersion drift detected. Bump every site together.", file=sys.stderr)

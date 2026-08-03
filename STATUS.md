@@ -99,8 +99,9 @@ and Vercel AI SDK stay single-agent by framework design.
 |---|:------:|-------|
 | PreToolUse hook | 🧪 | In-process evaluation of every tool call (adversarial scan of tool arguments minus structure-cue patterns, MCP-aware governance gating). Verdicts: allow / ask / deny mapped onto Claude Code's permission flow. Fail-open on missing library, malformed payload, or persistence failure. Modes: `enforce` (default) / `alert` / disabled via env. |
 | Decision chain | 🧪 | Every evaluated call appends a hash-linked `DecisionRecord` to `~/.agentegrity/claude-code/<session>.chain.json`; `agentegrity verify-decisions` verifies it. Unsigned in v1 (self-vouched); signing lands with the KeyProvider work. |
-| `/agentegrity-status` command | 🧪 | Reports importability, mode, risk tier, and per-session record counts. |
-| Marketplace packaging | 🧪 | Root `.claude-plugin/marketplace.json` → `/plugin marketplace add cogensec/agentegrity`. |
+| SessionStart hook | 🧪 | Probes library importability once per session in a subprocess (faithful to what PreToolUse will do, immune to a native-dep crash that `find_spec` would miss) and raises a user-visible `systemMessage` banner when the library does not import or the plugin is disabled — so a broken install cannot masquerade as active protection. Silent on a healthy install. |
+| `/agentegrity-status` / `/agentegrity-init` commands | 🧪 | `status` reports importability, mode, risk tier, and per-session record counts. `init` guides same-interpreter install, verifies with `agentegrity doctor`, and explains enforce/alert modes. |
+| Marketplace packaging | 🧪 | Root `.claude-plugin/marketplace.json` → `/plugin marketplace add cogensec/agentegrity`. Discovery metadata (category `security`, keywords, license, homepage) populated; plugin version pinned to the library release and gated by `scripts/check_versions.py` so a shipped hook fix always reaches installed users. Community-directory submission via clau.de/plugin-directory-submission. |
 
 ## Spec & Schemas
 
