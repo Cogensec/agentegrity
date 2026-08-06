@@ -18,7 +18,7 @@
     "check-versions": "tsx scripts/check-versions.ts"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "typescript": "^7.0.2",
     "tsx": "^4.7.0",
     "@types/node": "^20.0.0",
     "@agentegrity/client": "workspace:*",
