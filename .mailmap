@@ -9,14 +9,8 @@
 # layer applied at view time.
 
 # Re-attribute AI co-author trailers in legacy commits to the project
-# owner. Affects 4 historical commits with `Co-Authored-By: Claude …`
-# trailers (still reachable via `refs/pull/1/head`).
-requie <tarique.smith@gmail.com> Claude <noreply@anthropic.com>
-requie <tarique.smith@gmail.com> Claude Opus 4.6 <noreply@anthropic.com>
-# Catch-all for any other name attached to the anthropic noreply email.
-requie <tarique.smith@gmail.com> <noreply@anthropic.com>
+# owner. 
 
 # Collapse author-name variants for the same email into the canonical
 # username so GitHub doesn't show two "people" for the same person.
-requie <tarique.smith@gmail.com> Tarique Smith <tarique.smith@gmail.com>
-requie <tarique.smith@gmail.com> Tarique smith <tarique.smith@gmail.com>
+
