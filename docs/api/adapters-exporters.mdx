@@ -1,0 +1,241 @@
+---
+title: "Adapters & exporters"
+description: "FrameworkEvent, the adapter protocols, and every shipped exporter."
+icon: "plug"
+---
+
+## FrameworkAdapter
+
+```python
+from agentegrity.adapters.base import FrameworkAdapter
+
+class FrameworkAdapter(Protocol):
+    @property
+    def name(self) -> str: ...
+    @property
+    def profile(self) -> AgentProfile: ...
+    @property
+    def events(self) -> list[FrameworkEvent]: ...
+
+    def get_collected_context(self) -> dict: ...
+    async def on_event(self, event_type: str, event_data: dict) -> dict: ...
+```
+
+## _BaseAdapter
+
+Every shipped adapter inherits from it. Construct one directly when you need `signing_key` or
+`approval_handler`, which the zero-config entry points do not expose.
+
+```python
+_BaseAdapter(
+    profile,
+    evaluator=None,             # defaults to IntegrityEvaluator(default_layers())
+    enforce=False,
+    api_key=None,
+    signing_key=None,
+    approval_handler=None,
+)
+```
+
+### Properties
+
+```python
+adapter.name                 # registry key
+adapter.profile              # AgentProfile
+adapter.events               # list[FrameworkEvent] (a copy)
+adapter.attestation_chain    # AttestationChain
+adapter.evaluation_count     # int
+adapter.session_id           # str
+```
+
+### Methods
+
+```python
+adapter.register_exporter(exporter)
+adapter.get_collected_context() -> dict
+adapter.get_summary() -> dict
+adapter.set_topology(topology, my_role=None)
+adapter.record_decision(decision_point, candidate_action, *,
+                        reasoning_chain=None, rejected_alternatives=None,
+                        decision_inputs=None, goal_state=None) -> DecisionRecord | None
+adapter.close()                       # fires on_session_end; idempotent
+await adapter.on_event(event_type, event_data) -> dict
+
+async with adapter:                   # __aexit__ calls close()
+    ...
+```
+
+`record_decision` **fails open**: on any exception it logs with a traceback, emits a
+`capture_failure` event carrying only `exception_class`, and returns `None`.
+
+## FrameworkEvent
+
+```python
+@dataclass
+class FrameworkEvent:
+    event_type: str
+    timestamp: datetime = now(UTC)
+    adapter_name: str = ""
+    data: dict = {}
+    evaluation_result: IntegrityScore | None = None
+
+    def to_dict(self) -> dict: ...
+```
+
+### Event types
+
+| Group | Types |
+|---|---|
+| Core | `pre_tool_use` · `post_tool_use` · `post_tool_use_failure` · `user_prompt_submit` · `stop` · `subagent_start` · `subagent_stop` · `pre_compact` |
+| Multi-agent | `topology_declared` · `topology_change` · `peer_message` · `shared_memory_write` · `broadcast` · `task_started` |
+| Health | `capture_failure` · `subagent_orphan` · `<channel>_overflow` |
+
+`evaluation_result` is `None` for `post_tool_use_failure`, `subagent_stop`, `pre_compact`, and
+every health event.
+
+## Session summary
+
+```python
+adapter.get_summary()
+```
+
+```json
+{
+  "adapter": "claude",
+  "agent_id": "…",
+  "evaluations": 12,
+  "events": 18,
+  "attestation_records": 12,
+  "decision_records": 5,
+  "chain_records": 17,
+  "chain_hash_linked": true,
+  "enforce_mode": false,
+  "exporters": [{"type": "HTTPExporter", "target": "https://dashboard"}]
+}
+```
+
+<Warning>
+  The module-level `report()` zero-state fallback (before any instrumentation) omits
+  `decision_records` and `chain_records`. Use `.get(...)` rather than subscripting if your code
+  might see a session that never started.
+</Warning>
+
+## Context buffer
+
+Per-channel cap of **1000 entries per session** (`_BUFFER_CAP`). On overflow, the item is
+dropped and a one-time `<channel>_overflow` event fires — once per channel, so a sustained
+flood cannot flood the event stream in turn.
+
+`get_collected_context()` returns the evaluation context:
+
+```python
+{
+  "input", "tool_outputs", "reasoning_chain", "goals", "instructions",
+  "memory_reads", "action_distribution", "tool_usage", "action",
+  "tool_call_history", "peer_messages",
+  "topology_context": {...},          # only when multi-agent state exists
+}
+```
+
+---
+
+## SessionExporter
+
+```python
+from agentegrity import SessionExporter
+
+class SessionExporter(Protocol):
+    async def on_session_start(self, session_id: str, adapter_name: str,
+                               profile: dict) -> None: ...
+    async def on_event(self, session_id: str, event: dict) -> None: ...
+    async def on_session_end(self, session_id: str, summary: dict) -> None: ...
+```
+
+Optional convention:
+
+```python
+def describe(self) -> dict[str, str]:
+    return {"type": "MyExporter", "target": "https://sink"}
+```
+
+Not a Protocol member — exporters without it are reported by class name. **Must never include
+credentials**, since the summary is serialized to the sink and into logs.
+
+Fan-out is fail-open and registration is idempotent by reference equality.
+
+## HTTPExporter
+
+```python
+from agentegrity import HTTPExporter
+
+HTTPExporter(base_url: str, token: str, *, timeout: float = 5.0)
+```
+
+```python
+exporter.base                       # normalized origin (trailing slash stripped)
+exporter.describe()                 # {"type": ..., "target": base} — never the token
+exporter.flush(timeout=5.0)
+```
+
+```python
+from agentegrity.exporters.http import from_env, ENV_TOKEN, ENV_URL, ENV_URL_ALIAS
+
+exporter = from_env()               # None when unconfigured
+```
+
+| Constant | Value |
+|---|---|
+| `ENV_TOKEN` | `AGENTEGRITY_TOKEN` |
+| `ENV_URL` | `AGENTEGRITY_EXPORTER_URL` |
+| `ENV_URL_ALIAS` | `AGENTEGRITY_URL` |
+
+Ordered single-thread delivery, 1000-entry bounded queue that drops with a warning on
+overflow, at-exit flush.
+
+## Alert exporters
+
+```python
+from agentegrity import WebhookAlertExporter, SlackAlertExporter
+
+WebhookAlertExporter(url, *, alert_on={"block", "escalate"}, timeout=5.0)
+SlackAlertExporter(url, *, alert_on=..., timeout=...)
+```
+
+Override `_format(alert) -> dict` to reshape the payload. `describe()` **strips the query
+string** so webhook tokens never surface.
+
+<Note>
+  These exporters' callbacks are **synchronous**, unlike `HTTPExporter` and
+  `OTelSessionExporter`. The adapter fan-out handles both.
+</Note>
+
+## OTelSessionExporter
+
+```python
+from agentegrity.exporters.otel import OTelSessionExporter     # needs [otel]
+
+OTelSessionExporter(
+    *,
+    tracer_provider=None,       # defaults to the global provider
+    meter_provider=None,
+    capture_content=False,      # True truncates content to 512 chars onto spans
+    chain_provider=None,        # () -> AttestationChain
+    trusted_keys=None,          # set[bytes] — the trust anchor
+)
+```
+
+The module imports without the extra; the **constructor** raises `ImportError`.
+
+`describe()` returns `{"type": ...}` with **no target** — the OTLP destination belongs to the
+OpenTelemetry SDK's configuration, not this class.
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Session exporters" icon="share-nodes" href="/docs/export/session-exporters">
+    Writing your own.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The adapters that produce these events.
+  </Card>
+</CardGroup>

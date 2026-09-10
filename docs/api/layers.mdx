@@ -1,0 +1,298 @@
+---
+title: "Layers"
+description: "Constructors for all four layers, plus checkpoints, baseline stores, and detector types."
+icon: "layer-group"
+---
+
+## default_layers
+
+```python
+from agentegrity.layers import default_layers
+
+layers = default_layers(
+    coherence_threshold=0.70,
+    drift_tolerance=0.15,
+    policy_set="enterprise-default",
+    prefer_llm=False,
+    api_key=None,
+)
+```
+
+Returns `[AdversarialLayer, CorticalLayer | CorticalLLMLayer, GovernanceLayer, RecoveryLayer]`.
+
+`prefer_llm=True` probes for `anthropic` at construction and raises `ImportError` with the
+install command if missing — a clear error now rather than a confusing one on first evaluate.
+
+## AdversarialLayer
+
+```python
+AdversarialLayer(
+    coherence_threshold=0.70,
+    threat_detectors=None,
+    block_on_critical=True,
+    patterns=None,
+    extra_patterns=None,
+    detect_tool_sequences=True,
+    tool_categories=None,
+)
+```
+
+<ResponseField name="coherence_threshold" type="float" default="0.70" />
+<ResponseField name="threat_detectors" type="list[callable] | None">
+  Each receives `(profile, context)` and returns `list[ThreatAssessment]`. Isolated in
+  try/except.
+</ResponseField>
+<ResponseField name="block_on_critical" type="bool" default="True">
+  Block on any threat with severity ≥ 0.90.
+</ResponseField>
+<ResponseField name="patterns" type="list[DetectorPattern] | None">
+  **Replaces** the default taxonomy.
+</ResponseField>
+<ResponseField name="extra_patterns" type="list[DetectorPattern] | None">
+  **Appends** to it.
+</ResponseField>
+<ResponseField name="detect_tool_sequences" type="bool" default="True" />
+<ResponseField name="tool_categories" type="ToolCategories | None">
+  **Replaces** `DEFAULT_TOOL_CATEGORIES`.
+</ResponseField>
+
+```python
+layer.evaluate(profile, context) -> LayerResult
+await layer.aevaluate(profile, context) -> LayerResult
+layer.map_attack_surface(profile) -> AttackSurfaceMap
+layer.detect(input_data, channel, profile=None) -> ThreatAssessment | None
+```
+
+### Supporting types
+
+```python
+from agentegrity.layers.adversarial import (
+    DetectorPattern, ThreatAssessment, AttackSurfaceMap,
+    default_detector_patterns, DEFAULT_TOOL_CATEGORIES,
+)
+from agentegrity import ToolCategories, ToolSequenceDetector
+```
+
+```python
+@dataclass
+class DetectorPattern:
+    name: str
+    pattern: str | re.Pattern
+    threat_type: str
+    severity: float = 0.75         # validated into [0, 1]
+    confidence: float = 0.60       # validated into [0, 1]
+    description: str = ""
+    flags: int = re.IGNORECASE
+
+@dataclass
+class ThreatAssessment:
+    channel: str
+    threat_type: str
+    severity: float
+    confidence: float
+    description: str
+    indicators: list[str] = []
+
+@dataclass(frozen=True)
+class ToolCategories:
+    reads_sensitive: frozenset[str]
+    sends_external: frozenset[str]
+```
+
+## CorticalLayer
+
+```python
+CorticalLayer(
+    drift_tolerance=0.15,
+    memory_integrity_threshold=0.80,
+    reasoning_consistency_threshold=0.75,
+    baseline=None,
+    min_drift_samples=20,
+    baseline_store=None,
+    metric="js",
+)
+```
+
+<ResponseField name="metric" type='"js" | "wasserstein"' default='"js"'>
+  Wasserstein needs `[stats]`; a missing scipy logs one warning and falls back to JS.
+</ResponseField>
+
+<ResponseField name="min_drift_samples" type="int" default="20">
+  Below this, a dimension is recorded as `<dim>__insufficient_samples` and **not scored**.
+</ResponseField>
+
+```python
+layer.evaluate(profile, context) -> LayerResult
+await layer.aevaluate(profile, context) -> LayerResult
+layer.update_baseline({"action": ..., "tool": ...})
+```
+
+```python
+from agentegrity.layers.cortical import (
+    BehavioralBaseline, DriftAssessment, MemoryAssessment, ReasoningAssessment,
+)
+```
+
+## GovernanceLayer
+
+```python
+GovernanceLayer(
+    policy_set="enterprise-default",
+    custom_rules=None,
+    enable_audit=True,
+    escalation_callback=None,
+    sensitive_tools=None,
+)
+```
+
+```python
+layer.evaluate(profile, context) -> LayerResult
+await layer.aevaluate(profile, context) -> LayerResult
+layer.add_rule(rule)
+layer.rules            # list[PolicyRule]
+layer.audit_log        # list[AuditEntry]
+layer.emergency_stop(agent_id, reason) -> dict
+```
+
+### Supporting types
+
+```python
+from agentegrity.layers.governance import (
+    PolicyRule, PolicyDecision, PolicyEvaluation, AuditEntry,
+    DEFAULT_POLICIES, DEFAULT_SENSITIVE_TOOLS, tool_name_matches,
+)
+```
+
+```python
+@dataclass
+class PolicyRule:
+    rule_id: str
+    name: str
+    description: str
+    condition: Callable[[AgentProfile, dict, dict], bool]
+    decision: PolicyDecision = PolicyDecision.DENY
+    severity: float = 0.50
+
+class PolicyDecision(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+    REQUIRE_APPROVAL = "require_approval"
+    CONDITIONAL = "conditional"
+```
+
+```python
+tool_name_matches(tool: str, patterns: Collection[str]) -> bool
+```
+
+Exact, glob (`*`/`?` via `fnmatch`), or MCP suffix. Shared with the adversarial layer's tool
+categories.
+
+Policy sets: `"enterprise-default"` (GOV-001…004), `"strict"` (every tool call escalates),
+`"minimal"` (no rules, score 1.0).
+
+## RecoveryLayer
+
+```python
+RecoveryLayer(
+    degradation_window=10,
+    degradation_threshold=0.15,
+    chain=None,
+    score_history=None,
+    checkpoint=None,
+)
+```
+
+```python
+layer.evaluate(profile, context) -> LayerResult
+await layer.aevaluate(profile, context) -> LayerResult
+layer.record_score(composite)
+layer.snapshot(agent_id, baseline=None, metadata=None) -> str
+layer.restore_to(checkpoint_id) -> CheckpointSnapshot
+```
+
+`snapshot()` / `restore_to()` raise `RuntimeError` without a checkpoint backend;
+`restore_to()` raises `KeyError` for an unknown id.
+
+```python
+from agentegrity.layers.recovery import RecoveryAssessment, RECOVERY_CAPABILITIES
+```
+
+## Checkpoints
+
+```python
+from agentegrity.layers import (
+    Checkpoint, CheckpointSnapshot,
+    InMemoryCheckpoint, FileCheckpoint, SqliteCheckpoint,
+)
+from agentegrity.layers.kms_checkpoint import KMSCheckpoint   # needs [kms]
+```
+
+```python
+class Checkpoint(Protocol):
+    def save(self, snapshot: CheckpointSnapshot) -> str: ...
+    def load(self, checkpoint_id: str) -> CheckpointSnapshot | None: ...
+    def list_ids(self) -> list[str]: ...
+    def latest(self) -> CheckpointSnapshot | None: ...
+
+@dataclass
+class CheckpointSnapshot:
+    agent_id: str
+    checkpoint_id: str = uuid4()
+    created_at: str = now(UTC).isoformat()
+    score_history: list[float] = []
+    chain_records: list[dict] = []
+    baseline: dict | None = None
+    metadata: dict = {}
+```
+
+<Warning>
+  `save()` **may return a different id** than the one on the snapshot. The returned id is
+  canonical — always use it.
+</Warning>
+
+```python
+from agentegrity.layers.checkpoint import validate_storage_identifier
+validate_storage_identifier(value, kind="identifier")
+```
+
+Call this in any custom backend before an identifier reaches a path or key — it is the
+allow-list closing path traversal (**T-E1**).
+
+## Baseline stores
+
+```python
+from agentegrity.layers import (
+    BaselineStore, InMemoryBaselineStore, FileBaselineStore, SqliteBaselineStore,
+)
+
+class BaselineStore(Protocol):
+    def save(self, baseline, role: str | None = None) -> None: ...
+    def load(self, agent_id: str, role: str | None = None): ...
+    def list_agent_ids(self) -> list[str]: ...
+    def list_keys(self) -> list[tuple[str, str | None]]: ...
+    def delete(self, agent_id: str, role: str | None = None) -> bool: ...
+```
+
+Keyed `(agent_id, role)`, with transparent fallback to pre-v0.8 role-less entries.
+
+## Semantic layers
+
+```python
+from agentegrity.layers.adversarial_llm import AdversarialLLMLayer   # [llm]
+from agentegrity.layers.adversarial_slm import AdversarialSLMLayer   # no extra
+from agentegrity.layers.cortical_llm import CorticalLLMLayer         # [llm]
+from agentegrity.layers.embedding_similarity import EmbeddingSimilarityDetector
+```
+
+See [Semantic layers](/docs/guides/semantic-layers) for constructor arguments.
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="The four layers" icon="layer-group" href="/docs/concepts/four-layers">
+    Composition and evaluation flow.
+  </Card>
+  <Card title="Custom detectors" icon="crosshairs" href="/docs/guides/custom-detectors">
+    Extending the taxonomy.
+  </Card>
+</CardGroup>

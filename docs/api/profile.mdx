@@ -1,0 +1,202 @@
+---
+title: "Profile & enums"
+description: "AgentProfile, AgentType, DeploymentContext, RiskTier, and the capability constants."
+icon: "id-card"
+---
+
+## AgentProfile
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+
+profile = AgentProfile(
+    agent_type=AgentType.TOOL_USING,
+    capabilities=["tool_use", "web_access"],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.MEDIUM,
+    agent_id="research-agent-prod",
+    name="research-assistant",
+    framework="langchain",
+    model_provider="anthropic",
+    model_id="claude-sonnet-4-20250514",
+    metadata={"team": "research"},
+)
+```
+
+### Fields
+
+<ResponseField name="agent_type" type="AgentType" required>
+  Positional. Classification of the agent's autonomy model.
+</ResponseField>
+
+<ResponseField name="capabilities" type="list[str]" required>
+  Positional. Determines `input_channels`.
+</ResponseField>
+
+<ResponseField name="deployment_context" type="DeploymentContext" required>
+  Positional.
+</ResponseField>
+
+<ResponseField name="risk_tier" type="RiskTier" required>
+  Positional.
+</ResponseField>
+
+<ResponseField name="agent_id" type="str" default="uuid4()">
+  The identity a `KeyProvider` resolves and the key baselines are stored under. **Pin it**
+  for anything that must survive a restart.
+</ResponseField>
+
+<ResponseField name="name" type="str | None" default="None" />
+<ResponseField name="framework" type="str | None" default="None" />
+<ResponseField name="model_provider" type="str | None" default="None" />
+<ResponseField name="model_id" type="str | None" default="None" />
+<ResponseField name="metadata" type="dict" default="{}" />
+<ResponseField name="created_at" type="datetime" default="now(UTC)" />
+
+<Warning>
+  The first four fields are **positional** — `AgentProfile` is a plain dataclass and they carry
+  no defaults. Every keyword-only-looking argument after them does. Use keywords throughout to
+  avoid surprises.
+</Warning>
+
+### Methods and properties
+
+```python
+profile.has_capability("tool_use")     # -> bool
+profile.is_autonomous                  # AUTONOMOUS | MULTI_AGENT | EMBODIED
+profile.is_embodied                    # EMBODIED, PHYSICAL context, or physical_actuation
+profile.input_channels                 # -> list[str]
+profile.to_dict()                      # -> dict (enum values, ISO timestamp)
+AgentProfile.from_dict(data)           # -> AgentProfile
+AgentProfile.default(name="my-agent")  # -> AgentProfile
+```
+
+<Warning>
+  `from_dict()` does **not** restore `created_at` — a round trip produces a profile with a
+  fresh timestamp. Persist it separately if baseline age matters.
+</Warning>
+
+### AgentProfile.default()
+
+```python
+AgentProfile(
+    name=name,                                   # default "claude-agent"
+    agent_type=AgentType.TOOL_USING,
+    capabilities=[CAPABILITY_TOOL_USE],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.MEDIUM,
+)
+```
+
+Two input channels, medium risk, fresh UUID. Fine for a demo; explicit for production.
+
+## Enums
+
+<CodeGroup>
+
+```python AgentType
+class AgentType(str, Enum):
+    CONVERSATIONAL = "conversational"
+    TOOL_USING     = "tool_using"
+    AUTONOMOUS     = "autonomous"
+    MULTI_AGENT    = "multi_agent"
+    EMBODIED       = "embodied"
+```
+
+```python DeploymentContext
+class DeploymentContext(str, Enum):
+    CLOUD       = "cloud"
+    EDGE        = "edge"
+    HYBRID      = "hybrid"
+    MULTI_AGENT = "multi_agent"
+    FEDERATED   = "federated"
+    PHYSICAL    = "physical"
+```
+
+```python RiskTier
+class RiskTier(str, Enum):
+    LOW      = "low"
+    MEDIUM   = "medium"
+    HIGH     = "high"
+    CRITICAL = "critical"
+```
+
+</CodeGroup>
+
+All three subclass `str`, so `profile.risk_tier == "high"` works and JSON serialization is
+direct.
+
+## Capability constants
+
+```python
+from agentegrity.core.profile import (
+    CAPABILITY_TOOL_USE,                # "tool_use"
+    CAPABILITY_MEMORY_ACCESS,           # "memory_access"
+    CAPABILITY_MULTI_AGENT_COMM,        # "multi_agent_comm"
+    CAPABILITY_CODE_EXECUTION,          # "code_execution"
+    CAPABILITY_WEB_ACCESS,              # "web_access"
+    CAPABILITY_FILE_SYSTEM,             # "file_system"
+    CAPABILITY_PHYSICAL_ACTUATION,      # "physical_actuation"
+    CAPABILITY_FINANCIAL_TRANSACTIONS,  # "financial_transactions"
+)
+```
+
+### Capability → channel
+
+| Capability | Channel |
+|---|---|
+| *(always)* | `direct_prompt` |
+| `tool_use` | `tool_responses` |
+| `memory_access` | `memory_reads` |
+| `multi_agent_comm` | `peer_messages` |
+| `web_access` | `web_content` |
+| `code_execution` | `code_outputs` |
+| `physical_actuation` | `sensor_inputs` |
+
+`file_system` and `financial_transactions` open no channel; they are consumed by governance.
+
+### Recovery capabilities
+
+```python
+from agentegrity.layers.recovery import RECOVERY_CAPABILITIES
+# {"state_restore", "checkpoint", "rollback", "session_reset", "peer_quarantine"}
+```
+
+Any of these in `capabilities` raises the recovery layer's capability sub-score.
+
+<Warning>
+  Under-declaring capabilities **inflates** your score: an undeclared channel is never scanned.
+  Declare what the agent can actually do.
+</Warning>
+
+## Serialized shape
+
+```json
+{
+  "agent_id": "research-agent-prod",
+  "name": "research-assistant",
+  "agent_type": "tool_using",
+  "capabilities": ["tool_use", "web_access"],
+  "deployment_context": "cloud",
+  "risk_tier": "medium",
+  "framework": "langchain",
+  "model_provider": "anthropic",
+  "model_id": "claude-sonnet-4-20250514",
+  "metadata": {"team": "research"},
+  "created_at": "2026-09-10T14:20:00+00:00"
+}
+```
+
+This is exactly what `SessionExporter.on_session_start` receives, validated against
+`schemas/exporter/common.json#/$defs/AgentProfile`.
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Agent profiles" icon="id-card" href="/docs/concepts/agent-profiles">
+    The conceptual guide, with worked examples.
+  </Card>
+  <Card title="Evaluation" icon="gauge" href="/docs/api/evaluation">
+    What consumes a profile.
+  </Card>
+</CardGroup>

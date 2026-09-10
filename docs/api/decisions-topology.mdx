@@ -1,0 +1,260 @@
+---
+title: "Decisions & topology"
+description: "DecisionRecord, DecisionInput, CaptureTier, AgentTopology, AgentMember, TopologyChange."
+icon: "code-branch"
+---
+
+## DecisionRecord
+
+```python
+from agentegrity import DecisionRecord, DecisionInput, RejectedAlternative, CaptureTier
+```
+
+```python
+@dataclass
+class DecisionRecord:
+    agent_id: str
+    decision_point: str
+    candidate_action: dict
+    decision_inputs: list[DecisionInput] = []
+    reasoning_chain: list[str] = []
+    rejected_alternatives: list[RejectedAlternative] = []
+    goal_state: list[str] = []
+    capture_tier: CaptureTier = CaptureTier.MINIMAL
+    redacted: bool = True
+    record_id: str = uuid4()
+    timestamp: datetime = now(UTC)
+    chain_previous: str | None = None
+    signature: bytes | None = None
+    public_key: bytes | None = None
+    record_kind: str = "decision"
+```
+
+Same surface as `AttestationRecord`:
+
+```python
+record.canonical_payload
+record.content_hash
+record.sign(private_key)
+record.verify(public_key=None)
+record.to_dict()
+DecisionRecord.from_dict(data)
+```
+
+### Decision points
+
+| `decision_point` | `candidate_action.type` |
+|---|---|
+| `pre_tool_use` | `tool_call` |
+| `stop` | `final_output` |
+| `subagent_start` | `subagent_dispatch_observed` |
+| `approval` | *(the action under review)* |
+
+## DecisionInput
+
+```python
+@dataclass
+class DecisionInput:
+    channel: str
+    content_hash: str
+    summary: str
+```
+
+<Warning>
+  Carries a **SHA-256 of the content plus a short summary** — the raw text never enters the
+  chain. `redacted=True` records that fact in the signed payload.
+
+  You can still prove a specific prompt produced a specific decision by hashing the prompt you
+  hold and comparing.
+</Warning>
+
+## RejectedAlternative
+
+```python
+@dataclass
+class RejectedAlternative:
+    action_summary: str
+    rejection_reason: str
+```
+
+Populating this makes the record **Tier A**.
+
+## CaptureTier
+
+```python
+class CaptureTier(str, Enum):
+    MINIMAL = "minimal"    # Tier C — neither field populated
+    PARTIAL = "partial"    # Tier B — reasoning chain only
+    FULL    = "full"       # Tier A — rejected alternatives present
+```
+
+```python
+from agentegrity.core.decision import infer_capture_tier
+
+infer_capture_tier(reasoning_chain, rejected_alternatives) -> CaptureTier
+```
+
+The tier is **inferred**, never asserted. Most adapters produce Tier C.
+
+## build_decision_record
+
+```python
+from agentegrity.core.decision import build_decision_record
+
+record = build_decision_record(
+    agent_id=profile.agent_id,
+    decision_point="pre_tool_use",
+    candidate_action={"type": "tool_call", "tool_name": "transfer_funds",
+                      "arguments": {"amount": 5000}},
+    reasoning_chain=["invoice verified", "vendor on allowlist"],
+    rejected_alternatives=[RejectedAlternative("hold for review", "pre-approved")],
+    decision_inputs=[DecisionInput("user_prompt", content_hash, "pay invoice 4471")],
+    goal_state=["settle Q3 vendor invoices"],
+    previous_record_hash=chain.latest.content_hash if chain.latest else None,
+    signing_key=key,
+)
+```
+
+Infers the tier and bakes `chain_previous` in **before** signing.
+
+---
+
+## AgentTopology
+
+```python
+from agentegrity import AgentTopology, AgentMember, AgentRole, TopologyKind, TopologyChange
+```
+
+```python
+@dataclass(frozen=True)
+class AgentTopology:
+    kind: TopologyKind
+    members: tuple[AgentMember, ...] = ()
+    comm_channels: frozenset[str] = frozenset()
+    topology_id: str = uuid4()
+    created_at: datetime = now(UTC)
+```
+
+### Navigation
+
+```python
+topology.leader()                # LEADER or SUPERVISOR member, else None
+topology.children_of(agent_id)   # tuple[AgentMember, ...]
+topology.member(agent_id)        # AgentMember | None
+```
+
+### Mutation
+
+```python
+topology.with_member(member)     # replaces an existing member with the same agent_id
+topology.without_member(agent_id)
+topology.with_channels(*channels)
+```
+
+Each returns a **new** snapshot preserving `topology_id` with a fresh `content_hash`.
+
+### Hashing
+
+```python
+topology.canonical_payload       # {"comm_channels": [...], "kind": ..., "members": [...]}
+topology.content_hash()          # sha256 hex
+```
+
+<Info>
+  `topology_id` and `created_at` are **excluded** from the payload. The hash captures the
+  structural shape only, which is why two structurally identical topologies built in different
+  sessions — or in different **runtimes** — produce the same digest.
+
+  `@agentegrity/client`'s `contentHash()` matches this byte-for-byte.
+</Info>
+
+```python
+topology.to_dict()               # includes topology_id, created_at, content_hash
+AgentTopology.from_dict(data)    # content_hash in the input is ignored (derived)
+```
+
+## AgentMember
+
+```python
+@dataclass(frozen=True)
+class AgentMember:
+    agent_id: str
+    name: str
+    role: AgentRole
+    parent_id: str | None = None
+    capabilities: tuple[str, ...] = ()
+```
+
+<Note>
+  `capabilities` is a **tuple**, not a list, so the dataclass is hashable. Passing a list is a
+  common mistake and breaks frozen-dataclass hashing.
+</Note>
+
+`parent_id` is the immediate parent's `agent_id`, or `None` for the root. In `PEER_TO_PEER`
+and `GROUP_CHAT` every member has `parent_id=None`.
+
+## AgentRole
+
+```python
+class AgentRole(str, Enum):
+    LEADER     = "leader"       # hub-spoke orchestrator
+    MEMBER     = "member"       # hub-spoke worker
+    SUPERVISOR = "supervisor"   # hierarchical-DAG root
+    WORKER     = "worker"       # hierarchical-DAG leaf
+    PEER       = "peer"         # peer-to-peer and group chat
+```
+
+Drives the cortical layer's per-role behavioural baselines.
+
+## TopologyKind
+
+```python
+class TopologyKind(str, Enum):
+    HUB_SPOKE        = "hub_spoke"
+    HIERARCHICAL_DAG = "hierarchical_dag"
+    PEER_TO_PEER     = "peer_to_peer"
+    GROUP_CHAT       = "group_chat"
+```
+
+## TopologyChange
+
+```python
+@dataclass(frozen=True)
+class TopologyChange:
+    previous_topology_id: str
+    previous_content_hash: str
+    new_topology_id: str
+    new_content_hash: str
+    added_members: tuple[AgentMember, ...] = ()
+    removed_member_ids: tuple[str, ...] = ()
+
+    @classmethod
+    def between(cls, previous, current) -> "TopologyChange": ...
+    def to_dict(self) -> dict: ...
+```
+
+Lands on exactly **one** attestation as `Evidence(evidence_type="topology_change")`, while the
+topology evidence itself is sticky across subsequent attestations.
+
+## Declaring from an adapter
+
+```python
+adapter.set_topology(topology, my_role=AgentRole.MEMBER)
+```
+
+| Call | Effect |
+|---|---|
+| First | `topology_declared` event |
+| Structurally distinct | `topology_change` event with a diff |
+| Structurally identical | **No-op** |
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Decision provenance" icon="code-branch" href="/docs/concepts/decision-provenance">
+    Capture tiers and boundaries.
+  </Card>
+  <Card title="Multi-agent topology" icon="diagram-project" href="/docs/concepts/multi-agent-topology">
+    What a topology unlocks.
+  </Card>
+</CardGroup>

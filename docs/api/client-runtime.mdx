@@ -1,0 +1,235 @@
+---
+title: "Client & runtime"
+description: "AgentegrityClient, AgentegrityRuntime, init(), shutdown(), and framework detection."
+icon: "rocket"
+---
+
+## init
+
+```python
+import agentegrity
+
+runtime = agentegrity.init(
+    name="agent",
+    frameworks=None,
+    enforce=False,
+    policy_set="enterprise-default",
+    profile=None,
+)
+```
+
+All keyword-only.
+
+<ResponseField name="name" type="str" default='"agent"'>
+  Name for the default `AgentProfile`. Ignored when `profile` is passed.
+</ResponseField>
+
+<ResponseField name="frameworks" type="list[str] | None">
+  Explicit adapter names instead of auto-detection. An unknown name raises `ValueError`
+  listing the valid keys.
+</ResponseField>
+
+<ResponseField name="enforce" type="bool" default="False">
+  Forwarded to every adapter. Observation-only adapters warn.
+</ResponseField>
+
+<ResponseField name="policy_set" type="str" default='"enterprise-default"' />
+
+<ResponseField name="profile" type="AgentProfile | None">
+  Use this instead of a default.
+</ResponseField>
+
+<Warning>
+  **Idempotent.** A second call emits a `RuntimeWarning` and returns the existing runtime until
+  `shutdown()` is called.
+</Warning>
+
+```python
+agentegrity.shutdown()      # ends every adapter session; safe if init() never ran
+```
+
+## AgentegrityRuntime
+
+```python
+@dataclass
+class AgentegrityRuntime:
+    client: AgentegrityClient
+    profile: AgentProfile
+    adapters: dict[str, Any] = {}
+    skipped: dict[str, str] = {}     # framework -> ImportError message
+```
+
+```python
+runtime.instrument(target) -> Any
+runtime.report() -> dict[str, dict]      # per-adapter summaries
+runtime.shutdown() -> None
+```
+
+`skipped` records frameworks whose probe succeeded but whose adapter dependencies were
+missing — e.g. `autogen` installed without `opentelemetry-sdk`. Those do not fail `init()`.
+
+### instrument dispatch
+
+Dispatches on the target's class module, first prefix match wins:
+
+| Module prefix | Adapter | Method |
+|---|---|---|
+| `langgraph` | `langchain` | `instrument_graph` |
+| `langchain_core` | `langchain` | `instrument_chain` |
+| `langchain_community` | `langchain` | `instrument_chain` |
+| `langchain` | `langchain` | `instrument_chain` |
+| `agno.team` | `agno` | `instrument_team` |
+| `agno` | `agno` | `instrument` |
+| `strands` | `bedrock_agents` | `instrument_strands` |
+| `google.adk` | `google_adk` | `instrument` |
+| `crewai` | `crewai` | `subscribe` |
+
+| Error | When |
+|---|---|
+| `TypeError` | No prefix matched — use `runtime.adapters[name]` directly |
+| `RuntimeError` | Prefix matched but `init()` did not build that adapter |
+
+Hook-style frameworks have no dispatch entry:
+
+```python
+runtime.adapters["claude"].create_hooks()
+runtime.adapters["openai_agents"].create_run_hooks()
+```
+
+## detect_frameworks
+
+```python
+agentegrity.detect_frameworks()     # -> list[str], in registry order
+```
+
+| Adapter | Probe modules |
+|---|---|
+| `claude` | `claude_agent_sdk` |
+| `langchain` | `langchain_core` |
+| `openai_agents` | `agents` |
+| `crewai` | `crewai` |
+| `google_adk` | `google.adk` |
+| `autogen` | `autogen_agentchat`, `autogen_core` |
+| `agno` | `agno` |
+| `bedrock_agents` | `strands` |
+
+Only `crewai` auto-attaches at `init()` — its event-bus subscription is purely additive.
+AutoGen is deliberately excluded because `instrument()` installs a global OTel
+`TracerProvider`.
+
+## AgentegrityClient
+
+```python
+from agentegrity import AgentegrityClient
+
+client = AgentegrityClient(
+    policy_set="enterprise-default",
+    coherence_threshold=0.70,
+    drift_tolerance=0.15,
+    weights=None,
+)
+```
+
+Builds all four layers and one `IntegrityEvaluator` wired to them.
+
+### create_profile
+
+```python
+profile = client.create_profile(
+    name="support-bot",
+    agent_type="tool_using",
+    capabilities=["tool_use", "memory_access"],
+    deployment_context="cloud",
+    risk_tier="high",
+    framework="crewai",          # extra kwargs pass through to AgentProfile
+)
+```
+
+Takes plain strings and converts to enums, raising `ValueError` on an invalid value.
+
+### evaluate
+
+```python
+score = client.evaluate(profile, context=None) -> IntegrityScore
+```
+
+### monitor
+
+```python
+monitor = client.monitor(profile, threshold=0.70, on_violation="alert")
+```
+
+`on_violation` is a string: `"log"` · `"alert"` · `"block"` · `"escalate"`.
+
+<Note>
+  `client.monitor()` does not accept `signing_key` or `approval_handler`. Construct
+  `IntegrityMonitor` directly when you need either.
+</Note>
+
+### attest
+
+```python
+record = client.attest(profile, score) -> AttestationRecord
+```
+
+Returns an **unsigned** record. Call `.sign(private_key)` to make it verifiable.
+
+### create_adapter
+
+```python
+adapter = client.create_adapter(name, profile, *, enforce=False, api_key=None)
+```
+
+Valid names: `claude` · `langchain` · `openai_agents` · `crewai` · `google_adk` · `autogen` ·
+`agno` · `bedrock_agents`. An unknown name raises `ValueError` listing the valid set.
+
+<Info>
+  The registry is **lazy** — the framework module is imported only when its adapter is
+  requested, so a process that never asks for `"crewai"` never pays the crewai import cost.
+
+  When the framework is not installed, `ImportError` propagates *and* a telemetry event fires
+  with `framework_available: false`, because demand for an adapter people cannot install is a
+  useful signal.
+</Info>
+
+<Warning>
+  `create_adapter` does not accept `signing_key` or `approval_handler`. Construct the adapter
+  class directly for those:
+
+  ```python
+  from agentegrity.adapters.claude import ClaudeAdapter
+  adapter = ClaudeAdapter(profile=profile, evaluator=client.evaluator,
+                          signing_key=key, approval_handler=workflow)
+  ```
+</Warning>
+
+### Layer accessors
+
+```python
+client.evaluator            # IntegrityEvaluator
+client.adversarial_layer    # AdversarialLayer
+client.cortical_layer       # CorticalLayer
+client.governance_layer     # GovernanceLayer
+```
+
+Useful for calling `client.cortical_layer.update_baseline(...)` on a shared client.
+
+## disable_telemetry
+
+```python
+agentegrity.disable_telemetry()
+```
+
+Equivalent to `DO_NOT_TRACK=1` at runtime. No ID file, no thread, no network. See
+[Telemetry](/docs/export/telemetry).
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/docs/get-started/quickstart">
+    These APIs in use.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The adapters the registry builds.
+  </Card>
+</CardGroup>

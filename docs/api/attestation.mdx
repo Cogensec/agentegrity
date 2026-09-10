@@ -1,0 +1,217 @@
+---
+title: "Attestation & keys"
+description: "AttestationChain, AttestationRecord, Evidence, ChainedRecord, and the KeyProvider protocol."
+icon: "signature"
+---
+
+## AttestationChain
+
+```python
+from agentegrity import AttestationChain
+
+chain = AttestationChain()
+chain.append(record)
+```
+
+### Mutation
+
+<ResponseField name="append(record)" type="None">
+  Adds a record. Sets `chain_previous` when unset; **validates and raises `ValueError`** on
+  mismatch when already set.
+</ResponseField>
+
+### Verification
+
+<ResponseField name="verify_chain()" type="bool">
+  Every record references its predecessor's `content_hash`. Proves consistency, **not**
+  authenticity.
+</ResponseField>
+
+<ResponseField name="verify_chain_detailed()" type="tuple[bool, int | None, str | None]">
+  `(ok, broken_index, broken_record_kind)`. `(True, None, None)` for a valid or empty chain.
+</ResponseField>
+
+<ResponseField name="verify_signatures(trusted_keys=None)" type="tuple[bool, int | None]">
+  `(True, None)` iff every record is signed and verifies. `(False, first_bad_index)` otherwise.
+  **`trusted_keys` is the trust anchor** — without it a forged chain self-verifies.
+</ResponseField>
+
+<ResponseField name="verify_decision_links()" type="bool">
+  Every `decision` Evidence points at a `DecisionRecord` that exists, precedes the attestation,
+  and still hashes to the committed value.
+</ResponseField>
+
+<ResponseField name="verify_cross_agent_links(peer_chains=None, *, key_provider=None)" type="bool">
+  `peer_message` / `handoff` Evidence resolves into peer chains. **Strict:** cross-agent
+  evidence without peer chains returns `False`.
+</ResponseField>
+
+### Access and serialization
+
+```python
+chain.records            # list[ChainedRecord] (a copy)
+chain.latest             # ChainedRecord | None
+len(chain)
+
+chain.to_records_dict()  # list[dict]
+chain.to_json()          # str
+
+AttestationChain.from_records(records)
+AttestationChain.from_dict_list(dicts)   # dispatches on record_kind
+AttestationChain.from_json(text)
+```
+
+All three constructors are **restores** — existing `chain_previous` values are preserved
+verbatim, which is what keeps signatures valid across a round trip.
+
+## AttestationRecord
+
+```python
+@dataclass
+class AttestationRecord:
+    agent_id: str
+    integrity_score: dict
+    layer_states: dict = {}
+    evidence: list[Evidence] = []
+    record_id: str = uuid4()
+    timestamp: datetime = now(UTC)
+    chain_previous: str | None = None
+    signature: bytes | None = None
+    public_key: bytes | None = None
+    record_kind: str = "attestation"
+```
+
+```python
+record.canonical_payload    # deterministic JSON (includes chain_previous)
+record.content_hash         # sha256 of the above, computed on demand
+record.sign(private_key)
+record.verify(public_key=None)
+record.to_dict()
+AttestationRecord.from_dict(data)
+```
+
+## Evidence
+
+```python
+@dataclass
+class Evidence:
+    evidence_type: str
+    source: str
+    content_hash: str
+    summary: str
+    timestamp: datetime = now(UTC)
+```
+
+| `evidence_type` | `source` |
+|---|---|
+| `layer_result` | layer name |
+| `decision` | decision `record_id` |
+| `topology` | `topology_id` |
+| `topology_change` | previous `topology_id` |
+| `peer_message` / `handoff` | `"<peer_agent_id>:<record_id>"` |
+
+## ChainedRecord
+
+```python
+@runtime_checkable
+class ChainedRecord(Protocol):
+    record_kind: str
+    chain_previous: str | None
+    signature: bytes | None
+    public_key: bytes | None
+
+    @property
+    def content_hash(self) -> str: ...
+    def verify(self, public_key=None) -> bool: ...
+    def to_dict(self) -> dict: ...
+```
+
+Both record kinds satisfy it without inheritance.
+
+## Builders
+
+```python
+from agentegrity.core.attestation import (
+    generate_signing_key, build_attestation_record,
+)
+
+key = generate_signing_key()      # Ed25519PrivateKey; needs [crypto]
+
+record = build_attestation_record(
+    profile, score,
+    previous_record_hash=chain.latest.content_hash if chain.latest else None,
+    signing_key=key,
+    recent_decisions=[...],
+    topology=topology,
+    topology_change=change,
+)
+```
+
+The single construction path used by the adapter base, `IntegrityMonitor`, and
+`AgentegrityClient.attest`.
+
+## KeyProvider
+
+```python
+from agentegrity import KeyProvider, StaticKeyProvider, FileKeyProvider
+
+class KeyProvider(Protocol):
+    def get_public_key(self, agent_id: str) -> bytes | None: ...
+```
+
+<CodeGroup>
+
+```python StaticKeyProvider
+provider = StaticKeyProvider({"worker-1": bytes.fromhex(PUB_HEX)})
+```
+
+```python FileKeyProvider
+provider = FileKeyProvider("/etc/agentegrity/keys")
+# reads <agent_id>.pub — hex-encoded raw Ed25519 public key
+```
+
+</CodeGroup>
+
+`FileKeyProvider` resolves a malformed file to `None` (logged) rather than raising, so one bad
+key file cannot take down verification for every other agent. It runs
+`validate_storage_identifier` on `agent_id`, closing path traversal (**T-E1**).
+
+## ApprovalWorkflow
+
+```python
+from agentegrity import ApprovalWorkflow, ApprovalDecision
+
+workflow = ApprovalWorkflow(
+    handler=my_approver,           # (profile, score, action) -> bool | ApprovalDecision
+    approver="oncall@example.com",
+    timeout=300,                   # None waits indefinitely
+    timeout_action="deny",         # or "allow"
+)
+```
+
+```python
+@dataclass
+class ApprovalDecision:
+    approved: bool
+    approver: str = "approval_handler"
+    reason: str | None = None
+    timed_out: bool = False
+    requested_at: float = time.time()
+    resolved_at: float = time.time()
+
+    def provenance_steps(self) -> list[str]: ...
+```
+
+`timeout_action` must be `"deny"` or `"allow"`; anything else raises `ValueError` at
+construction. A raising handler denies fail-closed.
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Attestation chain" icon="link" href="/docs/concepts/attestation-chain">
+    The conceptual model.
+  </Card>
+  <Card title="Signing and keys" icon="key" href="/docs/guides/signing-and-keys">
+    Trust anchors in practice.
+  </Card>
+</CardGroup>

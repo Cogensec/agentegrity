@@ -1,0 +1,255 @@
+---
+title: "CLI reference"
+description: "Every command, flag, output, and exit code."
+icon: "terminal"
+---
+
+```bash
+agentegrity [pro | doctor | verify-decisions <path> | report <path>]
+python -m agentegrity ...            # identical
+```
+
+The console script is installed by the package; `python -m agentegrity` works without it
+being on PATH.
+
+## No arguments — info
+
+```bash
+agentegrity
+```
+
+```text
+agentegrity 0.10.0
+
+Adapters:
+  claude        [not installed]  — pip install "agentegrity[claude]"
+  langchain     [not installed]  — pip install "agentegrity[langchain]"
+  openai_agents [not installed]  — pip install "agentegrity[openai-agents]"
+  crewai        [not installed]  — pip install "agentegrity[crewai]"
+  google_adk    [not installed]  — pip install "agentegrity[google-adk]"
+  autogen       [not installed]  — pip install "agentegrity[autogen]"
+  agno          [not installed]  — pip install "agentegrity[agno]"
+  bedrock_agents[not installed]  — pip install "agentegrity[bedrock-agents]"
+
+Layers shipped: adversarial, cortical, governance, recovery
+
+Optional LLM cortical checks: [not installed]  — pip install "agentegrity[llm]"
+```
+
+Each line carries the install command for the missing extra, so the output is also the fix.
+
+## doctor
+
+```bash
+agentegrity doctor
+```
+
+```text
+agentegrity 0.10.0 — self-check
+  profile:   AgentProfile('doctor-agent', type=tool_using, risk=medium, channels=2)
+  composite: 0.929
+  action:    pass
+  layers:    adversarial, cortical, governance, recovery
+OK
+```
+
+Runs a real end-to-end evaluation against `AgentProfile.default()` through the full four-layer
+pipeline. **If it prints a composite score and `OK`, the install is wired correctly.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | Composite &gt; 0 |
+| `1` | Composite is 0 — something is broken |
+
+## verify-decisions
+
+```bash
+agentegrity verify-decisions [--trusted-key <pub.hex>]... <chain.json>
+```
+
+Runs all three chain verifications and prints a per-record table.
+
+```text
+agentegrity 0.10.0 — verify-decisions chain.json
+  records:        4
+  chain linkage:  yes (hash-linked)
+  decision links: yes
+  signatures:     yes [pinned]
+
+  idx  kind          boundary/score          tier      signed  verified
+    0  attestation   attestation             -         yes     yes
+    1  decision      pre_tool_use            minimal   yes     yes
+    2  attestation   attestation             -         yes     yes
+    3  decision      stop                    partial   yes     yes
+```
+
+<ResponseField name="--trusted-key <path>" type="repeatable">
+  A file containing one hex-encoded raw Ed25519 public key. **Without it, the anchor line reads
+  `[UNPINNED (self-vouched)]`** — a chain forged with an attacker-generated key self-verifies.
+</ResponseField>
+
+### Failure output
+
+```text
+  chain linkage:  NO (broken at index 7, kind=decision)
+  decision links: NO
+  signatures:     NO (record 7) [pinned]
+```
+
+The first broken index and its record kind, so you know **where** the chain diverged.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Linkage, decision links, and signatures all verified |
+| `1` | A verification failed |
+| `2` | Usage error, unreadable file, unparseable JSON, unreadable key |
+
+## report
+
+```bash
+agentegrity report [--format markdown|json] [--trusted-key <pub.hex>]... \
+                   [-o <path>] <chain.json>
+```
+
+Renders a session audit report: verification status, record timeline, human-approvals table,
+and a control mapping to EU AI Act Art. 12 / Art. 14 and NIST AI RMF.
+
+<ResponseField name="--format markdown | json" type="string">
+  Default `markdown`. JSON is the machine-readable shape for a GRC pipeline.
+</ResponseField>
+
+<ResponseField name="-o, --output <path>" type="string">
+  Write to a file instead of stdout. Prints `report written to <path>`.
+</ResponseField>
+
+<ResponseField name="--trusted-key <path>" type="repeatable">
+  Pin a signing key. **Gates the exit code** — see below.
+</ResponseField>
+
+### Exit semantics
+
+| Situation | Exit |
+|---|---|
+| Everything verified | `0` |
+| Hash linkage or decision links broken | `1` |
+| Signatures failed **and** `--trusted-key` passed | `1` |
+| Signatures absent, no `--trusted-key` | `0` — disclosed in the report, not treated as tamper |
+| Unreadable file / bad JSON / bad key | `2` |
+
+<Warning>
+  Structural tamper always fails. Signature failures gate the exit code **only when you pinned
+  a key**, because without an anchor no cryptographic claim was requested.
+
+  In CI this means **always pass `--trusted-key`**, or an unsigned chain exits `0`.
+</Warning>
+
+See [Compliance reports](/docs/guides/compliance-reports) for the full output.
+
+## pro
+
+```bash
+# verify the connection
+agentegrity pro --ingest-token agk_live_… --url https://your-dashboard --push
+
+# run your agent with streaming enabled
+agentegrity pro --ingest-token agk_live_… --url https://your-dashboard -- python my_agent.py
+```
+
+<ResponseField name="--ingest-token, --token <TOKEN>" type="string">
+  Ingest token. Falls back to `AGENTEGRITY_TOKEN`.
+</ResponseField>
+
+<ResponseField name="--url <URL>" type="string">
+  Backend origin. Falls back to `AGENTEGRITY_EXPORTER_URL` or `AGENTEGRITY_URL`.
+</ResponseField>
+
+<ResponseField name="--push" type="flag">
+  Verify and report the connection without running anything.
+</ResponseField>
+
+<ResponseField name="-- <command>..." type="passthrough">
+  Everything after `--` is exec'd with the exporter environment set.
+</ResponseField>
+
+The token is verified against `GET /ingest/verify` **before** anything streams:
+
+```text
+connected to https://your-dashboard (workspace: acme-research)
+running: python my_agent.py
+```
+
+| Exit | Meaning |
+|---|---|
+| `0` | Verified (and, with a command, the command replaced the process) |
+| `1` | Token rejected, wrong backend, or unreachable |
+| `2` | Missing token or URL, or an unknown option |
+| `127` | Command not found |
+
+See [HTTP export & pro](/docs/export/http-and-pro).
+
+## help
+
+```bash
+agentegrity help          # or -h, --help
+```
+
+An unknown command prints to stderr and exits `2`.
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `AGENTEGRITY_TOKEN` | Ingest token; with a URL, adapters self-attach an `HTTPExporter` |
+| `AGENTEGRITY_EXPORTER_URL` | Backend origin |
+| `AGENTEGRITY_URL` | Alias for the above |
+| `DO_NOT_TRACK` | `1` disables telemetry |
+| `AGENTEGRITY_TELEMETRY_DISABLED` | `1` disables telemetry |
+| `AGENTEGRITY_TELEMETRY_DISABLE_GEOIP` | `1` keeps telemetry, drops geo enrichment |
+| `AGENTEGRITY_OFFLINE` | Test runs work without a reporter |
+| `ANTHROPIC_API_KEY` | Fallback for LLM-backed layers |
+| `AGENTEGRITY_SLM_BASE_URL` | Local SLM server. Default `http://localhost:11434/v1` |
+| `AGENTEGRITY_SLM_MODEL` | Local SLM model name — no default |
+| `AGENTEGRITY_SLM_API_KEY` | Optional bearer token for the SLM server |
+| `AGENTEGRITY_CC_MODE` | Claude Code plugin: `enforce` (default) or `alert` |
+| `AGENTEGRITY_CC_DISABLED` | `1` disables the Claude Code hook |
+| `AGENTEGRITY_CC_RISK_TIER` | Claude Code profile risk tier. Default `high` |
+| `AGENTEGRITY_CC_CHAIN_DIR` | Claude Code chain directory |
+
+## A CI recipe
+
+```yaml
+- name: Install
+  run: pip install "agentegrity[crypto]"
+
+- name: Smoke test
+  run: agentegrity doctor
+
+- name: Verify the session chain
+  run: |
+    agentegrity verify-decisions \
+      --trusted-key .agentegrity/agent.pub \
+      artifacts/chain.json
+
+- name: Generate the audit report
+  run: |
+    agentegrity report \
+      --trusted-key .agentegrity/agent.pub \
+      -o artifacts/audit-report.md \
+      artifacts/chain.json
+
+- uses: actions/upload-artifact@v4
+  with:
+    name: agentegrity-audit
+    path: artifacts/audit-report.md
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Verifying chains" icon="circle-check" href="/docs/guides/verifying-chains">
+    What each verification proves.
+  </Card>
+  <Card title="Compliance reports" icon="file-lines" href="/docs/guides/compliance-reports">
+    The report in full.
+  </Card>
+</CardGroup>

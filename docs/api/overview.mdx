@@ -1,0 +1,191 @@
+---
+title: "API overview"
+description: "Everything exported from the agentegrity top-level package."
+icon: "code"
+---
+
+```python
+import agentegrity
+```
+
+Everything below is importable directly from `agentegrity`. Sub-modules are noted where the
+canonical location differs.
+
+## Entry points
+
+| Name | Purpose |
+|---|---|
+| `init(...)` | Detect frameworks, build adapters. [Client & runtime](/docs/api/client-runtime) |
+| `shutdown()` | End sessions, flush exporters |
+| `detect_frameworks()` | Adapter names whose framework is importable |
+| `AgentegrityRuntime` | Handle returned by `init()` |
+| `AgentegrityClient` | High-level client |
+
+## Core types
+
+<CardGroup cols={2}>
+  <Card title="Profile & scoring" icon="id-card" href="/docs/api/profile">
+    `AgentProfile` · `AgentType` · `DeploymentContext` · `RiskTier`
+  </Card>
+  <Card title="Evaluation" icon="gauge" href="/docs/api/evaluation">
+    `IntegrityEvaluator` · `IntegrityScore` · `PropertyWeights` · `IntegrityMonitor`
+  </Card>
+  <Card title="Attestation" icon="signature" href="/docs/api/attestation">
+    `AttestationChain` · `AttestationRecord` · `Evidence` · `ChainedRecord` · key providers
+  </Card>
+  <Card title="Decisions & topology" icon="code-branch" href="/docs/api/decisions-topology">
+    `DecisionRecord` · `DecisionInput` · `CaptureTier` · `AgentTopology` · `AgentMember`
+  </Card>
+  <Card title="Layers" icon="layer-group" href="/docs/api/layers">
+    Four layers, checkpoints, baseline stores, tool categories
+  </Card>
+  <Card title="Adapters & exporters" icon="plug" href="/docs/api/adapters-exporters">
+    `FrameworkEvent` · `SessionExporter` · `HTTPExporter` · alert exporters
+  </Card>
+</CardGroup>
+
+## Complete export list
+
+```python
+__all__ = [
+    # runtime
+    "AgentegrityRuntime", "detect_frameworks", "init", "shutdown",
+    # profile
+    "AgentProfile", "AgentType", "DeploymentContext", "RiskTier",
+    # evaluation
+    "IntegrityEvaluator", "IntegrityScore", "PropertyWeights", "IntegrityMonitor",
+    # attestation
+    "AttestationRecord", "AttestationChain", "ChainedRecord", "Evidence",
+    # decisions
+    "DecisionRecord", "DecisionInput", "RejectedAlternative", "CaptureTier",
+    # topology
+    "AgentTopology", "AgentMember", "AgentRole", "TopologyKind", "TopologyChange",
+    # client
+    "AgentegrityClient", "disable_telemetry",
+    # adapters + exporters
+    "FrameworkEvent", "SessionExporter", "HTTPExporter",
+    "WebhookAlertExporter", "SlackAlertExporter",
+    # approval
+    "ApprovalDecision", "ApprovalWorkflow",
+    # keys
+    "KeyProvider", "StaticKeyProvider", "FileKeyProvider",
+    # layers
+    "AdversarialLayer", "ToolCategories", "ToolSequenceDetector",
+    "CorticalLayer", "GovernanceLayer", "RecoveryLayer", "default_layers",
+    # checkpoints
+    "Checkpoint", "CheckpointSnapshot",
+    "InMemoryCheckpoint", "FileCheckpoint", "SqliteCheckpoint",
+    # baseline stores
+    "BaselineStore", "InMemoryBaselineStore",
+    "FileBaselineStore", "SqliteBaselineStore",
+    # per-framework re-exports
+    "claude_hooks", "claude_report",
+    "langchain_instrument_chain", "langchain_instrument_graph", "langchain_report",
+    "openai_agents_run_hooks", "openai_agents_report",
+    "crewai_instrument", "crewai_report",
+    "google_adk_instrument", "google_adk_report",
+    "autogen_instrument", "autogen_report",
+    "agno_instrument", "agno_instrument_team", "agno_report",
+    "bedrock_agents_instrument_strands", "bedrock_agents_wrap_client",
+    "bedrock_agents_report",
+]
+```
+
+## Prefixed framework re-exports
+
+Every framework entry point is also available from the top level under a prefixed name, so
+you can reach several frameworks without importing each module:
+
+```python
+import agentegrity
+
+agentegrity.claude_hooks()
+agentegrity.langchain_instrument_graph(graph)
+agentegrity.agno_instrument_team(team)
+```
+
+The per-framework modules remain the idiomatic path:
+
+```python
+from agentegrity.claude import hooks, report
+```
+
+<Warning>
+  Importing `agentegrity` imports every per-framework module, which is why they are all written
+  to import cleanly **without** their framework installed. Framework SDK imports happen lazily
+  at call time.
+
+  `AgentegrityClient.create_adapter` is likewise lazy — requesting `"crewai"` is the first
+  moment `crewai` is imported.
+</Warning>
+
+## Not exported at the top level
+
+Import these from their modules:
+
+```python
+from agentegrity.core.attestation import generate_signing_key, build_attestation_record
+from agentegrity.core.decision import build_decision_record, infer_capture_tier
+from agentegrity.core.evaluator import (
+    AsyncIntegrityEvaluator, LayerResult, PropertyScores, Layer, AsyncLayer,
+)
+from agentegrity.core.monitor import IntegrityViolationError, ViolationAction, ViolationEvent
+from agentegrity.core.profile import (
+    CAPABILITY_TOOL_USE, CAPABILITY_MEMORY_ACCESS, CAPABILITY_MULTI_AGENT_COMM,
+    CAPABILITY_CODE_EXECUTION, CAPABILITY_WEB_ACCESS, CAPABILITY_FILE_SYSTEM,
+    CAPABILITY_PHYSICAL_ACTUATION, CAPABILITY_FINANCIAL_TRANSACTIONS,
+)
+from agentegrity.layers.adversarial import (
+    DetectorPattern, ThreatAssessment, AttackSurfaceMap,
+    default_detector_patterns, DEFAULT_TOOL_CATEGORIES,
+)
+from agentegrity.layers.governance import (
+    PolicyRule, PolicyDecision, PolicyEvaluation, AuditEntry,
+    DEFAULT_SENSITIVE_TOOLS, tool_name_matches,
+)
+from agentegrity.layers.cortical import BehavioralBaseline, DriftAssessment
+from agentegrity.layers.recovery import RecoveryAssessment, RECOVERY_CAPABILITIES
+from agentegrity.layers.checkpoint import validate_storage_identifier
+from agentegrity.layers.adversarial_llm import AdversarialLLMLayer
+from agentegrity.layers.adversarial_slm import AdversarialSLMLayer
+from agentegrity.layers.cortical_llm import CorticalLLMLayer
+from agentegrity.layers.embedding_similarity import EmbeddingSimilarityDetector
+from agentegrity.layers.kms_checkpoint import KMSCheckpoint
+from agentegrity.exporters.otel import OTelSessionExporter
+from agentegrity.exporters.http import from_env, ENV_TOKEN, ENV_URL, ENV_URL_ALIAS
+```
+
+## Version
+
+```python
+agentegrity.__version__      # "0.10.0"
+```
+
+Kept in lockstep with `pyproject.toml`, every `package.json`, and the README badge by
+`scripts/check_versions.py` and `scripts/check-versions.ts`, both wired into CI.
+
+## Typing
+
+The package ships type hints and passes `mypy --strict` across all 40 source files.
+Optional-dependency modules type-check whether or not their runtime is installed.
+
+## Stability
+
+v0.10.0 is **beta** (`Development Status :: 4 - Beta`). The public API has been stable across
+several minor releases, but breaking changes still land in minors and are documented in the
+[changelog](https://github.com/cogensec/agentegrity/blob/main/CHANGELOG.md).
+
+Recent breaking changes worth knowing:
+
+| Version | Change |
+|---|---|
+| v0.7.0 | `Evidence.content_hash` became a real SHA-256. Pre-v0.7 chains fail `verify_chain()` — rebuild from a fresh root |
+| v0.8.1 | `chain_valid` renamed `chain_hash_linked` in the session summary |
+| v0.9.0 | Tool-call actions nest arguments under `action["arguments"]` |
+
+<Info>
+  v1.0.0 is not a date. It is declared when the public API has been unchanged for a full minor
+  cycle, when there are production deployments at three or more external organizations, and
+  when the framework has been cited in at least one peer-reviewed publication — a signal that
+  adoption happened beyond the maintainers' direct influence.
+</Info>

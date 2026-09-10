@@ -1,0 +1,280 @@
+---
+title: "Evaluation"
+description: "IntegrityEvaluator, IntegrityScore, PropertyWeights, LayerResult, and IntegrityMonitor."
+icon: "gauge"
+---
+
+## IntegrityEvaluator
+
+```python
+from agentegrity import IntegrityEvaluator, PropertyWeights
+from agentegrity.layers import default_layers
+
+evaluator = IntegrityEvaluator(
+    layers=default_layers(),
+    weights=PropertyWeights(),
+    fail_fast=True,
+)
+
+score = evaluator.evaluate(profile, context={"input": "..."})
+```
+
+<ResponseField name="layers" type="list[Layer]" required>
+  Evaluated in order. Standard configuration is the four defaults.
+</ResponseField>
+
+<ResponseField name="weights" type="PropertyWeights | None">
+  Defaults to `PropertyWeights()`.
+</ResponseField>
+
+<ResponseField name="fail_fast" type="bool" default="True">
+  Stop at the first layer returning `block`. Truncation lowers `confidence`.
+</ResponseField>
+
+```python
+evaluator.evaluate(profile, context=None) -> IntegrityScore
+evaluator.layers      # list[Layer]
+evaluator.weights     # PropertyWeights
+```
+
+## AsyncIntegrityEvaluator
+
+```python
+from agentegrity.core.evaluator import AsyncIntegrityEvaluator
+
+evaluator = AsyncIntegrityEvaluator(layers=[...], fail_fast=False)
+score = await evaluator.evaluate(profile, context)
+```
+
+| `fail_fast` | Behaviour |
+|---|---|
+| `True` | Sequential; stops at the first `block` |
+| `False` | **All layers concurrently** via `asyncio.gather` |
+
+Accepts both sync `Layer` and async `AsyncLayer` objects; sync layers are wrapped in
+`asyncio.to_thread`.
+
+<Info>
+  `fail_fast=False` is the right choice when a network-bound layer (LLM or SLM) is in the
+  pipeline — concurrency hides most of its latency behind the others. It reports
+  `evaluator_version` as `"0.2.0"` rather than `"1.0.0"`.
+</Info>
+
+## IntegrityScore
+
+```python
+@dataclass
+class IntegrityScore:
+    composite: float
+    properties: PropertyScores
+    layer_results: list[LayerResult]
+    timestamp: datetime
+    confidence: float = 1.0
+    evaluator_version: str = "1.0.0"
+    total_latency_ms: float = 0.0
+```
+
+| Property | Type | Meaning |
+|---|---|---|
+| `passed` | `bool` | Every layer passed (derived) |
+| `action` | `str` | Most severe across layers: `pass` &lt; `alert` &lt; `escalate` &lt; `block` |
+
+```python
+score.to_dict()
+repr(score)      # IntegrityScore(0.929, PASS)
+```
+
+## PropertyScores
+
+```python
+@dataclass
+class PropertyScores:
+    adversarial_coherence: float = 0.0
+    environmental_portability: float = 0.0
+    verifiable_assurance: float = 0.0
+    recovery_integrity: float = 0.0
+```
+
+## PropertyWeights
+
+```python
+@dataclass
+class PropertyWeights:
+    adversarial_coherence: float = 0.35
+    environmental_portability: float = 0.20
+    verifiable_assurance: float = 0.30
+    recovery_integrity: float = 0.15
+```
+
+<Warning>
+  `__post_init__` raises `ValueError` if the weights do not sum to 1.0 within 0.001, naming
+  every weight in the message. A composite built from weights that do not sum to one is not
+  comparable to any other composite.
+</Warning>
+
+## LayerResult
+
+```python
+@dataclass
+class LayerResult:
+    layer_name: str
+    score: float
+    passed: bool
+    action: str            # "pass" | "alert" | "block" | "escalate"
+    details: dict = {}
+    latency_ms: float = 0.0
+```
+
+`latency_ms` is set by the evaluator, not the layer.
+
+### Property keys in `details`
+
+| Key | Feeds |
+|---|---|
+| `coherence_score` | `adversarial_coherence` |
+| `portability_score` | `environmental_portability` |
+| `assurance_score` | `verifiable_assurance` |
+| `recovery_score` | `recovery_integrity` |
+
+Multiple layers publishing the same key: **max wins**. Fallbacks when nothing publishes one:
+AC from the first `adversarial`-named layer, EP from the **minimum** layer score, VA from the
+**average**. RI has no fallback and scores 0.0.
+
+## The Layer protocols
+
+```python
+class Layer(Protocol):
+    @property
+    def name(self) -> str: ...
+    def evaluate(self, profile, context: dict | None = None) -> LayerResult: ...
+
+class AsyncLayer(Protocol):
+    @property
+    def name(self) -> str: ...
+    async def aevaluate(self, profile, context: dict | None = None) -> LayerResult: ...
+
+AnyLayer = Union[Layer, AsyncLayer]
+```
+
+Structural — no inheritance required.
+
+## IntegrityMonitor
+
+```python
+from agentegrity import IntegrityMonitor
+from agentegrity.core.monitor import ViolationAction
+
+monitor = IntegrityMonitor(
+    profile=profile,
+    evaluator=evaluator,
+    threshold=0.70,
+    on_violation=ViolationAction.ALERT,
+    on_violation_callback=None,
+    enable_attestation=True,
+    signing_key=key,
+    approval_handler=workflow,
+)
+```
+
+<ResponseField name="profile" type="AgentProfile" required />
+<ResponseField name="evaluator" type="IntegrityEvaluator" required />
+
+<ResponseField name="threshold" type="float" default="0.70">
+  Composite below this triggers violation handling.
+</ResponseField>
+
+<ResponseField name="on_violation" type="ViolationAction" default="ALERT">
+  `LOG` · `ALERT` · `BLOCK` · `ESCALATE`.
+</ResponseField>
+
+<ResponseField name="on_violation_callback" type="callable | None">
+  Receives a `ViolationEvent`.
+</ResponseField>
+
+<ResponseField name="enable_attestation" type="bool" default="True">
+  Append an `AttestationRecord` per evaluation.
+</ResponseField>
+
+<ResponseField name="signing_key" type="Ed25519PrivateKey | None">
+  Signs every record.
+</ResponseField>
+
+<ResponseField name="approval_handler" type="callable | None">
+  Consulted on `escalate`. Absent means escalations **fail closed**.
+</ResponseField>
+
+### Methods
+
+```python
+monitor.evaluate(context=None) -> IntegrityScore
+monitor.guard                                     # decorator
+monitor.record_decision(...)                      # DecisionRecord on the chain
+monitor.attestation_chain                         # AttestationChain
+```
+
+### @guard
+
+```python
+@monitor.guard
+async def agent_action(context=None):
+    return await agent.execute(context)
+```
+
+Works on sync and async functions. Reads `context` from the **keyword argument** of that name.
+
+<Steps>
+  <Step title="Pre-check">
+    Evaluate. If blocking, raise `IntegrityViolationError` **before** the function runs.
+  </Step>
+  <Step title="Execute">
+    Call the wrapped function.
+  </Step>
+  <Step title="Post-check">
+    Evaluate again with `{**context, "post_execution": True}`.
+  </Step>
+</Steps>
+
+Blocking means `action == "block"`, or `action == "escalate"` without an approving handler.
+A raising handler denies fail-closed.
+
+```python
+from agentegrity.core.monitor import IntegrityViolationError
+
+try:
+    await agent_action(context=ctx)
+except IntegrityViolationError as exc:
+    log.warning("blocked: %s", exc)
+```
+
+<Warning>
+  `@guard` reads the `context` **keyword** argument. Calling `agent_action(ctx)` positionally
+  passes an empty context to the evaluator, and the pre-check sees nothing.
+</Warning>
+
+<Note>
+  `IntegrityMonitor` consults `approval_handler` to decide whether to block, but does **not**
+  write an approval `DecisionRecord`. That capture happens on the adapter enforcement path.
+</Note>
+
+## ViolationEvent
+
+```python
+@dataclass
+class ViolationEvent:
+    agent_id: str
+    timestamp: datetime
+    score: IntegrityScore
+    action_taken: ViolationAction
+    context: dict = {}
+```
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Properties and scoring" icon="calculator" href="/docs/concepts/properties-and-scoring">
+    The composite formula.
+  </Card>
+  <Card title="Reading results" icon="chart-simple" href="/docs/get-started/reading-results">
+    Every field decoded.
+  </Card>
+</CardGroup>
