@@ -1,0 +1,258 @@
+---
+title: "Governance layer"
+description: "Policy-as-code enforcement, human escalation, and a hash-stamped audit log."
+icon: "gavel"
+---
+
+The innermost layer, closest to action execution. It evaluates the candidate action against
+organizational policy and produces the audit trail that makes verification useful in a
+compliance workflow.
+
+```python
+from agentegrity.layers import GovernanceLayer
+
+layer = GovernanceLayer(
+    policy_set="enterprise-default",
+    enable_audit=True,
+    sensitive_tools={"database_write", "mcp__db__*", "payment_execute"},
+    escalation_callback=notify_oncall,
+)
+```
+
+## Policy decisions
+
+```python
+class PolicyDecision(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+    REQUIRE_APPROVAL = "require_approval"
+    CONDITIONAL = "conditional"
+```
+
+Aggregation across all triggered rules:
+
+| Triggered rules include | Layer action | Passed |
+|---|---|---|
+| any `DENY` | `block` | ✗ |
+| any `REQUIRE_APPROVAL` | `escalate` | ✗ |
+| only `CONDITIONAL` | `alert` | ✓ |
+| none | `pass` | ✓ |
+
+<Note>
+  A conditional trigger passes. It is recorded and surfaced but does not fail the layer — the
+  distinction between "worth knowing" and "worth stopping" is deliberate.
+</Note>
+
+## Built-in policy sets
+
+<Tabs>
+  <Tab title="enterprise-default">
+    | Rule | Name | Condition | Decision | Severity |
+    |---|---|---|---|---|
+    | `GOV-001` | High-Risk Tool Access | `risk_tier` in {high, critical} **and** tool matches the sensitive set | `REQUIRE_APPROVAL` | 0.70 |
+    | `GOV-002` | Code Execution Boundary | `action.type == "code_execution"` and `context["sandbox"]` is falsy | `REQUIRE_APPROVAL` | 0.60 |
+    | `GOV-003` | Financial Threshold | `action.type == "financial"` and `action["arguments"]["amount"] > threshold` (default 1000) | `REQUIRE_APPROVAL` | 0.80 |
+    | `GOV-004` | Multi-Agent Escalation | topology has more than 3 members | `REQUIRE_APPROVAL` | 0.50 |
+  </Tab>
+  <Tab title="strict">
+    | Rule | Condition | Decision |
+    |---|---|---|
+    | `GOV-STRICT-001` | **Any** `action.type == "tool_call"` | `REQUIRE_APPROVAL` |
+
+    Every tool call escalates. Useful for a supervised pilot, or for a critical agent during
+    its first week in production.
+  </Tab>
+  <Tab title="minimal">
+    No rules. The layer scores **1.0** and always passes.
+
+    Use when you want the adversarial, cortical, and recovery layers plus attestation, with
+    policy handled elsewhere.
+  </Tab>
+</Tabs>
+
+## Sensitive tool matching
+
+`GOV-001` is only as good as the set it gates on.
+
+```python
+DEFAULT_SENSITIVE_TOOLS = frozenset({
+    "database_write", "file_delete", "payment_execute", "admin_api",
+})
+```
+
+Three matching modes, shared with the adversarial layer's tool categories via
+`tool_name_matches`:
+
+<CardGroup cols={3}>
+  <Card title="Exact" icon="equals">
+    `"database_write"` matches `database_write`.
+  </Card>
+  <Card title="Glob" icon="asterisk">
+    An entry containing `*` or `?` is matched with `fnmatch`, so `"mcp__db__*"` gates a whole
+    MCP server.
+  </Card>
+  <Card title="MCP suffix" icon="plug">
+    `mcp__<server>__<tool>` also matches an entry naming the bare `<tool>` — the prefix is
+    transport namespacing, not a different tool. `"file_delete"` gates
+    `mcp__filesystem__file_delete`.
+  </Card>
+</CardGroup>
+
+Anything matching none of these is **not gated**.
+
+```python
+GovernanceLayer(sensitive_tools={"database_write", "mcp__stripe__*", "deploy_*"})
+```
+
+A per-call `context["sensitive_tools"]` overrides the constructor value.
+
+<Warning>
+  Four default entries is a starting point, not a policy. Enumerate the tools your deployment
+  actually considers sensitive — an ungated tool is invisible to `GOV-001` no matter how
+  destructive it is.
+</Warning>
+
+## The arguments-nesting boundary
+
+Agent-supplied arguments always live under `action["arguments"]`, never spread flat.
+
+<Warning>
+  This is a **security boundary**. Before v0.9, a prompt-injected agent could name a tool
+  argument `tool` and shadow the trusted top-level field `GOV-001` matches on, skipping the
+  approval gate entirely.
+
+  Custom `PolicyRule` conditions reading call-derived values **must** read from the nested
+  dict:
+
+  ```python
+  amount = (action.get("arguments") or {}).get("amount", 0)   # correct
+  amount = action.get("amount", 0)                            # shadowable, wrong
+  ```
+</Warning>
+
+## Custom rules
+
+```python
+from agentegrity.layers.governance import PolicyRule, PolicyDecision
+from agentegrity.layers import GovernanceLayer
+
+def _after_hours_deploy(profile, action, context):
+    from datetime import datetime, timezone
+    if action.get("tool") != "deploy_production":
+        return False
+    return datetime.now(timezone.utc).weekday() >= 4      # Fri, Sat, Sun
+
+rule = PolicyRule(
+    rule_id="ORG-001",
+    name="No Friday deploys",
+    description="Production deploys are frozen from Friday through Sunday",
+    condition=_after_hours_deploy,
+    decision=PolicyDecision.DENY,
+    severity=0.90,
+)
+
+layer = GovernanceLayer(policy_set="enterprise-default", custom_rules=[rule])
+layer.add_rule(another_rule)      # or add at runtime
+```
+
+A condition receives `(profile, action, context)` and returns `True` when the rule is
+**triggered** (a violation is detected).
+
+### Failing rules fail safe
+
+If a condition raises, the rule is treated as a **soft trigger** resolving to
+`REQUIRE_APPROVAL`, with reason `"Rule evaluation error: <ExceptionClass>"`.
+
+<Info>
+  Only the exception **class** reaches the audit log and the serialized `layer_states`. The
+  full exception with traceback goes to the local log. A custom condition can touch anything —
+  databases, HTTP APIs, secret stores — and those exception messages routinely embed
+  credentials and PII.
+</Info>
+
+## Scoring
+
+```
+violation_impact = Σ severity of triggered rules
+max_impact       = Σ severity of all rules
+score            = max(0, 1 − violation_impact / max_impact)
+```
+
+With `enterprise-default` (severities 0.70 + 0.60 + 0.80 + 0.50 = 2.60), a `GOV-001` trigger
+alone gives `1 − 0.70/2.60 = 0.731`.
+
+An empty policy set scores 1.0. The score is published as `assurance_score`, feeding
+**verifiable assurance**.
+
+## Audit log
+
+Every evaluation writes an `AuditEntry` when `enable_audit=True`:
+
+```python
+AuditEntry(
+    entry_id="...",
+    agent_id="...",
+    timestamp=datetime(...),
+    action="tool_call",
+    policy_evaluations=[PolicyEvaluation(...), ...],
+    decision="escalate",
+    content_hash="...",        # SHA-256 for tamper detection
+)
+```
+
+```python
+for entry in layer.audit_log:
+    print(entry.timestamp, entry.decision, entry.content_hash[:12])
+```
+
+<Note>
+  The audit log lives **in memory on the layer instance**. For durable audit, either persist
+  it yourself or rely on the attestation chain, which carries the same governance state in
+  `layer_states` and is signed.
+</Note>
+
+## Escalation callback
+
+```python
+def notify_oncall(profile, action, evaluation):
+    pager.send(f"{profile.name}: {evaluation.rule_id} — {evaluation.reason}")
+
+layer = GovernanceLayer(escalation_callback=notify_oncall)
+```
+
+Fires once per triggered `REQUIRE_APPROVAL` rule.
+
+<Warning>
+  The escalation callback is a **notification**, not a decision. It does not gate anything.
+  To actually gate an escalation, wire an `approval_handler` on the adapter or monitor — see
+  [Enforcement and approvals](/docs/guides/enforcement-and-approvals).
+</Warning>
+
+## Emergency stop
+
+```python
+layer.emergency_stop(agent_id="...", reason="incident INC-4821")
+```
+
+Break-glass suspension, recorded in the audit log.
+
+## Multi-agent
+
+`GOV-004` reads `len(topology.members)` directly.
+
+<Info>
+  Before v0.8 it gated on a synthetic `action.type == "multi_agent_coordination"` that **no
+  adapter ever produced** — the rule was dead code in every real deployment. The legacy path
+  still works for callers passing that action explicitly.
+</Info>
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Custom policies" icon="scroll" href="/docs/guides/custom-policies">
+    Full guide to writing and testing rules.
+  </Card>
+  <Card title="Normative spec" icon="file-contract" href="https://github.com/cogensec/agentegrity/blob/main/spec/layers/governance-layer.md">
+    `spec/layers/governance-layer.md`
+  </Card>
+</CardGroup>

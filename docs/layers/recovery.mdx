@@ -1,0 +1,243 @@
+---
+title: "Recovery layer"
+description: "Compromise detection, chain continuity, checkpoints, and multi-agent cascade detection."
+icon: "rotate-left"
+---
+
+The outermost verification concern. It answers: **if this agent were compromised, could it
+tell, and could it get back to a known-good state?**
+
+```python
+from agentegrity.layers import RecoveryLayer, SqliteCheckpoint
+
+layer = RecoveryLayer(
+    degradation_window=10,
+    degradation_threshold=0.15,
+    chain=adapter.attestation_chain,
+    checkpoint=SqliteCheckpoint("checkpoints.db"),
+)
+```
+
+## Four checks, averaged
+
+The recovery score is the plain mean of four sub-scores.
+
+<AccordionGroup>
+  <Accordion title="1. Baseline presence and freshness" icon="clock">
+    Reads `context["behavioral_baseline"]`.
+
+    | Condition | Score |
+    |---|---:|
+    | age &lt; 24h **and** `sample_count` ≥ 5 | 1.00 |
+    | age &lt; 72h | 0.85 |
+    | age &lt; 168h (one week) | 0.70 |
+    | older, or `sample_count == 0` | 0.50 |
+    | absent entirely | 0.50 |
+
+    A restorable baseline is the thing recovery restores *to*. Without one, "restore" has no
+    target.
+  </Accordion>
+
+  <Accordion title="2. Sustained degradation" icon="chart-line">
+    Splits the last `degradation_window` scores in half and compares means.
+
+    ```
+    drop      = mean(first_half) − mean(second_half)
+    sustained = drop >= degradation_threshold
+    ```
+
+    | Case | Score |
+    |---|---|
+    | `sustained` | `max(0, 1 − drop × 3)` |
+    | `drop > 0` but not sustained | `max(0.5, 1 − drop)` |
+    | no drop | 1.00 |
+
+    Fewer than 3 samples returns 1.0 and `sustained=False` — not enough history to claim
+    anything.
+
+    <Note>
+      This is what separates a **one-off spike** from **persistent compromise**. A single bad
+      score is noise; a sustained downward trend across a window is signal.
+    </Note>
+  </Accordion>
+
+  <Accordion title="3. Declared recovery capabilities" icon="list-check">
+    ```python
+    RECOVERY_CAPABILITIES = {
+        "state_restore", "checkpoint", "rollback",
+        "session_reset", "peer_quarantine",
+    }
+    ```
+
+    | Capabilities present | Score |
+    |---|---:|
+    | ≥ 3 | 1.00 |
+    | 2 | 0.85 |
+    | 1 | 0.70 |
+    | 0 | 0.40 |
+
+    An attached `Checkpoint` backend counts as a synthetic `checkpoint` capability — wiring a
+    real backend should not be undercounted just because the profile string is missing.
+
+    <Warning>
+      This scores a **declaration**. Listing `state_restore` without implementing it raises the
+      score and provides no recovery. The layer verifies the claim is present, not that
+      restoration would succeed against a live compromise.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="4. Attestation chain continuity" icon="link">
+    | Condition | Score | `chain_intact` |
+    |---|---:|---|
+    | no chain supplied | 0.50 | `True` |
+    | chain present, `verify_chain()` fails | **0.00** | `False` |
+    | chain present and empty | 0.50 | `True` |
+    | chain present and verified | 1.00 | `True` |
+
+    A broken chain scores zero **and** makes the layer `escalate`. It is the strongest single
+    signal the layer emits, because a broken chain means the session's own evidence is no
+    longer trustworthy.
+  </Accordion>
+</AccordionGroup>
+
+### Action
+
+| Condition | Action |
+|---|---|
+| `sustained_degradation` | `alert` |
+| `not chain_intact` | `escalate` |
+| `cascade_compromise_suspected` | `alert` |
+| score ≥ 0.5 | `pass` |
+| otherwise | `alert` |
+
+The layer publishes its score as `recovery_score`, feeding **recovery integrity** at weight
+0.15 of the composite.
+
+## Feeding score history
+
+```python
+layer = RecoveryLayer(degradation_window=20, degradation_threshold=0.10)
+
+score = evaluator.evaluate(profile, context)
+layer.record_score(score.composite)
+```
+
+Or seed it at construction with `score_history=[...]`.
+
+## Checkpoints
+
+A `Checkpoint` backend makes `snapshot()` and `restore_to()` available.
+
+```python
+class Checkpoint(Protocol):
+    def save(self, snapshot: CheckpointSnapshot) -> str: ...
+    def load(self, checkpoint_id: str) -> CheckpointSnapshot | None: ...
+    def list_ids(self) -> list[str]: ...
+    def latest(self) -> CheckpointSnapshot | None: ...
+```
+
+### Reference backends
+
+| Backend | Notes |
+|---|---|
+| `InMemoryCheckpoint` | Tests and ephemeral processes |
+| `FileCheckpoint` | One JSON file per snapshot; **atomic writes**, restrictive permissions, path-traversal guarded |
+| `SqliteCheckpoint` | Idempotent schema, persistent connection for `:memory:` |
+| `KMSCheckpoint` | Envelope encryption with AWS KMS wrapped data keys; `pip install "agentegrity[kms]"` |
+
+<Info>
+  `KMSCheckpoint` binds at-rest secrecy to a KMS-managed CMK and **verifies the KMS encryption
+  context at load time**, so a compromised inner backend cannot roll the agent back to
+  attacker-chosen state. That check is the point — encryption alone would still let an
+  attacker substitute a validly-encrypted older snapshot.
+</Info>
+
+### Snapshot and restore
+
+```python
+cid = layer.snapshot(
+    agent_id=profile.agent_id,
+    baseline=cortical_layer._baseline.to_dict(),
+    metadata={"reason": "pre-deploy", "release": "v4.2.0"},
+)
+
+snap = layer.restore_to(cid)
+```
+
+A `CheckpointSnapshot` carries:
+
+- `agent_id`, `checkpoint_id`, `created_at`
+- `score_history` — restored verbatim
+- `chain_records` — every record as `to_dict()`
+- `baseline` — optional behavioural baseline
+- `metadata` — persisted verbatim, never mutated by a backend
+
+<Warning>
+  `snapshot()` and `restore_to()` raise `RuntimeError` when no checkpoint backend was
+  supplied. `restore_to()` raises `KeyError` for an unknown id.
+</Warning>
+
+### Restore preserves verifiability
+
+`restore_to` rebuilds the chain via `AttestationChain.from_dict_list`, which is a **restore**
+rather than a re-append: original `chain_previous` link hashes are kept intact, so
+`verify_chain()` still returns `True` after restoration.
+
+This round-trip is pinned by `tests/test_recovery_restore.py` (mitigation **M-14**) — an
+unverifiable post-restore chain would make recovery self-defeating.
+
+## Multi-agent cascade detection
+
+**T-CASCADE**: compromise propagating through peer channels.
+
+The layer reads `peer_score_history` from the topology context and flags **correlated
+degradation across two or more peers**:
+
+```json
+{
+  "cascade_compromise_suspected": true,
+  "degrading_peer_ids": ["worker-2", "worker-5"],
+  "quarantine_capable": true
+}
+```
+
+<Note>
+  Cascade escalates to `alert` **even when this agent's own metrics are healthy**. That is the
+  entire point: correlated peer degradation is evidence something is propagating, and the
+  agent that has not yet degraded is exactly the one worth warning.
+</Note>
+
+Declaring `peer_quarantine` in the profile's capabilities sets `quarantine_capable`,
+signalling the system can isolate a compromised peer.
+
+## Full details
+
+```json
+{
+  "recovery_score": 0.8875,
+  "has_baseline": true,
+  "baseline_age_hours": 18.4,
+  "chain_intact": true,
+  "chain_length": 47,
+  "sustained_degradation": false,
+  "degradation_trend": [0.93, 0.92, 0.94, 0.91, 0.93],
+  "recovery_capable": true,
+  "recovery_capabilities_present": ["checkpoint", "rollback", "session_reset"],
+  "checkpoint_count": 12,
+  "last_checkpoint_id": "3f2a...",
+  "cascade_compromise_suspected": false,
+  "degrading_peer_ids": [],
+  "quarantine_capable": false
+}
+```
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Checkpoints and recovery" icon="floppy-disk" href="/docs/guides/checkpoints-and-recovery">
+    Full guide, including custom backends.
+  </Card>
+  <Card title="Normative spec" icon="file-contract" href="https://github.com/cogensec/agentegrity/blob/main/spec/layers/recovery-layer.md">
+    `spec/layers/recovery-layer.md`
+  </Card>
+</CardGroup>

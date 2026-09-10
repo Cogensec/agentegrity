@@ -1,0 +1,284 @@
+---
+title: "Multi-agent topology"
+description: "Immutable snapshots of which agents participate, in what roles, over which channels — and what the layers do with that."
+icon: "diagram-project"
+---
+
+Agentegrity models a multi-agent system as an **immutable topology snapshot**. Each
+`AgentTopology` records which agents participate, what roles they hold, and which
+communication channels exist. Mutation produces a *new* snapshot with a new content hash;
+the old one is unchanged.
+
+## Why immutable
+
+<CardGroup cols={2}>
+  <Card title="Deterministic restore targets" icon="rotate-left">
+    A mutable topology makes "restore to checkpoint X" undefined when the topology has since
+    changed. Snapshot-and-replace makes the restore target an explicit object.
+  </Card>
+  <Card title="Attestations commit to a shape" icon="signature">
+    An attestation carries `Evidence(evidence_type="topology")` whose content hash pins
+    exactly which topology was live at evaluation time.
+  </Card>
+</CardGroup>
+
+## The four shapes
+
+| Kind | Structure | Frameworks |
+|---|---|---|
+| `HUB_SPOKE` | One orchestrator + N workers | CrewAI sequential crews, Agno teams (coordinator mode), Bedrock supervisor + collaborators |
+| `HIERARCHICAL_DAG` | Arbitrary parent-child tree | LangGraph workflow graphs, Google ADK `SequentialAgent` / `ParallelAgent` / `LoopAgent`, CrewAI hierarchical |
+| `PEER_TO_PEER` | No orchestrator; handoffs between equals | LangGraph swarm, OpenAI Agents handoffs, Agno collaborator mode |
+| `GROUP_CHAT` | Dynamic membership, broadcast comms | AutoGen `GroupChatManager` conversations |
+
+## Roles
+
+```python
+class AgentRole(str, Enum):
+    LEADER = "leader"          # hub-spoke orchestrator
+    MEMBER = "member"          # hub-spoke worker
+    SUPERVISOR = "supervisor"  # hierarchical-DAG root
+    WORKER = "worker"          # hierarchical-DAG leaf
+    PEER = "peer"              # peer-to-peer and group chat
+```
+
+Roles are framework-agnostic by design, and they are load-bearing: the cortical layer keys
+behavioural baselines on `(agent_id, role)`, so the same agent operating as a `LEADER` and
+as a `MEMBER` is held to different behavioural expectations.
+
+## Constructing a topology
+
+```python
+from agentegrity import AgentTopology, AgentMember, AgentRole, TopologyKind
+
+topology = AgentTopology(
+    kind=TopologyKind.HUB_SPOKE,
+    members=(
+        AgentMember(agent_id="lead-1", name="coordinator",
+                    role=AgentRole.LEADER,
+                    capabilities=("tool_use", "multi_agent_comm")),
+        AgentMember(agent_id="w-1", name="researcher",
+                    role=AgentRole.MEMBER, parent_id="lead-1",
+                    capabilities=("web_access",)),
+        AgentMember(agent_id="w-2", name="writer",
+                    role=AgentRole.MEMBER, parent_id="lead-1"),
+    ),
+    comm_channels=frozenset({"peer_messages", "shared_memory"}),
+)
+```
+
+`AgentMember` is a frozen dataclass and `capabilities` is a **tuple**, not a list, so the
+whole structure is hashable.
+
+### Navigating
+
+```python
+topology.leader()                # the LEADER or SUPERVISOR member, else None
+topology.children_of("lead-1")   # members whose parent_id matches
+topology.member("w-2")           # lookup by agent_id
+```
+
+### Mutating produces new snapshots
+
+```python
+grown   = topology.with_member(AgentMember(agent_id="w-3", name="reviewer",
+                                           role=AgentRole.MEMBER, parent_id="lead-1"))
+shrunk  = topology.without_member("w-1")
+wired   = topology.with_channels("broadcast_channels")
+```
+
+`with_member` replaces any existing member with the same `agent_id`. All three preserve
+`topology_id` (same logical topology) and produce a fresh `content_hash`.
+
+## `topology_id` vs `content_hash`
+
+This distinction trips people up, so it is worth stating plainly.
+
+<CardGroup cols={2}>
+  <Card title="topology_id" icon="fingerprint">
+    Generated at construction, **stable across mutations** of the same logical topology. Use
+    it to correlate a lineage of snapshots.
+  </Card>
+  <Card title="content_hash" icon="hashtag">
+    SHA-256 over the canonical payload — `kind`, `members`, `comm_channels` only. **Neither
+    `topology_id` nor `created_at` is in it.** Use it to identify the structure.
+  </Card>
+</CardGroup>
+
+Because identity and timestamp are excluded, two structurally identical topologies built in
+different sessions produce the **same** hash. That is also what makes the hash match
+byte-for-byte between the Python and TypeScript implementations.
+
+## TopologyChange
+
+When a topology mutates at runtime, the adapter emits a diff:
+
+```python
+change = TopologyChange.between(previous, current)
+```
+
+```python
+TopologyChange(
+    previous_topology_id="...", previous_content_hash="...",
+    new_topology_id="...",      new_content_hash="...",
+    added_members=(AgentMember(...),),
+    removed_member_ids=("w-1",),
+)
+```
+
+It lands on exactly one attestation as `Evidence(evidence_type="topology_change")`, while
+the topology evidence itself is **sticky** — every subsequent attestation carries it until
+the topology is replaced.
+
+## Declaring it from an adapter
+
+Adapters do this for you at the right discovery point:
+
+```python
+# Agno team — walks team.members → HUB_SPOKE
+from agentegrity.agno import instrument_team
+team = instrument_team(team)
+
+# CrewAI crew — walks crew.agents → HUB_SPOKE / HIERARCHICAL_DAG
+from agentegrity.crewai import instrument
+instrument(crew)
+
+# Google ADK — walks SequentialAgent / ParallelAgent / LoopAgent.sub_agents
+from agentegrity.google_adk import instrument
+instrument(workflow_agent)
+
+# LangGraph — walks graph.get_graph().nodes
+from agentegrity.langchain import instrument_graph
+instrument_graph(compiled_graph)
+
+# OpenAI Agents — PEER_TO_PEER seeded on first agent, grows on each handoff
+from agentegrity.openai_agents import run_hooks
+await Runner.run(agent, input="...", hooks=run_hooks())
+
+# AutoGen — incremental GROUP_CHAT from OTel span hierarchy
+from agentegrity.autogen import instrument
+instrument()
+
+# Bedrock — collaborators discovered in the trace stream grow the topology
+from agentegrity.bedrock_agents import wrap_client, instrument_strands
+```
+
+Manually, from a custom adapter:
+
+```python
+adapter.set_topology(topology, my_role=AgentRole.MEMBER)
+```
+
+First call emits `topology_declared`; subsequent calls emit `topology_change` with a diff.
+A call with an identical content hash is a no-op — nothing to attest.
+
+<Note>
+  Claude Agent SDK and Vercel AI SDK are **single-agent by framework design** and declare no
+  topology. The conformance suite pins that absence, so a future change that silently starts
+  declaring one fails CI.
+</Note>
+
+## What the layers do with it
+
+Every multi-agent check no-ops silently when no topology is declared, so single-agent
+deployments pay nothing.
+
+<AccordionGroup>
+  <Accordion title="Adversarial — peer authority and coercion" icon="crosshairs">
+    Scans two new channels, `shared_memory` and `broadcast_channels`, using the same pattern
+    taxonomy as every other channel.
+
+    Adds a **peer-authority check**: a message or broadcast whose `sender_agent_id` is not in
+    the declared topology raises severity 0.70 / confidence 0.85 with indicator
+    `undeclared_sender:<id>`. High confidence is justified here — this is a structural fact,
+    not a text heuristic.
+
+    The `peer_coercion` family targets one agent pressuring another with fabricated authority.
+  </Accordion>
+
+  <Accordion title="Cortical — role-conformant drift" icon="brain">
+    Baselines are keyed `(agent_id, role)`. A compromised member that starts behaving like a
+    leader drifts against its *role's* baseline even if its absolute behaviour looks normal
+    for the system.
+
+    This is the **T-ROLE-DRIFT** mitigation. Store lookup falls back to pre-v0.8
+    single-agent baselines transparently.
+  </Accordion>
+
+  <Accordion title="Governance — GOV-004" icon="gavel">
+    `GOV-004` requires human oversight for coordination involving more than three agents. It
+    reads `len(topology.members)` directly.
+
+    Before v0.8 it gated on a synthetic `action.type == "multi_agent_coordination"` that **no
+    adapter ever produced** — the rule was dead. The legacy path still works for callers
+    passing that action explicitly.
+  </Accordion>
+
+  <Accordion title="Recovery — cascade detection" icon="rotate-left">
+    Tracks `peer_score_history` and flags **correlated degradation across two or more peers**
+    as `cascade_compromise_suspected` (**T-CASCADE**), escalating to `alert` even when this
+    agent's own metrics are fine.
+
+    Declaring `peer_quarantine` in the profile's capabilities sets `quarantine_capable`.
+  </Accordion>
+</AccordionGroup>
+
+## Multi-agent events
+
+Six event types join the canonical eight:
+
+| Event | Meaning |
+|---|---|
+| `topology_declared` | First topology received; triggers an attestation |
+| `topology_change` | Structural mutation; carries the diff |
+| `peer_message` | A peer sent a message into this agent's context |
+| `shared_memory_write` | A peer wrote to shared memory this agent reads |
+| `broadcast` | A broadcast on a subscribed channel |
+| `task_started` | A task started — distinct from a subagent |
+
+<Warning>
+  `writer_agent_id` on `shared_memory_write` is captured at ingest specifically so
+  shared-memory poisoning is attributed to the **writer**, not the reader
+  (**T-SHARED-MEM-MISATTRIB**). An adapter that drops it makes every poisoning look like the
+  victim's fault.
+</Warning>
+
+Broadcasts can amplify — N members receiving one broadcast produces N evaluations
+(**T-BROADCAST-AMP**). Adapters fanning out should rate-limit at the source; the context
+buffer caps at 1000 entries per channel per session and emits a one-time
+`<channel>_overflow` event.
+
+## Cross-agent chain verification
+
+```bash
+python -m agentegrity verify-decisions chain.json
+```
+
+```python
+ok = adapter.attestation_chain.verify_cross_agent_links(
+    {"peer-1": peer1.attestation_chain, "peer-2": peer2.attestation_chain},
+    key_provider=FileKeyProvider("/etc/agentegrity/keys"),
+)
+```
+
+Cross-agent Evidence uses `source="<peer_agent_id>:<record_id>"` so the verifier knows which
+peer chain to walk. Without `key_provider`, a forged peer chain signed with an
+attacker-generated key self-verifies.
+
+## Cross-runtime hash parity
+
+`@agentegrity/client` ships `AgentTopology` / `AgentMember` / `AgentRole` / `TopologyKind` /
+`TopologyChange` with a `contentHash()` that matches Python **byte-for-byte** for
+structurally identical topologies. A Python supervisor and a TypeScript worker can therefore
+commit to the same topology hash. See [TypeScript multi-agent](/docs/typescript/multi-agent).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Threat model" icon="skull" href="/docs/concepts/threat-model">
+    T-CASCADE, T-ROLE-DRIFT, and the rest.
+  </Card>
+  <Card title="Recovery layer" icon="rotate-left" href="/docs/layers/recovery">
+    Cascade detection in detail.
+  </Card>
+</CardGroup>

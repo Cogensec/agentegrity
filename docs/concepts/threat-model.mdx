@@ -1,0 +1,210 @@
+---
+title: "Threat model"
+description: "STRIDE against the framework itself — what an attacker can do to Agentegrity, and what Agentegrity does about it."
+icon: "skull"
+---
+
+Most agent-security documentation models threats against *the agent*. This page models
+threats against **Agentegrity itself**: what an adversary who wants to defeat the
+measurement can do, and which mitigation stands in the way.
+
+<Card title="Full threat model" icon="file-shield" href="https://github.com/cogensec/agentegrity/blob/main/spec/threat-model.md" horizontal>
+  The complete document — every threat with its mitigation, residual risk, and the test that
+  pins it — lives in the repository at `spec/threat-model.md`. This page is the orientation.
+</Card>
+
+## Scope
+
+The system under analysis is this repository plus the published `agentegrity` PyPI package
+and the `@agentegrity/*` npm scope. The agent's LLM, the framework SDK being instrumented,
+and the operator's exporter backend are **external** — modelled as what they can do *to*
+Agentegrity.
+
+## Trust boundaries
+
+| # | Boundary | What crosses it |
+|---|---|---|
+| **TB-1** | Framework SDK ↔ Adapter | Arbitrary content into adapter event handlers |
+| **TB-2** | LLM ↔ Adapter | Tool responses, retrieved documents, peer messages, shared memory, broadcasts — everything the adversarial layer scans |
+| **TB-3** | Adapter ↔ Layers | In-process; **trusted** |
+| **TB-4** | Layers ↔ Persistence | Checkpoint and baseline writes to disk or sqlite |
+| **TB-5** | Adapter ↔ Exporter | Session start / events / end fanned out to registered exporters |
+| **TB-6** | User process ↔ Operator backend | The wire format, over the network |
+| **TB-7** | Maintainers ↔ Public registries | PyPI and npm releases |
+
+<Note>
+  TB-3 being trusted is a deliberate, stated assumption. An attacker with in-process code
+  execution has already won — they can patch the layers directly. Agentegrity does not claim
+  to defend against that, and **T-T4** says so explicitly.
+</Note>
+
+## STRIDE at a glance
+
+<AccordionGroup>
+  <Accordion title="Spoofing" icon="user-secret">
+    | ID | Threat |
+    |---|---|
+    | **T-S1** | Forged `AttestationRecord` with attacker-chosen content |
+    | **T-S2** | Imposter `SessionExporter` registered into the fan-out |
+    | **T-S3** | Imposter HTTP exporter backend receiving session data |
+
+    T-S1 is *the* foundational threat. Every record embeds its own public key, so a chain
+    forged wholesale verifies against itself. The mitigation is the **trust anchor**:
+    `verify_signatures(trusted_keys=…)` and `KeyProvider`. Without one you have consistency,
+    not authenticity.
+  </Accordion>
+
+  <Accordion title="Tampering" icon="pen-to-square">
+    | ID | Threat |
+    |---|---|
+    | **T-T1** | Tampered record on disk or in transit |
+    | **T-T2** | Tampered `Checkpoint` or `BaselineStore` file |
+    | **T-T3** | Policy rule tampering at rest |
+    | **T-T4** | Tampering with the regex taxonomy at runtime |
+
+    T-T1 is closed by Ed25519 signatures over a canonical payload that **includes
+    `chain_previous`** — you cannot edit a record or move it between chains.
+
+    T-T2 has real residual risk: file and sqlite checkpoints are not signed. `KMSCheckpoint`
+    binds at-rest secrecy to a KMS-managed CMK and verifies the encryption context at load,
+    so a compromised inner backend cannot roll the agent back to attacker-chosen state.
+  </Accordion>
+
+  <Accordion title="Repudiation" icon="comment-slash">
+    | ID | Threat |
+    |---|---|
+    | **T-R1** | Operator denies an evaluation occurred |
+    | **T-R2** | Agent denies it received an injection |
+
+    Both are addressed by the chain: signed, ordered, hash-linked, with per-record content
+    hashes. The interop gap — a generic verifier needing the framework to check a record — is
+    tracked as JWS / COSE serialization work.
+  </Accordion>
+
+  <Accordion title="Information disclosure" icon="eye">
+    | ID | Threat |
+    |---|---|
+    | **T-I1** | Sensitive context leaks via exporter fan-out |
+    | **T-I2** | Signing key disclosure via debug logging |
+    | **T-I3** | Cross-tenant leakage in checkpoint stores |
+
+    T-I1 is not a bug — it is the exporter's **purpose**, and the design response is
+    disclosure rather than prevention. Attaching a sink logs the destination at INFO and adds
+    it to `report()["exporters"]`. **An empty `exporters` list is the proof a run stayed
+    local.** Neither surface ever contains the token.
+
+    Related hardening: exception *text* is kept out of serialized records. `capture_failure`
+    carries `exception_class` only, because framework internals routinely embed tokens and
+    PII in exception messages, and that event fans out to exporters.
+  </Accordion>
+
+  <Accordion title="Denial of service" icon="ban">
+    | ID | Threat |
+    |---|---|
+    | **T-D1** | Resource exhaustion via huge prompts |
+    | **T-D2** | Exporter starvation |
+    | **T-D3** | Chain-verification cost on long-running agents |
+
+    Context buffers are capped at **1000 entries per channel per session**, with a one-time
+    `<channel>_overflow` event so a sustained flood signals once instead of flooding the
+    event stream in turn.
+
+    The regex taxonomy is ReDoS-safe by construction: bounded character classes, no unbounded
+    backreferences.
+  </Accordion>
+
+  <Accordion title="Elevation of privilege" icon="arrow-up-right-dots">
+    | ID | Threat |
+    |---|---|
+    | **T-E1** | Path traversal in `FileCheckpoint` / `FileBaselineStore` |
+    | **T-E2** | Arbitrary code execution via a custom validator |
+    | **T-E3** | Supply-chain attack on `agentegrity` itself |
+
+    T-E1 is closed by `validate_storage_identifier` — storage identifiers are allow-listed,
+    so an `agent_id` of `../../etc/passwd` is rejected before it reaches the filesystem.
+
+    T-E2 is accepted and stated: a custom validator is your code running in your process.
+    Agentegrity catches and logs its exceptions so it cannot break the agent, but it does not
+    sandbox it.
+  </Accordion>
+</AccordionGroup>
+
+## Multi-agent threats
+
+Added in v0.8 alongside topology support. These are the threats that only exist once agents
+talk to each other.
+
+| ID | Threat | Mitigation |
+|---|---|---|
+| **T-CASCADE** | Compromise propagates through peer channels | Recovery layer tracks `peer_score_history`; correlated degradation across ≥2 peers raises `cascade_compromise_suspected` and escalates to `alert` |
+| **T-ROLE-DRIFT** | A member starts acting outside its declared role | Cortical baselines keyed `(agent_id, role)` — drift is measured against the role, not the agent |
+| **T-SHARED-MEM-MISATTRIB** | Poisoning attributed to the reader, not the writer | `writer_agent_id` captured at ingest on every `shared_memory_write` |
+| **T-ORPHAN-LIFECYCLE** | A lifecycle event dropped by sampling corrupts the topology view | `subagent_stop` without a matching start emits a `subagent_orphan` event so the gap is visible |
+| **T-BROADCAST-AMP** | One broadcast × N members = N evaluations | Adapters rate-limit at the source; buffer cap is the defensive ceiling |
+| **T-TOPO-FALSE** | Forged topology declaration | Topology is committed to via `Evidence`; the peer-authority check flags senders outside the declared set |
+
+## Mitigations
+
+| # | Mitigation | Where |
+|---|---|---|
+| M-1 | Ed25519 signatures, chain hash links | `core/attestation.py` |
+| M-2 | Deterministic canonical payload | `AttestationRecord.canonical_payload` |
+| M-3 | Atomic file writes | `FileCheckpoint`, `FileBaselineStore` |
+| M-4 | Path-traversal guard | `_path_for(agent_id)` in both backends |
+| M-5 | Idempotent `CREATE TABLE` | sqlite backends |
+| M-6 | Persistent connection for `:memory:` | sqlite backends |
+| M-7 | Fail-open exporter fan-out | `_safe_await` / `safeCall` |
+| M-8 | Idempotent `register_exporter` | reference-equality dedup, Python + TS |
+| M-9 | ReDoS-safe regex taxonomy | bounded classes, no unbounded backrefs |
+| M-10 | OIDC trusted publishing | `.github/workflows/release.yml` |
+| M-11 | Cross-adapter conformance suite | `tests/test_adapter_conformance.py` + TS mirror |
+| M-12 | Performance budget | `tests/test_perf_budget.py` |
+| M-13 | Detection regression gate | `tests/test_benchmarks.py` |
+| M-14 | Tamper-recovery round trip | `tests/test_recovery_restore.py` |
+
+Every mitigation is cross-linked to the test that pins it. A mitigation without a test is
+a claim, not a control.
+
+## Hardening history
+
+v0.8.1 closed every finding from a full adversarial audit of the v0.8.0 surface:
+
+- **Trust model** — `verify_signatures(trusted_keys=…)`; `verify-decisions` stopped reporting
+  unsigned chains as verified.
+- **Enforcement** — `escalate` now fails closed under `enforce=True`, so the built-in
+  `REQUIRE_APPROVAL` policies actually gate instead of being silently advisory.
+- **Deserialization** — the embedding-similarity cache moved from `pickle` to JSON, closing
+  RCE via a poisoned cache.
+- **Hardening** — bounded context buffers, exception text kept out of serialized records,
+  allow-listed storage identifiers, TLS-gated reporter token, restrictive store-file
+  permissions, TOCTOU-free store I/O.
+
+v0.9.0 closed two injection paths: tool arguments could shadow the fields governance matches
+on (an agent could name an argument `tool` and skip `GOV-001` entirely), and the LLM
+classifier did not cover `shared_memory` or `broadcast_channels` — the exact cross-agent
+cascade path those v0.8 channels exist to defend.
+
+## Out of scope
+
+Stated plainly so nobody infers a guarantee that is not there:
+
+- Alignment and value alignment of the underlying model
+- Model training safety
+- Data governance, except where it intersects agent memory integrity
+- An attacker with in-process code execution (see TB-3)
+
+## Reporting
+
+Report any threat not covered here, or any bypass of a listed mitigation, via
+[SECURITY.md](https://github.com/cogensec/agentegrity/blob/main/SECURITY.md).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Limitations" icon="scale-balanced" href="/docs/concepts/limitations">
+    Where detection is weak, with numbers.
+  </Card>
+  <Card title="Signing and keys" icon="key" href="/docs/guides/signing-and-keys">
+    Closing T-S1 properly.
+  </Card>
+</CardGroup>

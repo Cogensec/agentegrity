@@ -1,0 +1,331 @@
+---
+title: "Adversarial layer"
+description: "Attack surface mapping, multi-channel threat detection, and the adversarial coherence score."
+icon: "crosshairs"
+---
+
+The outermost layer. It verifies **self-defense**: whether the agent maintains coherent
+behaviour under adversarial pressure across every channel that can reach it.
+
+```python
+from agentegrity.layers import AdversarialLayer
+
+layer = AdversarialLayer(
+    coherence_threshold=0.70,
+    block_on_critical=True,
+    detect_tool_sequences=True,
+)
+```
+
+## What it does per evaluation
+
+<Steps>
+  <Step title="Map the attack surface">
+    Derives channels, tool interfaces, memory surfaces, and peer interfaces from the profile's
+    declared capabilities.
+  </Step>
+  <Step title="Scan every channel">
+    Runs the pattern taxonomy over each populated channel, aggregating matches per
+    `(channel, threat_type)` pair.
+  </Step>
+  <Step title="Run the sequence detector">
+    Behavioral check over ordered tool-call history — sensitive read followed by external send.
+  </Step>
+  <Step title="Run custom detectors">
+    Each in a try/except: a broken detector logs a warning and is skipped, never breaking the
+    evaluation.
+  </Step>
+  <Step title="Score and decide">
+    Coherence starts at 1.0 and degrades per threat; the action follows from severity and
+    threshold.
+  </Step>
+</Steps>
+
+## Channels scanned
+
+| Context key | Channel | Attack it surfaces |
+|---|---|---|
+| `input` | `direct_prompt` | Direct prompt injection |
+| `reasoning_chain` | `reasoning` | Hostile objectives stated in the agent's own reasoning, before any action |
+| `memory_reads[].content` | `memory_reads` | Model-context / memory-poisoning attacks |
+| `tool_outputs[].content` \| `.result` | `tool_responses` | Model-in-the-middle via a compromised tool |
+| `tool_definitions[]` | `tool_definitions` | **MCP tool poisoning** — directives in tool descriptions and schema field descriptions |
+| `retrieved_documents[].content` \| `.text` \| `.body` | `retrieved_documents` | Indirect injection via a poisoned RAG corpus |
+| `peer_messages[].content` | `peer_messages` | A compromised peer injecting into this agent |
+| `topology_context.shared_memory[]` | `shared_memory` | Cross-agent poisoning through shared state |
+| `topology_context.broadcast_messages[]` | `broadcast_channels` | Broadcast-borne injection |
+
+<Info>
+  Tool-definition scanning walks **nested schema descriptions recursively**, because MCP tool
+  poisoning frequently hides the directive in a parameter's description rather than the tool's
+  own. The attack is visible before the tool ever runs.
+</Info>
+
+A `tool_outputs` entry carrying an `error` also raises a low-severity `tool_manipulation`
+signal (severity 0.30, confidence 0.40) — "verify tool integrity", not an accusation.
+
+## The pattern taxonomy
+
+32 default patterns across eight families.
+
+| Family | Targets |
+|---|---|
+| `prompt_injection` | "ignore previous instructions", replacement-instruction headers, fake system fences |
+| `jailbreak` | DAN / developer mode, persona shift, "no restrictions", fiction-framed capability extraction |
+| `role_confusion` | Imperative role reassignment ("you are now …") |
+| `system_prompt_extraction` | Fishing for the system prompt |
+| `data_exfiltration` | Send-secrets-somewhere shapes |
+| `prompt_obfuscation` | Encoding and homoglyph tricks that hide the payload |
+| `action_injection` | Actionable imperatives embedded in structured content, gather-then-send, mid-sentence spliced imperatives |
+| `tool_poisoning` | Directives inside tool metadata |
+
+Two more families exist for multi-agent deployments: `peer_coercion` and `peer_authority`.
+
+### A pattern
+
+```python
+DetectorPattern(
+    name="ignore_previous",
+    pattern=r"\bignore\s+(all\s+|any\s+|the\s+|every\s+)?"
+            r"(previous|prior|above|preceding)\s+"
+            r"(instructions?|prompts?|rules?|directives?|context)\b",
+    threat_type="prompt_injection",
+    severity=0.80,
+    confidence=0.85,
+    description="Imperative to discard prior instructions",
+)
+```
+
+Patterns compile lazily with `re.IGNORECASE`; pass a pre-compiled `re.Pattern` if you need
+different flags. `severity` and `confidence` are validated into `[0, 1]` at construction.
+
+### Calibration
+
+<CardGroup cols={2}>
+  <Card title="Severity" icon="gauge-high">
+    **1.00** catastrophic (immediate secret exfiltration)
+    **0.85** high (jailbreak / role override)
+    **0.75** medium (prompt injection, system-prompt fishing)
+    **0.50** low (suspicious phrasing, weak signal)
+  </Card>
+  <Card title="Confidence" icon="percent">
+    **0.85+** attack-specific phrasing rarely seen in benign text
+    **0.60** matches both attack and ambiguous benign text
+    **0.40** weak signal, only meaningful combined with others
+  </Card>
+</CardGroup>
+
+<Note>
+  The taxonomy is deliberately conservative. In a measurement library, false positives are
+  worse than false negatives — an operator who learns to ignore alerts has lost more than one
+  who never had them.
+</Note>
+
+### Aggregation
+
+Multiple matches on one channel collapse into **one `ThreatAssessment` per
+`(channel, threat_type)` pair**:
+
+- `severity` = max across matches
+- `confidence` = max across matches
+- `description` = from the pattern with the highest `severity × confidence`
+- `indicators` = **every** matching pattern name
+
+```json
+{
+  "channel": "direct_prompt",
+  "threat_type": "prompt_injection",
+  "severity": 0.80,
+  "confidence": 0.85,
+  "description": "Imperative to discard prior instructions",
+  "indicators": ["ignore_previous", "new_instructions"]
+}
+```
+
+`indicators` naming every rule is what makes a false positive traceable to a single pattern
+you can then override.
+
+## ToolSequenceDetector
+
+Content patterns cannot see a multi-step exfiltration where each step is individually
+benign. This detector works on **behaviour** instead.
+
+It scans the ordered `tool_call_history` for a **sensitive-read followed by an
+external-send** within the session, and emits one aggregated assessment listing every
+`read->send` pair.
+
+```python
+ThreatAssessment(
+    channel="tool_sequence",
+    threat_type="exfiltration_sequence",
+    severity=0.75, confidence=0.65,
+    indicators=["read_credentials->http_post", "read_email->send_email"],
+)
+```
+
+Because it is behavioral, **paraphrase cannot evade it and benign text cannot trip it**.
+
+### Categories
+
+Names match with the same semantics as `GOV-001`: exact, glob (`*`/`?`), or MCP suffix.
+
+```python
+DEFAULT_TOOL_CATEGORIES = ToolCategories(
+    reads_sensitive=frozenset({
+        "get_credentials", "read_credentials", "get_secrets", "read_secrets",
+        "get_payment_methods", "payment_history", "transaction_history",
+        "list_accounts", "read_email", "read_messages", "get_messages",
+        "read_contacts", "export_data", "database_read",
+    }),
+    sends_external=frozenset({
+        "http_post", "http_request", "webhook_post", "send_email",
+        "send_message", "post_message", "send_transaction",
+        "transfer_funds", "upload_file", "publish", "post_tweet",
+    }),
+)
+```
+
+<Warning>
+  Generic verbs are deliberately **excluded** — `read_file` alone would flag every coding
+  agent. Passing `tool_categories=` **replaces** the defaults; extend by unioning:
+
+  ```python
+  from agentegrity.layers.adversarial import DEFAULT_TOOL_CATEGORIES
+  from agentegrity import ToolCategories
+
+  categories = ToolCategories(
+      reads_sensitive=DEFAULT_TOOL_CATEGORIES.reads_sensitive | {"fetch_patient_record"},
+      sends_external=DEFAULT_TOOL_CATEGORIES.sends_external | {"fax_document"},
+  )
+  ```
+</Warning>
+
+Disable with `detect_tool_sequences=False`.
+
+## Coherence scoring
+
+```python
+score = 1.0
+for threat in threats:
+    score -= threat.severity * threat.confidence * 0.5
+score = clamp(score, 0.0, 1.0)
+```
+
+A single severity-0.80 / confidence-0.85 injection costs **0.34**, landing at 0.66 — below
+the default 0.70 threshold, so the layer alerts.
+
+### Action
+
+| Condition | Action | Passed |
+|---|---|---|
+| `block_on_critical` and max severity ≥ 0.90 | `block` | ✗ |
+| coherence &lt; `coherence_threshold` | `alert` | ✗ |
+| threats present, max severity ≥ 0.50 | `alert` | threshold-dependent |
+| threats present, max severity &lt; 0.50 | `pass` | threshold-dependent |
+| no threats | `pass` | ✓ |
+
+## Multi-agent extensions
+
+A message or broadcast whose `sender_agent_id` is **not in the declared topology** raises:
+
+```python
+ThreatAssessment(
+    channel="peer_messages",
+    threat_type="peer_authority",
+    severity=0.70, confidence=0.85,
+    description="Peer message from 'ghost-agent' not in declared topology",
+    indicators=["undeclared_sender:ghost-agent"],
+)
+```
+
+Confidence 0.85 is justified because this is a **structural fact**, not a text heuristic.
+The check only runs when a topology is declared — no topology, no false positives.
+
+## Extending
+
+<CodeGroup>
+
+```python Add patterns
+from agentegrity.layers import AdversarialLayer
+from agentegrity.layers.adversarial import DetectorPattern
+
+layer = AdversarialLayer(extra_patterns=[
+    DetectorPattern(
+        name="phi_exfil",
+        pattern=r"\b(send|email|forward|export)\b.{0,40}\b(patient|phi|mrn|diagnosis)\b",
+        threat_type="data_exfiltration",
+        severity=0.95, confidence=0.80,
+        description="Attempt to move protected health information",
+    ),
+])
+```
+
+```python Replace the taxonomy
+from agentegrity.layers.adversarial import default_detector_patterns
+
+patterns = [p for p in default_detector_patterns()
+            if p.threat_type != "prompt_obfuscation"]
+layer = AdversarialLayer(patterns=patterns)
+```
+
+```python Custom detector
+def unusual_hour_detector(profile, context):
+    from datetime import datetime
+    if datetime.now().hour in range(0, 5) and context.get("action", {}).get(
+        "tool") in {"transfer_funds", "admin_api"}:
+        return [ThreatAssessment(
+            channel="behavioral", threat_type="anomalous_timing",
+            severity=0.60, confidence=0.50,
+            description="Privileged tool use outside business hours",
+        )]
+    return []
+
+layer = AdversarialLayer(threat_detectors=[unusual_hour_detector])
+```
+
+</CodeGroup>
+
+See [Custom detectors](/docs/guides/custom-detectors) for the full guide.
+
+## Standalone detection
+
+Outside the pipeline, for an inline check:
+
+```python
+assessment = layer.detect("ignore all previous instructions",
+                          channel="direct_prompt")
+if assessment:
+    print(assessment.threat_type, assessment.severity)
+```
+
+## Semantic tiers
+
+The regex taxonomy is **tier 1**. Two more sit above it:
+
+<CardGroup cols={2}>
+  <Card title="AdversarialLLMLayer" icon="cloud">
+    Claude-backed semantic classifier. Composes with regex by union; fail-open on API error.
+    Requires `pip install "agentegrity[llm]"`.
+  </Card>
+  <Card title="AdversarialSLMLayer" icon="microchip">
+    Local small model over the OpenAI-compatible protocol — Ollama, llama.cpp, vLLM,
+    LM Studio. **Zero extra dependencies** (stdlib `urllib`).
+  </Card>
+</CardGroup>
+
+`EmbeddingSimilarityDetector` sits between them: a zero-dependency n-gram fallback with a
+pluggable `embed_fn` for Voyage, OpenAI, or sentence-transformers.
+
+See [Semantic layers](/docs/guides/semantic-layers) and read
+[Limitations](/docs/concepts/limitations) before trusting any of these numbers.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="API" icon="code" href="/docs/api/layers">
+    Full constructor and type signatures.
+  </Card>
+  <Card title="Normative spec" icon="file-contract" href="https://github.com/cogensec/agentegrity/blob/main/spec/layers/adversarial-layer.md">
+    `spec/layers/adversarial-layer.md`
+  </Card>
+</CardGroup>

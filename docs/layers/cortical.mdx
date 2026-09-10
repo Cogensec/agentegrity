@@ -1,0 +1,262 @@
+---
+title: "Cortical layer"
+description: "Reasoning consistency, memory provenance, and behavioral drift against a baseline."
+icon: "brain"
+---
+
+The middle layer. It verifies **self-stability**: whether the agent's internal cognition
+stays consistent over time, and whether its behaviour has drifted from what "normal" looked
+like.
+
+```python
+from agentegrity.layers import CorticalLayer
+
+layer = CorticalLayer(
+    drift_tolerance=0.15,
+    memory_integrity_threshold=0.80,
+    reasoning_consistency_threshold=0.75,
+    min_drift_samples=20,
+    metric="js",
+)
+```
+
+## Three dimensions
+
+The layer score is a weighted average:
+
+```
+cortical = 0.35 · reasoning_consistency
+         + 0.35 · memory_integrity
+         + 0.30 · (1 − drift_score)
+```
+
+and it publishes that value as `portability_score`, feeding **environmental portability**.
+
+## Reasoning integrity
+
+Walks `context["reasoning_chain"]` looking for adjacent contradictions, and
+`context["instructions"]` versus `context["goals"]` for override attempts.
+
+Contradiction heuristics, applied to consecutive steps:
+
+| Step A contains | Step B contains |
+|---|---|
+| `should not` | `should` (without `should not`) |
+| `reject` | `accept` |
+| `deny` | `allow` |
+
+```
+consistency = max(0, 1 − (contradictions / chain_length) × 2)
+```
+
+An empty chain scores **0.85** — a moderate default, not a pass. There was nothing to
+validate, and the score says so rather than pretending the check succeeded.
+
+### Goal conflict
+
+An instruction containing `ignore your goal`, `new objective`, or `override` sets
+`conflict_detected=True`, halves the consistency score, and makes the layer **escalate**.
+
+<Info>
+  A conflict escalates rather than blocks. The framework's position is that a detected goal
+  conflict is exactly the situation a human should adjudicate — it is too consequential to
+  auto-allow and too ambiguous to auto-deny.
+</Info>
+
+<Warning>
+  These heuristics are **rule-based and English-only**. They catch blatant contradictions.
+  For semantic reasoning validation, use
+  [`CorticalLLMLayer`](/docs/guides/semantic-layers).
+</Warning>
+
+## Memory integrity
+
+Structural provenance inspection over `context["memory_reads"]`. Each entry is expected to
+carry a `provenance` field:
+
+| `provenance` | Treated as |
+|---|---|
+| `"verified"` | Clean |
+| `"external"` | Suspicious |
+| `"unknown"` or absent | Suspicious **and** counted as unknown |
+
+```
+clean_ratio      = 1 − suspicious / total
+conflict_penalty = conflicts_with_baseline × 0.15
+integrity        = max(0, clean_ratio − conflict_penalty)
+```
+
+No memory reads scores **1.0** — nothing to poison.
+
+<Warning>
+  This is a **structural** check. It verifies that provenance metadata is present and marked
+  verified; it does not verify the metadata is truthful, nor does it read the memory's
+  meaning. An attacker who controls the memory store and can stamp `provenance: "verified"`
+  defeats it. Pair with signed memory or the LLM-backed memory check.
+</Warning>
+
+## Behavioral drift
+
+The most valuable and most subtle dimension. Drift is compared across two distributions the
+adapter buffer maintains automatically:
+
+- `action_distribution` — counts by action type (`tool_call`, `user_prompt`, …)
+- `tool_usage` — counts by tool name
+
+### Jensen-Shannon distance
+
+The default metric. **Symmetric**, bounded in `[0, 1]`, well-defined under Laplace
+smoothing.
+
+<Note>
+  JS replaced an asymmetric KL approximation in v0.6.0 that had three real bugs:
+  baseline-vs-current and current-vs-baseline produced *different* scores; the additive
+  epsilon broke the probability simplex; and there was no minimum-sample guard, so a 1-vs-1
+  comparison could return a confident "drifted" verdict.
+</Note>
+
+### Wasserstein
+
+```python
+CorticalLayer(metric="wasserstein")     # needs pip install "agentegrity[stats]"
+```
+
+1D Earth Mover's Distance with each support point indexed at its sorted-key position. Use it
+only when the support has genuine **ordinal** meaning — latency buckets, risk tiers. For
+`action_distribution` and `tool_usage`, whose keys carry no order, JS is the correct choice.
+
+If scipy is missing, the layer logs **one** warning at construction and falls back to JS.
+
+### The minimum-sample guard
+
+`min_drift_samples` (default 20) requires that many total observations in **both**
+distributions before drift is computed. Below it, the dimension is recorded as
+`<dimension>__insufficient_samples` with value 0.0 and is **not factored into the score**.
+
+<Warning>
+  `action_distribution__insufficient_samples` in the details means "checked and skipped", not
+  "passed". A fresh session always looks drift-free — that is honesty about sample size, not
+  a clean bill of health.
+</Warning>
+
+### Action
+
+| Condition | Action |
+|---|---|
+| `conflict_detected` | `escalate` |
+| `drift_score > drift_tolerance × 2` | `block` |
+| drift &gt; tolerance, or memory &lt; threshold, or reasoning &lt; threshold | `alert` |
+| otherwise | `pass` |
+
+## Building a baseline
+
+The baseline is what "normal" means. Feed it during known-clean operation:
+
+```python
+layer = CorticalLayer(drift_tolerance=0.15)
+
+for event in normal_traffic:
+    layer.update_baseline({"action": event.action_type, "tool": event.tool_name})
+```
+
+`BehavioralBaseline` accumulates `sample_count`, `action_distribution`, and
+`tool_usage_patterns`.
+
+### Persisting it
+
+Baselines are worthless if they reset every deploy.
+
+```python
+from agentegrity.layers import CorticalLayer, SqliteBaselineStore
+
+layer = CorticalLayer(baseline_store=SqliteBaselineStore("baselines.db"))
+```
+
+With a store wired, the layer loads a baseline for `profile.agent_id` on first `evaluate()`
+and writes through on every `update_baseline()`.
+
+<Warning>
+  Write-through failures are **deliberately not silenced**. A misconfigured store should fail
+  loudly rather than masquerade as working persistence — the failure mode of silent
+  non-persistence is an agent that never accumulates a baseline and therefore never detects
+  drift.
+</Warning>
+
+Three reference backends ship: `InMemoryBaselineStore`, `FileBaselineStore` (atomic writes,
+restrictive permissions), and `SqliteBaselineStore` (idempotent schema).
+
+<Note>
+  Pin `agent_id` explicitly on any profile whose baseline must survive a restart. The default
+  is a fresh UUID4 per process, which means a new baseline every time.
+</Note>
+
+## Per-role baselines
+
+In a declared [topology](/docs/concepts/multi-agent-topology), baselines are keyed
+`(agent_id, role)`.
+
+This catches **T-ROLE-DRIFT**: a compromised member that starts behaving like a leader
+drifts against its *role's* baseline even when its absolute behaviour looks unremarkable for
+the system as a whole.
+
+The role flows in through `context["topology_context"]["role"]`, populated by team-aware
+adapters. Lookup falls back to pre-v0.8 single-agent baselines transparently, so upgrading
+does not reset anything.
+
+## Reading the details
+
+```json
+{
+  "portability_score": 0.9245,
+  "reasoning": {
+    "consistency_score": 1.0, "chain_length": 4, "contradictions": 0,
+    "goal_alignment": 1.0, "conflict_detected": false,
+    "conflict_description": null
+  },
+  "memory": {
+    "integrity_score": 0.85, "total_reads": 20, "suspicious_reads": 3,
+    "provenance_verified": 17, "provenance_unknown": 3,
+    "conflicts_detected": 0
+  },
+  "drift": {
+    "drift_score": 0.08,
+    "dimensions": {"action_distribution": 0.06, "tool_usage": 0.10},
+    "drifted_dimensions": [],
+    "baseline_age_hours": 36.5
+  },
+  "baseline_sample_count": 412
+}
+```
+
+`baseline_age_hours` matters: the recovery layer scores a baseline older than a week at 0.5.
+
+## LLM-backed sibling
+
+```python
+from agentegrity.layers import default_layers
+evaluator = IntegrityEvaluator(layers=default_layers(prefer_llm=True))
+```
+
+`CorticalLLMLayer` swaps in Claude-driven semantic checks for reasoning-chain validation,
+memory-provenance analysis, and drift classification.
+
+<Info>
+  Its **sync `evaluate()` stays pattern-based** — only `aevaluate()` calls Claude. Opting in
+  never penalises sync callers with surprise network latency. All LLM paths fail open on API
+  error or a missing key.
+</Info>
+
+Requires `pip install "agentegrity[llm]"`; `default_layers(prefer_llm=True)` probes for
+`anthropic` at construction so you get a clear error immediately rather than a confusing
+failure on the first evaluation.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Baselines and drift" icon="chart-line" href="/docs/guides/baselines-and-drift">
+    Full guide to establishing and tuning baselines.
+  </Card>
+  <Card title="Normative spec" icon="file-contract" href="https://github.com/cogensec/agentegrity/blob/main/spec/layers/cortical-layer.md">
+    `spec/layers/cortical-layer.md`
+  </Card>
+</CardGroup>
