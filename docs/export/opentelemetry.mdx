@@ -1,0 +1,153 @@
+---
+title: "OpenTelemetry"
+description: "One trace per session, plus metrics, to any OTLP backend."
+icon: "chart-line"
+---
+
+```bash
+pip install "agentegrity[otel]"
+```
+
+```python
+from agentegrity.langchain import register_exporter, instrument_graph
+from agentegrity.exporters.otel import OTelSessionExporter
+
+register_exporter(OTelSessionExporter())
+graph = instrument_graph(my_graph)
+```
+
+<Note>
+  This is **distinct from the AutoGen adapter**, which *consumes* OTel spans that AutoGen
+  emits. This exporter *produces* spans describing Agentegrity's own evaluations.
+</Note>
+
+## Global providers by default
+
+The exporter emits through the **global** OTel providers, so the deploying process configures
+everything the standard way:
+
+```bash
+export OTEL_SERVICE_NAME=research-agent
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com
+```
+
+Pass explicit providers to override:
+
+```python
+OTelSessionExporter(tracer_provider=tp, meter_provider=mp)
+```
+
+## Metrics
+
+| Instrument | Type | Unit | Description |
+|---|---|---|---|
+| `agentegrity.evaluations` | counter | `{evaluation}` | Evaluations, by adapter and action |
+| `agentegrity.enforcement.denials` | counter | `{denial}` | Blocks, and escalates without approval |
+| `agentegrity.health_events` | counter | `{event}` | `capture_failure`, `subagent_orphan`, buffer overflows |
+| `agentegrity.score.composite` | histogram | `1` | Composite score distribution |
+| `agentegrity.score.layer` | histogram | `1` | Per-layer score distribution |
+| `agentegrity.evaluation.latency` | histogram | `ms` | Per-evaluation latency |
+| `agentegrity.sessions.active` | up-down counter | `{session}` | Active instrumented sessions |
+
+<Info>
+  `agentegrity.health_events` is the one to alert on first. It counts **instrumentation
+  failures** — decision capture that failed, lifecycle events that arrived orphaned, buffers
+  that overflowed. A rising health-event rate means your evidence has gaps, which is a
+  different and more urgent problem than a falling score.
+</Info>
+
+## Content is off by default
+
+```python
+OTelSessionExporter(capture_content=True)
+```
+
+<Warning>
+  With `capture_content=False` (the default), content-bearing keys — `prompt`, `tool_input`,
+  `tool_response`, `output`, `content` — are **hashed**, not recorded.
+
+  With it enabled, they are truncated to **512 characters** and attached to the span. Turning
+  it on sends prompts and tool arguments to your OTLP backend. Make that a deliberate decision
+  about where your observability data lives.
+</Warning>
+
+## Chain verification as a signal
+
+```python
+from agentegrity.langchain import adapter, register_exporter
+
+register_exporter(OTelSessionExporter(
+    chain_provider=lambda: adapter().attestation_chain,
+    trusted_keys={pinned_public_key_bytes},
+))
+```
+
+With a `chain_provider`, the exporter reports cryptographic chain verification as telemetry —
+so a tampered chain becomes an alertable metric rather than something you discover during an
+audit.
+
+<Warning>
+  **Without `trusted_keys`, a forged chain signed with an attacker-generated key
+  self-verifies.** Pin a key set anywhere the chain crosses a trust boundary. See
+  [Signing and keys](/docs/guides/signing-and-keys).
+</Warning>
+
+## Span structure
+
+One trace per session:
+
+```
+session (root span)
+├── pre_tool_use          [action=pass,     composite=0.92]
+├── post_tool_use         [action=pass,     composite=0.93]
+├── pre_tool_use          [action=escalate, composite=0.73]
+└── stop                  [action=pass,     composite=0.91]
+```
+
+Attributes cover adapter name, event type, composite score, action, per-layer scores, and —
+when a topology is declared — its kind and member count.
+
+## describe()
+
+```python
+{"type": "OTelSessionExporter"}
+```
+
+<Note>
+  Deliberately **no `target`**. The OTLP destination is owned by the OpenTelemetry SDK's own
+  configuration and the process's provider, not by this class. Reporting one here could
+  contradict where spans actually go.
+</Note>
+
+## Import vs construction
+
+The module **imports** without the `[otel]` extra; the **constructor** is what raises:
+
+```python
+ImportError: OpenTelemetry is required for OTelSessionExporter.
+Install it with: pip install agentegrity[otel]
+```
+
+This keeps `from agentegrity.exporters import ...` working in environments that only use the
+HTTP exporter.
+
+## Composing sinks
+
+```python
+register_exporter(OTelSessionExporter())        # metrics + traces
+register_exporter(SlackAlertExporter(webhook))  # denials to Slack
+register_exporter(HTTPExporter(url, token))     # full session to the dashboard
+```
+
+Every exporter receives every event, independently, fail-open.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Alerts" icon="bell" href="/docs/export/alerts">
+    Push denials to Slack or a webhook.
+  </Card>
+  <Card title="Session exporters" icon="share-nodes" href="/docs/export/session-exporters">
+    The protocol underneath.
+  </Card>
+</CardGroup>

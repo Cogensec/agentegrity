@@ -1,0 +1,285 @@
+---
+title: "Session exporters"
+description: "The SessionExporter protocol — three async methods that receive every evaluated event."
+icon: "share-nodes"
+---
+
+Agentegrity evaluates locally and sends nothing anywhere by default. Registering an exporter
+is what turns on streaming.
+
+```python
+from agentegrity.langchain import register_exporter, instrument_graph
+
+class PrintExporter:
+    async def on_session_start(self, session_id, adapter_name, profile):
+        print(f"[{adapter_name}] session {session_id} started")
+
+    async def on_event(self, session_id, event):
+        print(" ", event["event_type"], event["evaluation_result"])
+
+    async def on_session_end(self, session_id, summary):
+        print(f"[{session_id}] {summary['evaluations']} evaluations")
+
+register_exporter(PrintExporter())
+graph = instrument_graph(my_graph)
+```
+
+## The protocol
+
+```python
+class SessionExporter(Protocol):
+    async def on_session_start(self, session_id: str, adapter_name: str,
+                               profile: dict[str, Any]) -> None: ...
+    async def on_event(self, session_id: str, event: dict[str, Any]) -> None: ...
+    async def on_session_end(self, session_id: str,
+                             summary: dict[str, Any]) -> None: ...
+```
+
+<ResponseField name="on_session_start" type="async">
+  Fires **once**, just before the first event, with the adapter's session id, adapter name,
+  and a JSON-serializable profile snapshot.
+</ResponseField>
+
+<ResponseField name="on_event" type="async">
+  Fires for every `FrameworkEvent`, with `event.to_dict()`.
+</ResponseField>
+
+<ResponseField name="on_session_end" type="async">
+  Fires from `close()` / `__aexit__` / `agentegrity.shutdown()`, with `get_summary()`.
+</ResponseField>
+
+Every method is async by contract. Registration is **idempotent** — the same instance is
+never added twice.
+
+## Optional describe()
+
+```python
+def describe(self) -> dict[str, str]:
+    return {"type": "MyExporter", "target": "https://sink.example.com"}
+```
+
+A **convention**, not a Protocol member, so exporters written before it existed keep working
+— those are reported by class name. Whatever `describe()` returns is serialized into the
+session summary, so **it must never include credentials**.
+
+## Fail-open by design
+
+```python
+async def _safe_await(coro, method_name):
+    try:
+        await coro
+    except Exception as exc:
+        logger.warning("exporter %s failed: %s", method_name, exc)
+```
+
+Exporter exceptions are caught and logged, never propagated. **A broken sink can never break
+the instrumented agent** — that is mitigation **M-7**.
+
+Synchronous exceptions raised while *constructing* the coroutine are caught too.
+
+<Warning>
+  The flip side: an exporter that raises on every call **silently delivers nothing**. Check
+  your logs after deploying one, and prefer an exporter that surfaces its own delivery
+  failures (queue depth, drop count) over one that only fails quietly.
+</Warning>
+
+## Event shape
+
+```json
+{
+  "event_type": "pre_tool_use",
+  "timestamp": "2026-09-10T14:22:31.882401+00:00",
+  "adapter_name": "langchain",
+  "data": {"tool_name": "web_search", "tool_input": {"query": "..."}},
+  "evaluation_result": {
+    "composite": 0.9245,
+    "properties": {"adversarial_coherence": 1.0, "...": "..."},
+    "layer_results": [{"layer_name": "adversarial", "score": 1.0, "...": "..."}],
+    "timestamp": "...", "confidence": 1.0,
+    "evaluator_version": "1.0.0", "total_latency_ms": 0.23,
+    "passed": true, "action": "pass"
+  }
+}
+```
+
+`evaluation_result` is `null` for events that do not trigger an evaluation —
+`post_tool_use_failure`, `subagent_stop`, `pre_compact`, and the health events.
+
+Every payload validates against the published [wire format](/docs/export/wire-format).
+
+<Warning>
+  **Exporters stream full content.** `data` carries prompts, tool arguments, and tool outputs.
+  This is threat **T-I1**, and the design response is disclosure rather than prevention:
+
+  - Attaching logs the destination at INFO
+  - `report()["exporters"]` lists every attached sink
+  - **An empty `exporters` list is the proof a run stayed local**
+
+  Neither surface ever contains the token. This is a completely different disclosure than
+  [telemetry](/docs/export/telemetry), which is shape-only and never carries content.
+</Warning>
+
+## Registering
+
+<CodeGroup>
+
+```python Module-level
+from agentegrity.claude import register_exporter
+register_exporter(MyExporter())
+```
+
+```python On an adapter
+adapter = client.create_adapter("langchain", profile=profile)
+adapter.register_exporter(MyExporter())
+```
+
+```python From the environment
+# AGENTEGRITY_TOKEN + AGENTEGRITY_EXPORTER_URL → HTTPExporter self-attaches
+```
+
+</CodeGroup>
+
+Register **before** the first instrumented call so the exporter receives `on_session_start`.
+
+## Lifecycle
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+# ... run the agent ...
+agentegrity.shutdown()          # fires on_session_end, flushes exporters
+```
+
+Or per-adapter:
+
+```python
+adapter.close()                 # idempotent
+
+async with adapter:             # __aexit__ calls close()
+    ...
+```
+
+<Warning>
+  Without `close()` / `shutdown()`, `on_session_end` never fires and a queued exporter may
+  drop buffered events at process exit. `HTTPExporter` installs an at-exit flush as a
+  backstop, but a custom exporter should either do the same or be driven by an explicit
+  shutdown.
+</Warning>
+
+## A batching exporter
+
+```python
+import asyncio, json
+from pathlib import Path
+
+class JSONLExporter:
+    """Append every event to a JSONL file. Buffered, flushed on session end."""
+
+    def __init__(self, path: str, batch_size: int = 50) -> None:
+        self._path = Path(path)
+        self._batch: list[dict] = []
+        self._batch_size = batch_size
+        self._lock = asyncio.Lock()
+
+    def describe(self) -> dict[str, str]:
+        return {"type": "JSONLExporter", "target": str(self._path)}
+
+    async def on_session_start(self, session_id, adapter_name, profile):
+        await self._append({"kind": "session_start", "session_id": session_id,
+                            "adapter_name": adapter_name, "profile": profile})
+
+    async def on_event(self, session_id, event):
+        await self._append({"kind": "event", "session_id": session_id, "event": event})
+
+    async def on_session_end(self, session_id, summary):
+        await self._append({"kind": "session_end", "session_id": session_id,
+                            "summary": summary})
+        await self._flush()
+
+    async def _append(self, row: dict) -> None:
+        async with self._lock:
+            self._batch.append(row)
+            if len(self._batch) >= self._batch_size:
+                await self._flush_locked()
+
+    async def _flush(self) -> None:
+        async with self._lock:
+            await self._flush_locked()
+
+    async def _flush_locked(self) -> None:
+        if not self._batch:
+            return
+        with self._path.open("a", encoding="utf-8") as fh:
+            for row in self._batch:
+                fh.write(json.dumps(row) + "\n")
+        self._batch.clear()
+```
+
+## A filtering exporter
+
+Only forward what matters, and drop content before it leaves:
+
+```python
+class DenialOnlyExporter:
+    """Forward only block/escalate verdicts, with content stripped."""
+
+    def __init__(self, sink) -> None:
+        self._sink = sink
+
+    def describe(self) -> dict[str, str]:
+        return {"type": "DenialOnlyExporter"}
+
+    async def on_session_start(self, session_id, adapter_name, profile): ...
+    async def on_session_end(self, session_id, summary): ...
+
+    async def on_event(self, session_id, event):
+        result = event.get("evaluation_result")
+        if not result or result.get("action") not in {"block", "escalate"}:
+            return
+        await self._sink.send({
+            "session_id": session_id,
+            "event_type": event["event_type"],
+            "action": result["action"],
+            "composite": result["composite"],
+            # deliberately no `data` — no prompts, no tool arguments
+        })
+```
+
+## Shipped exporters
+
+<CardGroup cols={2}>
+  <Card title="HTTPExporter" icon="cloud-arrow-up" href="/docs/export/http-and-pro">
+    POSTs sessions to an agentegrity-pro backend. Stdlib-only, no extra required.
+  </Card>
+  <Card title="OTelSessionExporter" icon="chart-line" href="/docs/export/opentelemetry">
+    One trace per session plus metrics to any OTLP backend. Needs `[otel]`.
+  </Card>
+  <Card title="WebhookAlertExporter" icon="bell" href="/docs/export/alerts">
+    POSTs a JSON alert per block/escalate verdict.
+  </Card>
+  <Card title="SlackAlertExporter" icon="slack" href="/docs/export/alerts">
+    The same, formatted for a Slack incoming webhook.
+  </Card>
+</CardGroup>
+
+## TypeScript
+
+```ts
+import { registerExporter } from "@agentegrity/langchain";
+import type { SessionExporter } from "@agentegrity/client";
+```
+
+Same contract, camelCase method names, every method optional. See
+[Client reference](/docs/typescript/client-reference).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Wire format" icon="file-code" href="/docs/export/wire-format">
+    JSON Schema and OpenAPI 3.1.
+  </Card>
+  <Card title="HTTP and pro" icon="cloud-arrow-up" href="/docs/export/http-and-pro">
+    Zero-code-change streaming.
+  </Card>
+</CardGroup>

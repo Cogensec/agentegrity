@@ -1,0 +1,144 @@
+---
+title: "Anonymous telemetry"
+description: "Every event documented, the anonymity mechanism explained, and how to turn it off."
+icon: "chart-pie"
+---
+
+Agentegrity collects **anonymous, shape-only** usage telemetry: enum values, counts,
+durations, and rounded score floats. It carries **no content**.
+
+<Card title="Turn it off in one line" icon="power-off" horizontal>
+  ```bash
+  export DO_NOT_TRACK=1
+  ```
+  When disabled, no ID file is written, no thread starts, and no network is touched.
+</Card>
+
+## Why it exists
+
+The library is zero-dependency with no server, no signup, and no download counter that says
+which parts matter. Telemetry answers two questions that are otherwise unanswerable: **which
+framework adapters people use** (so adapter work goes where the users are) and **which
+evaluation surfaces get exercised** (so hardening follows real usage).
+
+That is the whole scope. It is not product analytics.
+
+## Every event
+
+| Event | Fired by | Properties |
+|---|---|---|
+| `client_evaluate_started` | `AgentegrityClient.evaluate` | `risk_tier`, `agent_type`, `deployment_context`, `capability_count` |
+| `client_evaluate_finished` | `AgentegrityClient.evaluate` | the above, plus per-property scores (3 dp), `composite`, `composite_bucket`, `passed`, `action`, `duration_ms` |
+| `client_attest` | `AgentegrityClient.attest` | `record_kind`, `signed`, `evidence_count` |
+| `adapter_created` | `AgentegrityClient.create_adapter` | `adapter`, `framework_available` |
+| `monitor_violation` | `IntegrityMonitor` | `action`, `property` (lowest-scoring property) |
+| `attestation_verified` | `AttestationChain.verify_chain` | `record_count`, `decision_count`, `verified` |
+| `cli_run` | `python -m agentegrity` | `command` |
+| `agentegrity_uncaught_exception` | outermost telemetry scope | `exception_type` (**class name only**) |
+
+<Info>
+  `adapter_created` fires **even when the framework import fails**, carrying
+  `framework_available: false`. That is deliberate: demand for an adapter people cannot install
+  is the highest-value signal in the whole set.
+</Info>
+
+Every event also carries coarse environment tags: `agentegrity_version`, `python_version`
+(major.minor), `environment` (`local` / `ci` / `docker` / `colab` / `kaggle`), `os_type`
+(`sys.platform`), a per-process `$session_id`, and `component` / `operation` naming which API
+surface fired it.
+
+## Never collected
+
+<Warning>
+  Prompts. Model inputs or outputs. Tool arguments. File paths. Agent or profile names.
+  Capability strings. Policy text. Exception messages or tracebacks. Hostnames. Usernames.
+  IP-derived identity.
+</Warning>
+
+This is enforced, not just promised. All payload construction lives in **one auditable
+module** — [`_telemetry_props.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py)
+— and leak-guard tests in `tests/test_telemetry.py` assert that every shape builder emits only
+allow-listed keys and **no string longer than 64 characters**.
+
+That length cap is the interesting part: it makes accidental content leakage structurally
+impossible to ship, because a prompt cannot fit through a 64-character allow-listed field.
+
+## The anonymous ID
+
+A random UUID at `~/.agentegrity/id`, file mode `0600`, written on first **instrumented
+use** — never on import, and never when telemetry is disabled.
+
+If the file cannot be written (read-only home, sandbox), an ephemeral per-process `anon-` ID
+is used instead. The ID carries no machine or user information. Deleting the file resets it.
+
+## Turning it off
+
+<CodeGroup>
+
+```bash Environment
+export DO_NOT_TRACK=1                       # the cross-tool standard
+export AGENTEGRITY_TELEMETRY_DISABLED=1     # agentegrity-specific
+```
+
+```python Runtime
+import agentegrity
+agentegrity.disable_telemetry()
+```
+
+```bash GeoIP only
+export AGENTEGRITY_TELEMETRY_DISABLE_GEOIP=1
+```
+
+</CodeGroup>
+
+Truthy values: `1`, `true`, `yes`, `on`, `t`, `y` — case-insensitive.
+
+## Transport
+
+A single daemon thread, stdlib `urllib`, 2-second timeout, bounded queue that **drops on
+overflow**, batching to US-hosted PostHog (`us.i.posthog.com`).
+
+<Info>
+  Telemetry can never break or block the host process. Every failure is swallowed, and offline
+  use simply drops events. The embedded project key is **write-only** — it can ingest events
+  but never read them back.
+</Info>
+
+## Telemetry vs exporters
+
+The distinction matters and is worth being explicit about.
+
+| | Telemetry | [Session exporters](/docs/export/session-exporters) |
+|---|---|---|
+| **On by default** | ✅ yes | ❌ no |
+| **Carries content** | ❌ never | ✅ prompts, tool arguments, outputs |
+| **Destination** | PostHog (fixed) | Whatever **you** configure |
+| **Disclosed in `report()`** | ❌ no | ✅ in `exporters` |
+| **Disable** | `DO_NOT_TRACK=1` | don't configure one |
+
+As of v0.10.0 those are the **only two** ways anything leaves your process, and you control
+both. Configure neither and nothing leaves. `report()["exporters"]` naming an empty list is
+the proof a run stayed local.
+
+## Verifying for yourself
+
+```bash
+DO_NOT_TRACK=1 python -m agentegrity doctor
+ls ~/.agentegrity/          # no id file created
+```
+
+The two files to read if you want to check the claims rather than take them:
+
+- [`core/telemetry.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/telemetry.py) — transport, tags, opt-out
+- [`core/_telemetry_props.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py) — every payload builder, in one place
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Session exporters" icon="share-nodes" href="/docs/export/session-exporters">
+    The other egress path, and how it discloses itself.
+  </Card>
+  <Card title="Security policy" icon="shield" href="https://github.com/cogensec/agentegrity/blob/main/SECURITY.md">
+    Reporting a vulnerability.
+  </Card>
+</CardGroup>

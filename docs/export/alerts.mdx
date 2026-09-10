@@ -1,0 +1,179 @@
+---
+title: "Webhook and Slack alerts"
+description: "Push every block and escalate verdict to a webhook or Slack channel."
+icon: "bell"
+---
+
+```python
+from agentegrity import WebhookAlertExporter, SlackAlertExporter
+from agentegrity.claude import register_exporter
+
+register_exporter(SlackAlertExporter("https://hooks.slack.com/services/T…/B…/…"))
+```
+
+Stdlib-only, fail-open, and **shape-only** — no prompts, no tool arguments.
+
+## Configuration
+
+<ResponseField name="url" type="str" required>
+  Webhook endpoint. POSTed with `Content-Type: application/json`.
+</ResponseField>
+
+<ResponseField name="alert_on" type="set[str]">
+  Actions that fire an alert. Default `{"block", "escalate"}`.
+</ResponseField>
+
+<ResponseField name="timeout" type="float">
+  Per-request seconds. Default 5.0.
+</ResponseField>
+
+```python
+WebhookAlertExporter(url, alert_on={"block", "escalate", "alert"}, timeout=10.0)
+```
+
+<Warning>
+  Adding `"alert"` to `alert_on` is usually a mistake in production. `alert` fires on any
+  detected threat above severity 0.50 — a busy agent generates a steady stream, and an alert
+  channel nobody reads is worse than no channel.
+
+  Start with the default `{"block", "escalate"}`: those are the verdicts that would have
+  stopped an action.
+</Warning>
+
+## The payload
+
+```json
+{
+  "source": "agentegrity",
+  "session_id": "3f2a…",
+  "adapter": "claude",
+  "event_type": "pre_tool_use",
+  "action": "escalate",
+  "composite": 0.7312,
+  "failing_layers": ["governance"],
+  "tool_name": "database_write",
+  "timestamp": "2026-09-10T14:22:31.882401+00:00"
+}
+```
+
+<Info>
+  **Deliberately shape-only.** No prompt, no tool arguments, no tool output. An alert channel
+  is usually a chat room with broad membership and long retention; it is exactly the wrong
+  place for agent content to land.
+
+  If you need content, use a [session exporter](/docs/export/session-exporters) into a system
+  with access controls.
+</Info>
+
+`failing_layers` tells you *which* layer objected, which is usually the first thing you want:
+`governance` means a policy fired; `adversarial` means a threat was detected;
+`cortical` means drift or a reasoning conflict; `recovery` means chain or degradation trouble.
+
+## Slack formatting
+
+```python
+SlackAlertExporter("https://hooks.slack.com/services/…")
+```
+
+Subclasses `WebhookAlertExporter` and overrides `_format` to shape the payload for a Slack
+incoming webhook. Everything else — queueing, flushing, fail-open, `describe()` — is
+inherited.
+
+## Your own format
+
+```python
+class PagerDutyAlertExporter(WebhookAlertExporter):
+    def _format(self, alert: dict) -> dict:
+        return {
+            "routing_key": self._routing_key,
+            "event_action": "trigger",
+            "dedup_key": f"agentegrity-{alert['session_id']}-{alert['event_type']}",
+            "payload": {
+                "summary": f"{alert['action']} on {alert['tool_name']} "
+                           f"(composite {alert['composite']})",
+                "severity": "critical" if alert["action"] == "block" else "warning",
+                "source": alert["adapter"],
+                "custom_details": alert,
+            },
+        }
+```
+
+`_format` is the single extension point — a payload-shape hook subclasses adapt to a service.
+
+## Delivery
+
+<CardGroup cols={2}>
+  <Card title="Background worker" icon="gears">
+    A single daemon thread, started lazily on the first alert.
+  </Card>
+  <Card title="Bounded queue" icon="gauge">
+    1000 entries. On overflow, alerts are dropped with a warning.
+  </Card>
+  <Card title="Fail-open" icon="shield-halved">
+    Delivery failures are logged and the alert is dropped. Alerting never breaks the agent.
+  </Card>
+  <Card title="Flush on session end" icon="broom">
+    `on_session_end` flushes with a 5-second deadline. With no live worker it drains
+    synchronously so nothing is lost.
+  </Card>
+</CardGroup>
+
+## Tokens never surface
+
+```python
+exporter.describe()
+# {"type": "SlackAlertExporter",
+#  "target": "https://hooks.slack.com/services/T00000/B00000/XXXX"}
+```
+
+<Info>
+  `describe()` **strips the query string** before reporting the target, so a webhook token
+  passed as `?token=…` never reaches `report()["exporters"]` or the logs.
+
+  Slack-style path-embedded secrets are still visible in the path — treat the whole webhook
+  URL as a credential regardless.
+</Info>
+
+## Composing with other sinks
+
+```python
+register_exporter(SlackAlertExporter(slack_webhook))       # denials → chat
+register_exporter(OTelSessionExporter())                   # metrics → OTLP
+register_exporter(HTTPExporter(dashboard_url, token))      # full session → dashboard
+```
+
+Each receives every event independently. A failure in one never affects another.
+
+## Sync methods
+
+Unlike `HTTPExporter` and `OTelSessionExporter`, the alert exporters' callbacks are
+**synchronous**. The adapter's fan-out handles both — `_notify_exporters` calls the method
+and only awaits when it produced a coroutine.
+
+## What to alert on
+
+<Steps>
+  <Step title="Start with denials">
+    `{"block", "escalate"}` — the verdicts that stop an action.
+  </Step>
+  <Step title="Add health events separately">
+    `capture_failure`, `subagent_orphan`, and buffer overflows mean your **evidence** has gaps.
+    Those are best watched as [OTel metrics](/docs/export/opentelemetry)
+    (`agentegrity.health_events`), not chat alerts.
+  </Step>
+  <Step title="Watch for alert volume as a policy signal">
+    A flood of `escalate` alerts usually means a policy is mistuned, not that the agent is
+    under attack. Read them, then fix the policy.
+  </Step>
+</Steps>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Enforcement and approvals" icon="hand" href="/docs/guides/enforcement-and-approvals">
+    Making those verdicts actually gate.
+  </Card>
+  <Card title="OpenTelemetry" icon="chart-line" href="/docs/export/opentelemetry">
+    Metrics and traces.
+  </Card>
+</CardGroup>

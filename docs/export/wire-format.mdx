@@ -1,0 +1,229 @@
+---
+title: "Wire format"
+description: "JSON Schema and OpenAPI 3.1 for the exporter contract — build a backend in any language."
+icon: "file-code"
+---
+
+The event stream is a published contract, not an implementation detail. Both a Python adapter
+and a TypeScript reporter emit the same shapes.
+
+<CardGroup cols={2}>
+  <Card title="JSON Schema (Draft 2020-12)" icon="brackets-curly" href="https://github.com/cogensec/agentegrity/tree/main/schemas/exporter">
+    `schemas/exporter/` — `common.json`, `session_start.json`, `event.json`, `session_end.json`
+  </Card>
+  <Card title="OpenAPI 3.1" icon="server" href="https://github.com/cogensec/agentegrity/blob/main/schemas/openapi.yaml">
+    `schemas/openapi.yaml` — the three ingest endpoints
+  </Card>
+</CardGroup>
+
+## Endpoints
+
+| Operation | Method | Path | Payload schema |
+|---|---|---|---|
+| `startSession` | `POST` | `/sessions` | `session_start.json` |
+| `appendEvent` | `POST` | `/sessions/{sessionId}/events` | `event.json` |
+| `endSession` | `POST` | `/sessions/{sessionId}/end` | `session_end.json` |
+
+<Warning>
+  **Order matters.** The ingest API rejects an event for a session it has not seen. That is why
+  `HTTPExporter` delivers on a single ordered worker thread rather than fanning out
+  concurrently.
+</Warning>
+
+## Payloads
+
+<Tabs>
+  <Tab title="session_start">
+    Required: `session_id`, `adapter_name`, `profile`.
+
+    ```json
+    {
+      "session_id": "3f2a9c1e…",
+      "adapter_name": "langchain",
+      "profile": {
+        "agent_id": "research-agent-prod",
+        "name": "research-agent",
+        "agent_type": "tool_using",
+        "capabilities": ["tool_use", "web_access"],
+        "deployment_context": "cloud",
+        "risk_tier": "high",
+        "framework": "langchain",
+        "model_provider": "anthropic",
+        "model_id": "claude-sonnet-4-20250514",
+        "metadata": {},
+        "created_at": "2026-09-10T14:20:00+00:00"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="event">
+    Required: `session_id`, `event`.
+
+    ```json
+    {
+      "session_id": "3f2a9c1e…",
+      "event": {
+        "event_type": "pre_tool_use",
+        "timestamp": "2026-09-10T14:22:31.882401+00:00",
+        "adapter_name": "langchain",
+        "data": {"tool_name": "web_search", "tool_input": {"query": "..."}},
+        "evaluation_result": {
+          "composite": 0.9245,
+          "properties": {
+            "adversarial_coherence": 1.0,
+            "environmental_portability": 0.9245,
+            "verifiable_assurance": 1.0,
+            "recovery_integrity": 0.75
+          },
+          "layer_results": [
+            {"layer_name": "adversarial", "score": 1.0, "passed": true,
+             "action": "pass", "details": {}, "latency_ms": 0.08}
+          ],
+          "timestamp": "2026-09-10T14:22:31.882401+00:00",
+          "confidence": 1.0,
+          "evaluator_version": "1.0.0",
+          "total_latency_ms": 0.23,
+          "passed": true,
+          "action": "pass"
+        }
+      }
+    }
+    ```
+
+    `evaluation_result` is `null` for events that do not trigger an evaluation.
+  </Tab>
+  <Tab title="session_end">
+    Required: `session_id`, `summary`.
+
+    ```json
+    {
+      "session_id": "3f2a9c1e…",
+      "summary": {
+        "adapter": "langchain",
+        "agent_id": "research-agent-prod",
+        "evaluations": 12,
+        "events": 18,
+        "attestation_records": 12,
+        "decision_records": 5,
+        "chain_records": 17,
+        "chain_hash_linked": true,
+        "enforce_mode": false,
+        "exporters": [{"type": "HTTPExporter", "target": "https://dashboard"}]
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Shared definitions
+
+`common.json` holds five `$defs` every payload references:
+
+| `$def` | Describes |
+|---|---|
+| `AgentProfile` | The profile snapshot |
+| `IntegrityScore` | Composite, properties, layer results, confidence, action |
+| `LayerResult` | One layer's verdict |
+| `FrameworkEvent` | Event type, timestamp, adapter, data, evaluation |
+| `SessionSummary` | The `session_end` summary |
+
+## Drift is caught in CI
+
+`tests/test_schemas.py` validates the Python `to_dict()` output against these schemas on
+every run.
+
+<Info>
+  This matters more than it sounds. Without it, a field renamed in Python drifts from the
+  schema, TypeScript clients keep emitting the old shape, and backends silently receive two
+  incompatible dialects of the same contract.
+
+  The v0.8.1 `chain_valid` → `chain_hash_linked` rename is exactly the kind of change that
+  test exists to surface.
+</Info>
+
+## Building a backend
+
+The reference receiver is a FastAPI app implementing all three endpoints and validating each
+payload with `jsonschema.Draft202012Validator`:
+
+```
+examples/exporter_receiver/
+```
+
+11 smoke tests cover the happy path (202) and validation errors (422).
+
+<Warning>
+  **Not a production backend** — in-memory store, no auth. It exists so you can adopt the wire
+  format without `agentegrity-pro`.
+</Warning>
+
+### A minimal receiver
+
+```python
+from fastapi import FastAPI, Request, HTTPException
+from jsonschema import Draft202012Validator
+import json, pathlib
+
+SCHEMAS = pathlib.Path("schemas/exporter")
+validators = {
+    name: Draft202012Validator(json.loads((SCHEMAS / f"{name}.json").read_text()))
+    for name in ("session_start", "event", "session_end")
+}
+
+app = FastAPI()
+sessions: dict[str, list] = {}
+
+def _validate(name: str, body: dict) -> None:
+    errors = sorted(validators[name].iter_errors(body), key=lambda e: e.path)
+    if errors:
+        raise HTTPException(422, detail=[e.message for e in errors])
+
+@app.post("/sessions", status_code=202)
+async def start(request: Request):
+    body = await request.json()
+    _validate("session_start", body)
+    sessions[body["session_id"]] = []
+    return {"ok": True}
+
+@app.post("/sessions/{session_id}/events", status_code=202)
+async def event(session_id: str, request: Request):
+    body = await request.json()
+    _validate("event", body)
+    if session_id not in sessions:
+        raise HTTPException(404, "unknown session")   # ordering is a contract
+    sessions[session_id].append(body["event"])
+    return {"ok": True}
+
+@app.post("/sessions/{session_id}/end", status_code=202)
+async def end(session_id: str, request: Request):
+    body = await request.json()
+    _validate("session_end", body)
+    return {"ok": True, "events": len(sessions.get(session_id, []))}
+```
+
+Add `GET /ingest/verify` returning `{"org_name": "..."}` behind Bearer auth and
+`agentegrity pro` works against it.
+
+## Emitting from another language
+
+Nothing about the format is Python-specific. Implement the three POSTs against the OpenAPI
+spec and any runtime can participate.
+
+The first-party TypeScript reporter is the worked example:
+
+```ts
+import { AgentegrityReporter } from "@agentegrity/client";
+```
+
+See [Client reference](/docs/typescript/client-reference).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Session exporters" icon="share-nodes" href="/docs/export/session-exporters">
+    The in-process protocol.
+  </Card>
+  <Card title="HTTP and pro" icon="cloud-arrow-up" href="/docs/export/http-and-pro">
+    The shipped client for this contract.
+  </Card>
+</CardGroup>

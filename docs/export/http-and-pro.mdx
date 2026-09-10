@@ -1,0 +1,178 @@
+---
+title: "HTTP export & agentegrity pro"
+description: "Stream an already-instrumented agent to a dashboard with no code change."
+icon: "cloud-arrow-up"
+---
+
+`HTTPExporter` is a stdlib-only sink that POSTs session data to any backend implementing the
+published wire format — including the commercial `agentegrity-pro` dashboard.
+
+## Two environment variables
+
+```bash
+export AGENTEGRITY_TOKEN=agk_live_…
+export AGENTEGRITY_EXPORTER_URL=https://your-dashboard
+```
+
+Adapters constructed after these are set **self-attach** an `HTTPExporter`. Nothing in your
+agent changes.
+
+| Variable | Purpose |
+|---|---|
+| `AGENTEGRITY_TOKEN` | Ingest token, sent as a Bearer credential |
+| `AGENTEGRITY_EXPORTER_URL` | Backend origin |
+| `AGENTEGRITY_URL` | Alias for the above |
+
+Both must be present. With either missing, nothing attaches and the SDK stays fully local.
+
+<Info>
+  These variables were **inert before v0.10.0** — they existed but activated nothing. If you
+  set them on an older version expecting streaming, you got silence.
+</Info>
+
+## The pro CLI
+
+```bash
+# verify the connection
+agentegrity pro --ingest-token agk_live_… --url https://your-dashboard --push
+
+# run your agent with streaming enabled
+agentegrity pro --ingest-token agk_live_… --url https://your-dashboard -- python my_agent.py
+```
+
+<Steps>
+  <Step title="Verify first">
+    The CLI calls `GET /ingest/verify` with the token **before** anything is streamed, and
+    prints which workspace it belongs to.
+
+    ```text
+    connected to https://your-dashboard (workspace: acme-research)
+    ```
+
+    That turns an opaque token into visible proof it points at the workspace you expect.
+  </Step>
+  <Step title="Then exec">
+    With `-- <command>`, the CLI sets `AGENTEGRITY_TOKEN` / `AGENTEGRITY_EXPORTER_URL` and
+    `execvp`s your command. Adapters constructed inside it self-attach.
+
+    This is what lets `agentegrity pro` wrap an agent it did not write.
+  </Step>
+</Steps>
+
+### Error messages that tell you what to do
+
+| Situation | Message |
+|---|---|
+| No token | `no ingest token. Pass --ingest-token or set AGENTEGRITY_TOKEN. Mint one in Settings -> Ingest Tokens.` |
+| HTTP 401 | `token rejected. Mint a fresh one in Settings -> Ingest Tokens.` |
+| HTTP 404 | `<url> has no /ingest/verify — is this an agentegrity-pro backend, and is it up to date?` |
+| Unreachable | `cannot reach <url>: <reason>` |
+| Command missing | exit `127` |
+
+## Explicit registration
+
+```python
+from agentegrity import HTTPExporter
+from agentegrity.openai_agents import register_exporter
+
+register_exporter(HTTPExporter("https://your-dashboard", "agk_live_…", timeout=5.0))
+```
+
+Usually unnecessary — the environment path covers most deployments.
+
+## Delivery semantics
+
+<CardGroup cols={2}>
+  <Card title="Ordered" icon="list-ol">
+    Single background daemon thread. The ingest API rejects an event for a session it has not
+    seen yet, so ordering is a correctness requirement, not a nicety.
+  </Card>
+  <Card title="Fail-open" icon="shield-halved">
+    A dashboard outage never surfaces in the agent. Failures are logged, never raised.
+  </Card>
+  <Card title="Bounded" icon="gauge">
+    1000-entry queue. On overflow, events are **dropped** with a warning carrying a running
+    drop count.
+  </Card>
+  <Card title="Non-blocking" icon="bolt">
+    `_enqueue` uses `put_nowait` — it never blocks the caller's event loop.
+  </Card>
+</CardGroup>
+
+At-exit flush runs with a 5-second deadline.
+
+<Warning>
+  **Drops are silent to the agent and loud in the log.** If your dashboard is slow enough to
+  fill a 1000-entry queue, you lose events. Watch for
+  `agentegrity exporter: queue full, dropped … (N total)` — the running total is the signal.
+</Warning>
+
+## Endpoints
+
+| Method | Path | Payload |
+|---|---|---|
+| `POST` | `/sessions` | `{session_id, adapter_name, profile}` |
+| `POST` | `/sessions/{id}/events` | `{session_id, event}` |
+| `POST` | `/sessions/{id}/end` | `{session_id, summary}` |
+| `GET` | `/ingest/verify` | — (used by `agentegrity pro`) |
+
+Full definitions in [wire format](/docs/export/wire-format).
+
+## The framework backfill
+
+`on_session_start` fills in `profile["framework"]` from the adapter name when the caller left
+it unset, copying rather than mutating your dict. Without it the dashboard shows an
+unidentified agent even though the adapter knew exactly which framework it was instrumenting.
+
+## Attaching is never silent
+
+```python
+logger.info("agentegrity: streaming session data to %s (configured by %s)",
+            exporter.base, ENV_URL)
+```
+
+```python
+report()["exporters"]
+# [{"type": "HTTPExporter", "target": "https://your-dashboard"}]
+```
+
+<Info>
+  The INFO log is a convenience — Python's default level is WARNING and will swallow it. The
+  **durable** disclosure is the `exporters` entry in `get_summary()`, which is why that field
+  exists.
+
+  `describe()` reports the destination origin so an operator can see *where* data is going. It
+  **never** includes the bearer token, because the summary is itself serialized to the sink and
+  into logs.
+</Info>
+
+## Running a backend
+
+The reference receiver in `examples/exporter_receiver/` is a FastAPI app implementing all
+three endpoints and validating each payload against `schemas/exporter/*.json` with
+`jsonschema.Draft202012Validator`.
+
+<Warning>
+  It is **not a production backend** — in-memory store, no auth. It exists so you can adopt the
+  wire format without `agentegrity-pro`.
+</Warning>
+
+For the commercial dashboard:
+
+```bash
+docker compose up
+```
+
+then set the two environment variables on the agent. See
+[agentegrity-pro](https://github.com/cogensec/agentegrity-pro).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Wire format" icon="file-code" href="/docs/export/wire-format">
+    Build your own backend.
+  </Card>
+  <Card title="OpenTelemetry" icon="chart-line" href="/docs/export/opentelemetry">
+    Traces and metrics instead of HTTP.
+  </Card>
+</CardGroup>

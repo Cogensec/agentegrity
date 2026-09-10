@@ -1,0 +1,158 @@
+---
+title: "Claude Code plugin"
+description: "In-process integrity verification for every Claude Code tool call, with a verifiable per-session decision chain."
+icon: "terminal"
+---
+
+Every tool call in a Claude Code session passes through a `PreToolUse` hook that evaluates it
+locally — no backend, no network round-trip, no GPU.
+
+<Warning>
+  Marked **experimental** in STATUS.md. The hook, the decision chain, the status command, and
+  the marketplace packaging are all 🧪. Treat it as a measurement seam with verifiable
+  provenance, not a guarantee.
+</Warning>
+
+## Install
+
+```bash
+pip install agentegrity        # the hook imports it at evaluation time
+```
+
+Then, inside Claude Code:
+
+```
+/plugin marketplace add cogensec/agentegrity
+/plugin install agentegrity@agentegrity
+```
+
+Check the wiring with `/agentegrity-status`, which reports importability, mode, risk tier, and
+per-session record counts.
+
+## What it evaluates
+
+<Steps>
+  <Step title="Adversarial scan of tool arguments">
+    The 32-pattern taxonomy, **minus the structure-cue patterns** that would false-positive on
+    ordinary code. `boundary_marker_injection` matching `### SYSTEM ###` would fire on half the
+    Markdown a coding agent touches.
+  </Step>
+  <Step title="MCP-aware governance gating">
+    Sensitive tool names match exactly, by glob, or by MCP suffix. `file_delete` in the
+    sensitive set also gates `mcp__filesystem__file_delete`; `mcp__db__*` gates a whole server.
+  </Step>
+  <Step title="Verdict mapped to the permission flow">
+    **allow** — the hook stays silent.
+    **ask** — inline approval with the reason.
+    **deny** — blocked before the tool runs.
+  </Step>
+  <Step title="Decision recorded">
+    A hash-linked `DecisionRecord` is appended to a per-session chain.
+  </Step>
+</Steps>
+
+## The decision chain
+
+```
+~/.agentegrity/claude-code/<session>.chain.json
+```
+
+```bash
+agentegrity verify-decisions ~/.agentegrity/claude-code/<session>.chain.json
+```
+
+<Info>
+  The session itself becomes verifiable evidence: what Claude Code was asked to do, what the
+  verdict was, and in what order — hash-linked so a later edit is detectable.
+</Info>
+
+<Warning>
+  **Unsigned in v1** (self-vouched). Signing lands with the `KeyProvider` work. The chain proves
+  internal consistency, not authorship — see
+  [Signing and keys](/docs/guides/signing-and-keys).
+</Warning>
+
+## Configuration
+
+All optional:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_CC_MODE` | `enforce` | `alert` records verdicts but never blocks or asks |
+| `AGENTEGRITY_CC_DISABLED` | unset | `1` disables the hook entirely |
+| `AGENTEGRITY_CC_RISK_TIER` | `high` | Profile risk tier for governance gating |
+| `AGENTEGRITY_CC_CHAIN_DIR` | `~/.agentegrity/claude-code` | Decision-chain directory |
+
+<Note>
+  `AGENTEGRITY_CC_RISK_TIER` defaults to `high` specifically so `GOV-001` is active — a coding
+  agent with filesystem and shell access is a high-risk agent by any reasonable reading.
+</Note>
+
+### A dry run first
+
+```bash
+export AGENTEGRITY_CC_MODE=alert
+```
+
+In `alert` mode the chain records what the verdict **would have been**, so a dry run produces
+the same auditable evidence as enforcement without interrupting anyone. Read a week of it,
+then decide whether to enforce.
+
+## Fail-open
+
+The hook stays silent and Claude Code's normal permission flow decides when:
+
+- `agentegrity` is not importable for the `python3` on PATH
+- the hook payload is malformed
+- chain persistence fails
+
+A fail-open event is logged to stderr, and `/agentegrity-status` reports it.
+
+<Warning>
+  Fail-open means **a broken install silently stops protecting you**. `/agentegrity-status` is
+  how you find out. Run it after any Python environment change.
+</Warning>
+
+## Performance
+
+The full evaluation runs in the hook, typically **single-digit milliseconds** after
+interpreter startup. Interpreter startup dominates — the hook has a 20-second timeout
+configured, which is generous headroom rather than an expected duration.
+
+## What it is not
+
+<Warning>
+  The hook evaluates tool **calls**, not the model's reasoning. Its regex tier only catches the
+  attack shapes it knows.
+
+  See [STATUS.md](https://github.com/cogensec/agentegrity/blob/main/STATUS.md) for published
+  benchmark numbers, including the weak ones, and
+  [Limitations](/docs/concepts/limitations) for what content-only detection structurally cannot
+  do.
+</Warning>
+
+## Plugin layout
+
+```
+integrations/claude-code/
+├── .claude-plugin/plugin.json
+├── hooks/
+│   ├── hooks.json                 # PreToolUse matcher, 20s timeout
+│   └── pretooluse.py              # the hook
+└── commands/
+    └── agentegrity-status.md      # /agentegrity-status
+```
+
+The root `.claude-plugin/marketplace.json` is what makes
+`/plugin marketplace add cogensec/agentegrity` work.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Decision provenance" icon="code-branch" href="/docs/concepts/decision-provenance">
+    What the chain records.
+  </Card>
+  <Card title="Verifying chains" icon="circle-check" href="/docs/guides/verifying-chains">
+    Checking a session after the fact.
+  </Card>
+</CardGroup>
