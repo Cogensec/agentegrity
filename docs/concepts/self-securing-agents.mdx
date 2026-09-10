@@ -1,0 +1,157 @@
+---
+title: "Self-securing agents"
+description: "The thesis: security that lives inside the agent's decision loop, travels with it, and can be proven."
+icon: "shield"
+---
+
+Agentegrity rests on one distinction. Everything else follows from it.
+
+<CardGroup cols={2}>
+  <Card title="Exogenous security" icon="border-all">
+    Applied to the agent from **outside** its decision architecture. Guardrails, I/O filters,
+    policy wrappers, inference-time safety layers. Does not alter the agent's internal
+    reasoning, and does not persist when the control is removed or bypassed.
+  </Card>
+  <Card title="Intrinsic security" icon="atom">
+    Embedded **within** the agent's own architecture, reasoning chain, and behavioral
+    framework. Operates inside the decision loop, travels with the agent across
+    environments, and persists without external enforcement.
+  </Card>
+</CardGroup>
+
+The failure mode this exists to eliminate is **guardrail dependency**: an agent whose
+security relies entirely on exogenous controls, leaving no residual defense when those
+controls are removed, bypassed, or misconfigured.
+
+<Note>
+  An agent with guardrail dependency has an agentegrity score approaching zero regardless of
+  how sophisticated its external protections are. That is not a rhetorical flourish — it is
+  what the scoring actually does, because the measurements are taken inside the decision
+  process where exogenous controls are not visible.
+</Note>
+
+## Three capabilities, held simultaneously
+
+### Self-defense
+
+The agent maintains coherent reasoning under adversarial pressure **across every input
+channel** — not just the prompt.
+
+The channel list is derived from the agent's declared capabilities, so an agent with
+`memory_access` is evaluated on memory reads whether or not you remembered to think about
+that surface:
+
+| Capability | Channel it opens |
+|---|---|
+| *(always)* | `direct_prompt` |
+| `tool_use` | `tool_responses` |
+| `memory_access` | `memory_reads` |
+| `multi_agent_comm` | `peer_messages` |
+| `web_access` | `web_content` |
+| `code_execution` | `code_outputs` |
+| `physical_actuation` | `sensor_inputs` |
+
+The adversarial layer additionally scans `reasoning`, `tool_definitions` (MCP tool-poisoning
+lives in the metadata, visible before any tool runs), `retrieved_documents`,
+`shared_memory`, and `broadcast_channels`.
+
+Prevents: goal hijacking, prompt injection, indirect injection via retrieved content, tool
+output poisoning, MCP tool poisoning.
+
+### Self-stability
+
+The agent monitors its own behavioral drift against an established baseline and detects
+internal state corruption.
+
+The insidious property of **behavioral drift** is that it evades point-in-time testing. An
+agent that passes every test on Monday and every test on Friday can still have moved
+steadily across the week. The cortical layer computes Jensen-Shannon distance between the
+baseline and current action/tool distributions, gated by a minimum-sample guard so a
+1-vs-1 comparison cannot produce a "drifted" verdict.
+
+Prevents: slow-drift attacks, memory poisoning, gradual goal redirection, identity erosion.
+
+### Self-recovery
+
+The agent detects when its integrity has been compromised and restores itself to a
+known-good state.
+
+Verification here is deliberately structural: does the profile **declare** recovery
+capabilities (`state_restore`, `checkpoint`, `rollback`, `session_reset`,
+`peer_quarantine`)? Is a checkpoint backend attached? Is the attestation chain continuous?
+Has the score degraded persistently over a window rather than spiking once?
+
+Prevents: persistent compromise, undetected lateral movement, state pollution across
+sessions.
+
+## Capability is the goal; verification is the method
+
+This is the design principle that keeps the project honest in both directions.
+
+<Steps>
+  <Step title="Without the capability, the score is theater">
+    A number attached to an agent that cannot actually defend itself is worse than no number,
+    because it converts an unknown into a false positive assurance.
+  </Step>
+  <Step title="Without the verification, the capability is unprovable">
+    "We built it to be robust" is not evidence. Neither is "we monitored it and it looked
+    fine." Both are claims about a process, not about a state.
+  </Step>
+  <Step title="So the framework does both">
+    Layers verify capability. Attestation makes the verification independently checkable.
+    Neither half is useful alone.
+  </Step>
+</Steps>
+
+## Defense in depth, not defense in replacement
+
+Agentegrity does not compete with your guardrails, WAF, network controls, or runtime
+monitors. Those operate at boundaries. Agentegrity operates **inside** the decision process,
+where those controls have no visibility.
+
+```
+     ┌─────────────────────────────────────────────┐
+     │  Exogenous controls (guardrails, WAF, DLP)  │
+     │  ┌───────────────────────────────────────┐  │
+     │  │   Agent process                       │  │
+     │  │   ┌─────────────────────────────┐     │  │
+     │  │   │  Agentegrity: 4 layers on   │     │  │
+     │  │   │  every decision boundary    │     │  │
+     │  │   └─────────────────────────────┘     │  │
+     │  └───────────────────────────────────────┘  │
+     └─────────────────────────────────────────────┘
+```
+
+The two are complementary. A prompt injection that a perimeter filter misses because it
+arrived inside a retrieved document is exactly the case where an in-process channel scan
+still sees it.
+
+## Cryptographic, not observational
+
+"We monitored the agent and it looked fine" is not assurance.
+
+Attestation records are signed, hash-chained, and independently verifiable. Verification
+means you can **prove what the agent's state was at a point in time**, not merely that
+someone was watching. See [Attestation chain](/docs/concepts/attestation-chain).
+
+## Vocabulary
+
+The full vocabulary of the discipline — *agentegrity*, *adversarial coherence*, *behavioral
+drift rate*, *cascade compromise*, *prompt-to-physical exploit*, *agentegrity posture* — is
+defined precisely in the
+[Glossary](https://github.com/cogensec/agentegrity/blob/main/agentegrity-glossary.md).
+Terms novel to the discipline are marked with a dagger.
+
+The founding statement of the discipline is the
+[Manifesto](https://github.com/cogensec/agentegrity/blob/main/MANIFESTO.md).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="The four layers" icon="layer-group" href="/docs/concepts/four-layers">
+    How each capability is verified.
+  </Card>
+  <Card title="Properties and scoring" icon="calculator" href="/docs/concepts/properties-and-scoring">
+    From layer output to a composite number.
+  </Card>
+</CardGroup>

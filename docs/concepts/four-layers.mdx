@@ -1,0 +1,215 @@
+---
+title: "The four layers"
+description: "Adversarial, cortical, governance, recovery — what each verifies, in what order, and how they compose."
+icon: "layer-group"
+---
+
+Verification is structured as four layers. Each addresses a different dimension of
+integrity; together they form a complete envelope around the agent's decision process.
+
+```
+┌─────────────────────────────────────────────┐
+│            RECOVERY LAYER                   │
+│   Compromise detection · Continuity ·       │
+│   Sustained-degradation tracking            │
+├─────────────────────────────────────────────┤
+│           GOVERNANCE LAYER                  │
+│   Policy enforcement · Human oversight ·    │
+│   Compliance mapping · Audit trails         │
+├─────────────────────────────────────────────┤
+│            CORTICAL LAYER                   │
+│   Reasoning consistency · Memory checks ·   │
+│   Behavioral baselines · Drift detection    │
+├─────────────────────────────────────────────┤
+│           ADVERSARIAL LAYER                 │
+│   Attack surface mapping · Threat           │
+│   detection · Coherence scoring             │
+└─────────────────────────────────────────────┘
+```
+
+## At a glance
+
+| Layer | Verifies | Publishes | Can emit |
+|---|---|---|---|
+| [Adversarial](/docs/layers/adversarial) | Self-defense | `coherence_score` → **AC** | `pass` `alert` `block` |
+| [Cortical](/docs/layers/cortical) | Self-stability | `portability_score` → **EP** | `pass` `alert` `block` `escalate` |
+| [Governance](/docs/layers/governance) | Policy + audit | `assurance_score` → **VA** | `pass` `alert` `escalate` `block` |
+| [Recovery](/docs/layers/recovery) | Self-recovery | `recovery_score` → **RI** | `pass` `alert` `escalate` |
+
+## The evaluation flow
+
+Every agent action passes through all four in order.
+
+<Steps>
+  <Step title="Adversarial — threat detection" icon="crosshairs">
+    Maps the attack surface from the profile's capabilities, scans every input channel
+    against the pattern taxonomy plus any custom detectors, runs the behavioral
+    `ToolSequenceDetector`, and computes an adversarial coherence score.
+
+    **Blocks** when any threat reaches severity ≥ 0.90 and `block_on_critical` is on.
+  </Step>
+
+  <Step title="Cortical — cognitive integrity" icon="brain">
+    Validates the reasoning chain for internal conflict, inspects memory provenance, and
+    computes behavioral drift against the baseline.
+
+    **Escalates** on a detected reasoning conflict. **Blocks** when drift exceeds twice the
+    tolerance.
+  </Step>
+
+  <Step title="Governance — policy and audit" icon="gavel">
+    Evaluates the candidate action against every rule in the active policy set, writes a
+    hash-stamped audit entry, and calls the escalation callback for approvals.
+
+    **Blocks** on any `DENY` rule. **Escalates** on any `REQUIRE_APPROVAL` rule.
+  </Step>
+
+  <Step title="Recovery — continuity" icon="rotate-left">
+    Checks baseline presence, sustained score degradation over a window, declared recovery
+    capabilities, attestation-chain continuity, and (multi-agent) correlated peer degradation.
+
+    **Escalates** when the attestation chain is not intact.
+  </Step>
+
+  <Step title="Attest" icon="signature">
+    An `AttestationRecord` is built from the score, signed if a key is configured, and
+    appended to the chain.
+  </Step>
+</Steps>
+
+<Note>
+  With `fail_fast=True` (the default), evaluation **stops at the first layer returning
+  `block`**. That short-circuit lowers `IntegrityScore.confidence`, because coverage is
+  `layers_run / layers_configured` — the score correctly reports that it saw an incomplete
+  picture.
+</Note>
+
+## Constructing the pipeline
+
+The default pipeline:
+
+```python
+from agentegrity.layers import default_layers
+from agentegrity import IntegrityEvaluator
+
+evaluator = IntegrityEvaluator(layers=default_layers())
+```
+
+`default_layers()` accepts the knobs you most often want to move:
+
+```python
+default_layers(
+    coherence_threshold=0.70,        # AdversarialLayer
+    drift_tolerance=0.15,            # CorticalLayer
+    policy_set="enterprise-default", # GovernanceLayer
+    prefer_llm=False,                # swap in CorticalLLMLayer
+    api_key=None,                    # Anthropic key for the LLM path
+)
+```
+
+Or build it explicitly when you need per-layer configuration:
+
+```python
+from agentegrity import IntegrityEvaluator
+from agentegrity.layers import (
+    AdversarialLayer, CorticalLayer, GovernanceLayer, RecoveryLayer,
+)
+
+evaluator = IntegrityEvaluator(
+    layers=[
+        AdversarialLayer(coherence_threshold=0.85, block_on_critical=True),
+        CorticalLayer(drift_tolerance=0.10, min_drift_samples=50),
+        GovernanceLayer(policy_set="strict"),
+        RecoveryLayer(degradation_window=20, degradation_threshold=0.10),
+    ],
+    fail_fast=True,
+)
+```
+
+## Layers are a Protocol
+
+Anything satisfying this shape is a layer. No inheritance required.
+
+```python
+class Layer(Protocol):
+    @property
+    def name(self) -> str: ...
+    def evaluate(self, profile, context: dict | None = None) -> LayerResult: ...
+```
+
+The async variant adds `aevaluate`. `AsyncIntegrityEvaluator` accepts a mix of both and
+wraps sync layers in `asyncio.to_thread`; with `fail_fast=False` it runs every layer
+concurrently via `asyncio.gather`.
+
+A custom layer joins the property system simply by publishing one of the four well-known
+keys in its `details` dict — see
+[Properties and scoring](/docs/concepts/properties-and-scoring).
+
+## The evaluation context
+
+Layers read a single `context` dict. Adapters build it from their internal buffer, so you
+rarely construct one by hand — but knowing the keys tells you what each layer can see.
+
+```python
+{
+  "input": "latest user prompt",
+  "tool_outputs": [{"tool": "search", "output": "..."}],
+  "reasoning_chain": ["step 1", "step 2"],
+  "goals": [], "instructions": [], "memory_reads": [],
+  "action_distribution": {"tool_call": 12, "user_prompt": 3},
+  "tool_usage": {"web_search": 9, "database_write": 3},
+  "action": {"type": "tool_call", "tool": "web_search",
+             "arguments": {"q": "..."}},
+  "tool_call_history": ["web_search", "read_email", "http_post"],
+  "peer_messages": [...],
+  "topology_context": {                      # multi-agent only
+     "topology": {...}, "role": "member",
+     "peer_messages": [...], "shared_memory": [...],
+     "broadcast_messages": [...],
+     "peer_attestations": [...], "peer_score_history": {...},
+  },
+}
+```
+
+<Warning>
+  Agent-supplied tool arguments always live nested under `action["arguments"]`, never spread
+  flat. This is a security boundary, not a style choice: before v0.9, a prompt-injected agent
+  could name a tool argument `tool` and shadow the field `GOV-001` matches on, skipping the
+  approval gate entirely. Custom `PolicyRule` conditions must read call-derived values from
+  the nested dict.
+</Warning>
+
+## Multi-agent extensions
+
+When a [topology](/docs/concepts/multi-agent-topology) is declared, the same four layers
+gain extra checks automatically — no new layer, no new pipeline:
+
+| Layer | Multi-agent extension |
+|---|---|
+| Adversarial | Scans `shared_memory` and `broadcast_channels`; `peer_coercion` pattern family; peer-authority check flagging senders outside the declared topology |
+| Cortical | Per-role behavioural baselines keyed `(agent_id, role)`, catching a member acting outside its declared role |
+| Governance | `GOV-004` gates on topology member count |
+| Recovery | Cascade detection over `peer_score_history`; `peer_quarantine` capability |
+
+Single-agent deployments are unaffected — every multi-agent check silently no-ops when no
+topology is declared.
+
+## Specification
+
+The normative definitions live in the repository and are the source of truth:
+
+<CardGroup cols={2}>
+  <Card title="Specification" icon="file-contract" href="https://github.com/cogensec/agentegrity/blob/main/spec/SPECIFICATION.md">
+    Properties, layer contracts, conformance levels, maturity model.
+  </Card>
+  <Card title="Layer specs" icon="folder-tree" href="https://github.com/cogensec/agentegrity/tree/main/spec/layers">
+    Normative per-layer architecture documents.
+  </Card>
+</CardGroup>
+
+<Info>
+  The latency targets in the specification (10 ms threat detection, 100 ms full pipeline) are
+  **design targets for spec v1.0**. Measured reality today is far under them — per-layer p95
+  of 0.01–0.20 ms and full-pipeline p95 of 0.23 ms — but that is without LLM-backed layers,
+  which change the picture entirely.
+</Info>

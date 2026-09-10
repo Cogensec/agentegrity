@@ -1,0 +1,189 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Agentegrity",
+  "description": "The open standard for AI agent integrity. Evaluate, enforce, and prove that autonomous agents are adversarially coherent, environmentally portable, and verifiably assured.",
+  "colors": {
+    "primary": "#1E3A5F",
+    "light": "#7BA7D1",
+    "dark": "#12253C"
+  },
+  "favicon": "/assets/logo.png",
+  "logo": {
+    "light": "/assets/logo.png",
+    "dark": "/assets/logo-dark.png",
+    "href": "https://github.com/cogensec/agentegrity"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "rocket",
+            "pages": [
+              "docs/get-started/introduction",
+              "docs/get-started/installation",
+              "docs/get-started/quickstart",
+              "docs/get-started/first-attestation",
+              "docs/get-started/reading-results"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "icon": "lightbulb",
+            "pages": [
+              "docs/concepts/self-securing-agents",
+              "docs/concepts/four-layers",
+              "docs/concepts/properties-and-scoring",
+              "docs/concepts/agent-profiles",
+              "docs/concepts/attestation-chain",
+              "docs/concepts/decision-provenance",
+              "docs/concepts/multi-agent-topology",
+              "docs/concepts/threat-model",
+              "docs/concepts/limitations"
+            ]
+          },
+          {
+            "group": "The four layers",
+            "icon": "layer-group",
+            "pages": [
+              "docs/layers/adversarial",
+              "docs/layers/cortical",
+              "docs/layers/governance",
+              "docs/layers/recovery"
+            ]
+          },
+          {
+            "group": "Python frameworks",
+            "icon": "python",
+            "pages": [
+              "docs/frameworks/overview",
+              "docs/frameworks/claude-agent-sdk",
+              "docs/frameworks/langchain",
+              "docs/frameworks/openai-agents",
+              "docs/frameworks/crewai",
+              "docs/frameworks/google-adk",
+              "docs/frameworks/autogen",
+              "docs/frameworks/agno",
+              "docs/frameworks/bedrock-agents"
+            ]
+          },
+          {
+            "group": "TypeScript",
+            "icon": "js",
+            "pages": [
+              "docs/typescript/overview",
+              "docs/typescript/framework-packages",
+              "docs/typescript/multi-agent",
+              "docs/typescript/client-reference"
+            ]
+          },
+          {
+            "group": "Guides",
+            "icon": "book",
+            "pages": [
+              "docs/guides/enforcement-and-approvals",
+              "docs/guides/custom-detectors",
+              "docs/guides/custom-policies",
+              "docs/guides/baselines-and-drift",
+              "docs/guides/checkpoints-and-recovery",
+              "docs/guides/signing-and-keys",
+              "docs/guides/verifying-chains",
+              "docs/guides/compliance-reports",
+              "docs/guides/semantic-layers"
+            ]
+          },
+          {
+            "group": "Export & telemetry",
+            "icon": "share-nodes",
+            "pages": [
+              "docs/export/session-exporters",
+              "docs/export/http-and-pro",
+              "docs/export/opentelemetry",
+              "docs/export/alerts",
+              "docs/export/wire-format",
+              "docs/export/telemetry"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "icon": "plug",
+            "pages": [
+              "docs/integrations/claude-code"
+            ]
+          },
+          {
+            "group": "CLI",
+            "icon": "terminal",
+            "pages": [
+              "docs/cli/overview"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Python API",
+            "icon": "code",
+            "pages": [
+              "docs/api/overview",
+              "docs/api/profile",
+              "docs/api/evaluation",
+              "docs/api/attestation",
+              "docs/api/decisions-topology",
+              "docs/api/layers",
+              "docs/api/adapters-exporters",
+              "docs/api/client-runtime"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Specification",
+        "href": "https://github.com/cogensec/agentegrity/blob/main/spec/SPECIFICATION.md"
+      },
+      {
+        "label": "Status",
+        "href": "https://github.com/cogensec/agentegrity/blob/main/STATUS.md"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/cogensec/agentegrity"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/cogensec/agentegrity",
+      "website": "https://github.com/cogensec"
+    },
+    "links": [
+      {
+        "header": "Project",
+        "items": [
+          { "label": "Manifesto", "href": "https://github.com/cogensec/agentegrity/blob/main/MANIFESTO.md" },
+          { "label": "Specification", "href": "https://github.com/cogensec/agentegrity/blob/main/spec/SPECIFICATION.md" },
+          { "label": "Glossary", "href": "https://github.com/cogensec/agentegrity/blob/main/agentegrity-glossary.md" },
+          { "label": "Status", "href": "https://github.com/cogensec/agentegrity/blob/main/STATUS.md" }
+        ]
+      },
+      {
+        "header": "Packages",
+        "items": [
+          { "label": "PyPI", "href": "https://pypi.org/project/agentegrity/" },
+          { "label": "npm", "href": "https://www.npmjs.com/org/agentegrity" },
+          { "label": "Changelog", "href": "https://github.com/cogensec/agentegrity/blob/main/CHANGELOG.md" },
+          { "label": "Security policy", "href": "https://github.com/cogensec/agentegrity/blob/main/SECURITY.md" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,155 @@
+---
+title: "Introduction"
+sidebarTitle: "Introduction"
+description: "Agentegrity measures whether an agent can defend, stabilize, and recover itself, and produces cryptographic proof of the answer."
+icon: "shield-check"
+---
+
+Every AI security tool you already run protects agents **from the outside**. Guardrails
+filter inputs. Runtime monitors watch outputs. Policy engines enforce rules at the
+boundary. All of that is necessary, and Agentegrity does not replace any of it.
+
+Agentegrity answers a different question: **does the agent itself have the structural
+integrity to stay coherent when those external controls cannot reach inside its decision
+process?**
+
+<Card title="Agentegrity" icon="triangle-exclamation" horizontal>
+  *agent + integrity* — the discipline of building AI agents that can defend themselves,
+  stabilize themselves, and recover themselves, and then verifying that they actually can.
+</Card>
+
+This library is the reference implementation of that verification. It runs inside your
+agent's process, evaluates every decision boundary through four layers, and emits a
+signed, hash-linked chain of records you can hand to an auditor.
+
+## Why the composition layer
+
+Frontier labs ship better base models on a regular cadence, and each release lowers the
+rate at which the underlying model produces unsafe output in isolated benchmarks. That is
+real progress. It does not solve the agent security problem.
+
+Enterprises do not deploy base models. They deploy **compositions**: a base model wrapped
+in system prompts, augmented with retrieval over private data, given tools that touch
+customer systems, equipped with persistent memory, orchestrated through planning loops,
+and dropped into environments producing inputs the model was never trained against.
+
+Every capability gain in the underlying model enables a more ambitious composition with
+more attack surface. The composition layer is where security failures happen, and the
+composition layer is not what the model labs are improving.
+
+Agentegrity sits at the composition layer specifically. Its measurements are about whether
+the **assembled agent** has the structural properties required to maintain integrity under
+adversarial pressure, across deployment contexts, and over time.
+
+## The three self-securing capabilities
+
+A self-securing agent holds three properties at once. Each is a capability the agent has,
+not a control imposed from outside.
+
+| Capability | What the agent does | What this prevents |
+|---|---|---|
+| **Self-defense** | Maintains coherent reasoning under adversarial pressure across every input channel | Goal hijacking, prompt injection, indirect injection via retrieved content, tool output poisoning |
+| **Self-stability** | Monitors its own behavioral drift against a baseline and detects internal state corruption | Slow-drift attacks, memory poisoning, gradual goal redirection, identity erosion |
+| **Self-recovery** | Detects when its integrity is compromised and restores a known-good state | Persistent compromise, undetected lateral movement, state pollution across sessions |
+
+[The four layers](/docs/concepts/four-layers) are how the framework verifies each one.
+
+## What you get in three lines
+
+<CodeGroup>
+
+```python Claude Agent SDK
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+from agentegrity.claude import hooks, report
+
+async with ClaudeSDKClient(options=ClaudeAgentOptions(hooks=hooks())) as sdk:
+    await sdk.query("Summarize the latest LLM safety papers")
+print(report())
+```
+
+```python LangChain / LangGraph
+from agentegrity.langchain import instrument_chain, report
+
+chain = instrument_chain(my_chain)
+chain.invoke({"input": "..."})
+print(report())
+```
+
+```python Any framework
+import agentegrity
+
+runtime = agentegrity.init()             # detect + attach
+chain = runtime.instrument(my_chain)
+chain.invoke({"input": "..."})
+print(runtime.report())
+agentegrity.shutdown()
+```
+
+```ts TypeScript
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { hooks } from "@agentegrity/claude-sdk";
+
+await query({ prompt: "hi", options: { hooks: hooks() } });
+```
+
+</CodeGroup>
+
+Fourteen zero-config adapters — eight in Python, six in TypeScript — produce the same
+evaluator pipeline, the same event stream, and the same signed attestation chain.
+
+## What it is, precisely
+
+<AccordionGroup>
+  <Accordion title="What it does" icon="circle-check">
+    Provides a Python implementation of the four-layer verification architecture defined in
+    the [Agentegrity Specification](https://github.com/cogensec/agentegrity/blob/main/spec/SPECIFICATION.md).
+    It computes integrity scores from real evaluation runs, generates cryptographically
+    signed attestation records, builds tamper-evident chains, and produces structured audit
+    output for governance workflows.
+
+    Evaluation runs locally with zero required dependencies. Extension points exist for
+    custom threat detectors, custom policy rules, and custom validators.
+  </Accordion>
+
+  <Accordion title="What it deliberately is not" icon="circle-xmark">
+    It is not a guardrail. It does not block agent actions on its own — when an action is
+    blocked, that is the result of an explicit governance policy, not inferred risk.
+
+    It is not a runtime enforcement layer competing with WAF-style products. It is not a
+    hosted service. It is a measurement and verification library, and everything it does
+    serves the goal of producing evidence that an agent has (or lacks) the structural
+    properties of a self-securing system.
+  </Accordion>
+
+  <Accordion title="Where it is weak" icon="triangle-exclamation">
+    The adversarial layer's first tier is a regex taxonomy. It scores 1.000 TPR / 0.000 FPR
+    on InjecAgent (N=2,108) — but those patterns were **calibrated on that suite**, so read
+    it as in-distribution recall. On AgentDojo's goal-text projection it scores 0.286 TPR /
+    0.113 FPR, and regex cannot close that gap because separating an injected goal from a
+    legitimate user task requires session context, not content patterns.
+
+    [Limitations](/docs/concepts/limitations) states every one of these plainly, with numbers.
+  </Accordion>
+</AccordionGroup>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Install" icon="download" href="/docs/get-started/installation">
+    Pick the extra that matches your framework.
+  </Card>
+  <Card title="Quickstart" icon="bolt" href="/docs/get-started/quickstart">
+    Instrument a running agent in under five minutes.
+  </Card>
+  <Card title="The four layers" icon="layer-group" href="/docs/concepts/four-layers">
+    How verification is actually structured.
+  </Card>
+  <Card title="Limitations" icon="scale-balanced" href="/docs/concepts/limitations">
+    Read this before you trust a number.
+  </Card>
+</CardGroup>
+
+<Info>
+  Agentegrity is a Cogensec Research initiative, licensed Apache 2.0. The discipline is
+  open, the specification is open, and other implementations are welcome from any vendor.
+</Info>

@@ -1,0 +1,246 @@
+---
+title: "Decision provenance"
+description: "Capturing what the agent was about to do, and why, before it does it."
+icon: "code-branch"
+---
+
+An `AttestationRecord` says what the evaluator observed. A `DecisionRecord` says what the
+**agent** was about to do, captured at the boundary **before** the action executes.
+
+The ordering is the point. A rationale written after the fact is a story. A rationale
+hash-chained into position before execution, and committed to by the next attestation, is
+evidence.
+
+## The three boundaries
+
+Adapters capture a decision at each of these:
+
+| Boundary | Fires when | `candidate_action.type` |
+|---|---|---|
+| `pre_tool_use` | Before a tool call executes | `tool_call` |
+| `stop` | When the agent produces final output | `final_output` |
+| `subagent_start` | When a child agent starts running | `subagent_dispatch_observed` |
+| `approval` | When an escalation is put to a human | *(the action under review)* |
+
+<Note>
+  `subagent_start` is honest about itself. The parent's decision to delegate already happened
+  earlier — often at the parent's own `pre_tool_use`. So the record carries
+  `boundary_category: "lifecycle_attestation"`, telling a downstream verifier this is a
+  lifecycle event recorded for completeness, not a deliberation captured at the moment of
+  choice.
+</Note>
+
+## Anatomy
+
+```python
+DecisionRecord(
+    agent_id="25b4742d-...",
+    decision_point="pre_tool_use",
+    candidate_action={
+        "type": "tool_call",
+        "tool_name": "send_email",
+        "arguments": {"to": "...", "body": "..."},
+    },
+    decision_inputs=[
+        DecisionInput(channel="user_prompt",
+                      content_hash="a3f1...", summary="draft a reply to..."),
+        DecisionInput(channel="tool_output",
+                      content_hash="9b02...", summary="search: 12 results"),
+    ],
+    reasoning_chain=[],
+    rejected_alternatives=[],
+    goal_state=[],
+    capture_tier=CaptureTier.MINIMAL,
+    redacted=True,
+    chain_previous="13da867e...",
+    signature=b"...", public_key=b"...",
+    record_kind="decision",
+)
+```
+
+`DecisionRecord` mirrors `AttestationRecord` exactly — same `canonical_payload` /
+`content_hash` / `sign` / `verify` semantics, same chain-link field — so both kinds live in
+one chain with no dispatch in the chain itself.
+
+## Capture tiers
+
+How much rationale was actually available at the boundary. The tier is **inferred** from
+which fields are populated, never asserted:
+
+<CardGroup cols={3}>
+  <Card title="Tier C — MINIMAL" icon="circle">
+    Neither reasoning chain nor rejected alternatives. The record attests the candidate
+    action and its inputs.
+
+    **This is what production ships today.**
+  </Card>
+  <Card title="Tier B — PARTIAL" icon="circle-half-stroke">
+    A reasoning chain is present, but no rejected alternatives.
+  </Card>
+  <Card title="Tier A — FULL" icon="circle-dot">
+    Rejected alternatives present: the agent considered other actions and rejected them with
+    stated reasons.
+  </Card>
+</CardGroup>
+
+```python
+def infer_capture_tier(reasoning_chain, rejected_alternatives):
+    if rejected_alternatives:  return CaptureTier.FULL
+    if reasoning_chain:        return CaptureTier.PARTIAL
+    return CaptureTier.MINIMAL
+```
+
+<Warning>
+  Most adapters produce **Tier C** because frameworks expose the candidate action but not the
+  agent's internal deliberation. Tiers B and A unlock as adapter-specific deliberation
+  surfaces get wired in (Claude reasoning streams, OpenAI Responses reasoning content).
+
+  A chain full of Tier C records is not a defect — it is the framework telling you honestly
+  how much it could see.
+</Warning>
+
+## Content is hashed, not stored
+
+`DecisionInput` carries a **SHA-256 of the underlying content plus a short summary**. The
+raw text never enters the chain.
+
+```python
+DecisionInput(
+    channel="user_prompt",
+    content_hash=hashlib.sha256(prompt.encode()).hexdigest(),
+    summary=prompt[:120],
+)
+```
+
+`redacted=True` is the default and records that fact in the signed payload. You can still
+prove a specific prompt produced a specific decision — hash the prompt you hold and compare —
+without the chain itself becoming a data-exfiltration surface.
+
+The `stop` boundary uses the same treatment for final output: a content hash plus a
+120-character summary, never the full response.
+
+## Defensive serialization
+
+`candidate_action` comes from adapter payloads and can contain anything. `_json_safe`
+coerces it: sets become sorted lists, bytes become hex, dataclasses become dicts, datetimes
+become ISO strings. Anything else becomes:
+
+```json
+{"_coerced": true, "repr": "<Foo object at 0x...>"}
+```
+
+The marker means a downstream verifier can always tell a value was lossy-encoded rather than
+silently trusting a `repr`.
+
+## How attestations commit to decisions
+
+After decisions are appended, the next attestation adds one `Evidence` entry per decision
+since the last attestation:
+
+```python
+Evidence(
+    evidence_type="decision",
+    source=decision.record_id,
+    content_hash=decision.content_hash,
+    summary="pre_tool_use: minimal",
+)
+```
+
+`verify_decision_links()` then checks each pointer resolves to a real decision, positioned
+strictly **before** the attestation, whose current hash still matches. Editing a decision
+after the fact breaks the link even if you fix up the chain hashes.
+
+## Capture fails open
+
+Provenance capture must never break the agent. On any exception, `record_decision`:
+
+1. logs a warning **with** the traceback locally,
+2. emits a structured `capture_failure` `FrameworkEvent`, and
+3. returns `None` — the calling handler continues normally.
+
+The `capture_failure` event carries only `decision_point` and `exception_class`. The raw
+message is deliberately excluded: this event fans out to exporters, and framework internals
+routinely embed tokens, URLs, or PII in exception text.
+
+<Info>
+  The gap stays queryable downstream — you can see *that* capture failed and where — without
+  the failure becoming a leak.
+</Info>
+
+## Approvals become provenance
+
+Under enforcement, every consulted human approval is written to the chain as a decision at
+the `approval` boundary, with the outcome in `reasoning_chain`:
+
+```text
+outcome:approved
+approver:oncall@example.com
+timed_out:false
+requested_at:1757521830.412
+resolved_at:1757521834.907
+reason:ticket INC-4821
+```
+
+This is what the [audit report's](/docs/guides/compliance-reports) Human Approvals table
+reads, and what maps to EU AI Act Art. 14 (human oversight).
+
+<Note>
+  This capture happens on the **adapter** enforcement path. `IntegrityMonitor` consults its
+  `approval_handler` but does not itself write an approval decision record.
+</Note>
+
+## Building one manually
+
+```python
+from agentegrity.core.decision import (
+    build_decision_record, DecisionInput, RejectedAlternative,
+)
+
+record = build_decision_record(
+    agent_id=profile.agent_id,
+    decision_point="pre_tool_use",
+    candidate_action={"type": "tool_call", "tool_name": "transfer_funds",
+                      "arguments": {"amount": 5000}},
+    reasoning_chain=["invoice 4471 verified", "vendor on allowlist"],
+    rejected_alternatives=[
+        RejectedAlternative(action_summary="hold for manual review",
+                            rejection_reason="vendor pre-approved this quarter"),
+    ],
+    decision_inputs=[DecisionInput(channel="user_prompt",
+                                   content_hash=h, summary="pay invoice 4471")],
+    goal_state=["settle Q3 vendor invoices"],
+    previous_record_hash=chain.latest.content_hash if chain.latest else None,
+    signing_key=key,
+)
+chain.append(record)
+```
+
+Populating `rejected_alternatives` makes this a **Tier A** record.
+
+`IntegrityMonitor.record_decision()` mirrors the adapter-side API for agents that are not
+behind a supported framework.
+
+## Verify from the CLI
+
+```bash
+agentegrity verify-decisions --trusted-key key.pub chain.json
+```
+
+```text
+  idx  kind          boundary/score          tier      signed  verified
+    0  decision      pre_tool_use            minimal   yes     yes
+    1  attestation   attestation             -         yes     yes
+    2  decision      stop                    partial   yes     yes
+    3  attestation   attestation             -         yes     yes
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Attestation chain" icon="link" href="/docs/concepts/attestation-chain">
+    The chain both record kinds live in.
+  </Card>
+  <Card title="Enforcement and approvals" icon="hand" href="/docs/guides/enforcement-and-approvals">
+    Where approval provenance comes from.
+  </Card>
+</CardGroup>

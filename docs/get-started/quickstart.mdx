@@ -1,0 +1,238 @@
+---
+title: "Quickstart"
+description: "Instrument a running agent in two to three lines, on any of the fourteen supported frameworks."
+icon: "bolt"
+---
+
+Every adapter has the same shape: import one module, call one function, print `report()`.
+No configuration, no server, no signup.
+
+<Steps>
+  <Step title="Install the extra for your framework">
+    ```bash
+    pip install "agentegrity[claude]"    # or langchain, openai-agents, crewai, ...
+    ```
+  </Step>
+  <Step title="Attach the adapter">
+    One call. Measure-only by default — it never blocks a tool call unless you pass
+    `enforce=True`.
+  </Step>
+  <Step title="Read the session summary">
+    `report()` returns evaluation count, chain length, hash-linkage status, enforcement
+    mode, and which sinks (if any) the session streamed to.
+  </Step>
+</Steps>
+
+## Two-line start, any framework
+
+`init()` probes the environment for every framework the adapter registry knows, builds one
+adapter per detected framework on a shared client, and auto-subscribes the ones that attach
+globally.
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()              # detect + attach
+chain = runtime.instrument(my_chain)      # LangChain / LangGraph / Agno / Strands / ADK
+chain.invoke({"input": "..."})
+print(runtime.report())
+agentegrity.shutdown()                    # end sessions, flush exporters
+```
+
+`runtime.instrument(obj)` dispatches on the object's class module, so the same call handles
+a LangChain runnable, a compiled LangGraph, an Agno agent or team, a Strands agent, a Google
+ADK agent, or a CrewAI crew.
+
+Hook-style frameworks hand you their hooks object instead:
+
+```python
+runtime.adapters["claude"].create_hooks()
+runtime.adapters["openai_agents"].create_run_hooks()
+```
+
+<Note>
+  `init()` is convenience wiring only. Every adapter it builds behaves exactly as if you had
+  constructed it via `AgentegrityClient.create_adapter`. It is idempotent — a second call
+  warns and returns the existing runtime until you call `shutdown()`.
+</Note>
+
+## Per-framework, explicit
+
+The per-framework modules are the fully explicit path, and the one most people use.
+
+<Tabs>
+  <Tab title="Claude Agent SDK">
+    ```python
+    from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+    from agentegrity.claude import hooks, report
+
+    async with ClaudeSDKClient(options=ClaudeAgentOptions(hooks=hooks())) as sdk:
+        await sdk.query("Summarize the latest LLM safety papers")
+    print(report())
+    ```
+    Eight hook surfaces including `SubagentStart` / `SubagentStop`. Real enforcement via
+    the hook return value. [Full guide](/docs/frameworks/claude-agent-sdk)
+  </Tab>
+
+  <Tab title="LangChain / LangGraph">
+    ```python
+    from agentegrity.langchain import instrument_chain, instrument_graph, report
+
+    chain = instrument_chain(my_chain)
+    chain.invoke({"input": "..."})
+
+    graph = instrument_graph(my_compiled_graph)   # also declares topology
+    print(report())
+    ```
+    One adapter covers both. `instrument_graph` introspects `graph.get_graph()` to detect
+    supervisor and swarm patterns. [Full guide](/docs/frameworks/langchain)
+  </Tab>
+
+  <Tab title="OpenAI Agents">
+    ```python
+    from agents import Runner
+    from agentegrity.openai_agents import run_hooks, report
+
+    await Runner.run(agent, input="...", hooks=run_hooks())
+    print(report())
+    ```
+    Handoffs grow a `PEER_TO_PEER` topology incrementally. [Full guide](/docs/frameworks/openai-agents)
+  </Tab>
+
+  <Tab title="CrewAI">
+    ```python
+    from agentegrity.crewai import instrument, report
+
+    instrument(crew)      # or instrument() for the global event bus
+    crew.kickoff()
+    print(report())
+    ```
+    Subscribes to the CrewAI event bus; walks `crew.agents` for topology.
+    [Full guide](/docs/frameworks/crewai)
+  </Tab>
+
+  <Tab title="Google ADK">
+    ```python
+    from agentegrity.google_adk import instrument, report
+
+    instrument(agent)
+    print(report())
+    ```
+    Observation-only — ADK's `before_*` callbacks expose no veto mechanism.
+    [Full guide](/docs/frameworks/google-adk)
+  </Tab>
+
+  <Tab title="AutoGen">
+    ```python
+    from agentegrity.autogen import instrument, report
+
+    instrument()          # installs the OTel SpanProcessor
+    print(report())
+    ```
+    Consumes GenAI semconv spans; builds a `GROUP_CHAT` topology from the span hierarchy.
+    [Full guide](/docs/frameworks/autogen)
+  </Tab>
+
+  <Tab title="Agno">
+    ```python
+    from agentegrity.agno import instrument, instrument_team, report
+
+    agent = instrument(agent)
+    team  = instrument_team(team)     # walks team.members → HUB_SPOKE
+    team.run("...")
+    print(report())
+    ```
+    Real enforcement via `StopAgentRun`. [Full guide](/docs/frameworks/agno)
+  </Tab>
+
+  <Tab title="Bedrock Agents">
+    ```python
+    from agentegrity.bedrock_agents import instrument_strands, wrap_client
+
+    agent  = instrument_strands(strands_agent)   # real enforcement
+    client = wrap_client(boto_client)            # observation-only
+    ```
+    Two surfaces, one adapter. [Full guide](/docs/frameworks/bedrock-agents)
+  </Tab>
+</Tabs>
+
+Every entry point accepts the same four overrides:
+
+```python
+hooks(
+    profile=my_profile,       # AgentProfile — replaces AgentProfile.default()
+    client=my_client,         # AgentegrityClient — custom thresholds/weights
+    enforce=True,             # block on "block"; escalate fails closed
+    api_key="sk-ant-...",     # for LLM-backed layers
+)
+```
+
+<Warning>
+  Passing **any** of these builds a *new* adapter rather than reusing the module-global one.
+  That is deliberate — it lets you run independent evaluations in one process — but it means
+  the module-level `report()` will not see that adapter's session. Keep the returned adapter
+  if you need its summary.
+</Warning>
+
+## TypeScript
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { hooks } from "@agentegrity/claude-sdk";
+await query({ prompt: "hi", options: { hooks: hooks() } });
+```
+
+```ts
+import { ChatAnthropic } from "@langchain/anthropic";
+import { instrument } from "@agentegrity/langchain";
+await new ChatAnthropic({ callbacks: [instrument()] }).invoke("hi");
+```
+
+```ts
+import { streamText } from "ai";
+import { instrument } from "@agentegrity/vercel-ai";
+await streamText({ model, prompt: "hi", experimental_telemetry: instrument() });
+```
+
+All six packages re-export `report()`, `reset()`, and `registerExporter()`.
+[TypeScript overview](/docs/typescript/overview)
+
+## Score a profile without a framework
+
+For agents outside any supported framework, or one-off scoring in CI:
+
+```python
+from agentegrity import AgentegrityClient
+
+client = AgentegrityClient()
+score = client.evaluate(client.create_profile(name="my-agent"))
+print(f"{score.composite:.3f}  ({score.action})")
+```
+
+```text
+0.929  (pass)
+```
+
+## Confirm from the terminal
+
+```bash
+python -m agentegrity          # version + installed adapters
+python -m agentegrity doctor   # end-to-end self-check, prints composite score
+```
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Your first attestation" icon="signature" href="/docs/get-started/first-attestation">
+    Sign a chain and verify it from the CLI.
+  </Card>
+  <Card title="Reading results" icon="chart-simple" href="/docs/get-started/reading-results">
+    What every field in `report()` and `IntegrityScore` means.
+  </Card>
+  <Card title="Enforcement" icon="hand" href="/docs/guides/enforcement-and-approvals">
+    Turn measurement into gating, with human approval.
+  </Card>
+  <Card title="Session exporters" icon="share-nodes" href="/docs/export/session-exporters">
+    Stream evaluated events anywhere.
+  </Card>
+</CardGroup>

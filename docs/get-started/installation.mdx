@@ -1,0 +1,180 @@
+---
+title: "Installation"
+description: "Install Agentegrity, pick the right extras, and confirm the wiring with one command."
+icon: "download"
+---
+
+Agentegrity requires **Python 3.10+**. The base package has **zero required dependencies** —
+every optional capability lives behind an extra.
+
+```bash
+pip install agentegrity
+```
+
+That gives you the four-layer evaluator, attestation chains (unsigned), the CLI, and the
+exporter protocol. Everything else is opt-in.
+
+## Framework extras
+
+Install the extra matching the agent framework you already run. The extra pulls in the
+framework itself, so if it is already in your environment the install is close to a no-op.
+
+<CodeGroup>
+
+```bash Claude Agent SDK
+pip install "agentegrity[claude]"
+```
+
+```bash LangChain / LangGraph
+pip install "agentegrity[langchain]"
+```
+
+```bash OpenAI Agents
+pip install "agentegrity[openai-agents]"
+```
+
+```bash CrewAI
+pip install "agentegrity[crewai]"
+```
+
+```bash Google ADK
+pip install "agentegrity[google-adk]"
+```
+
+```bash AutoGen
+pip install "agentegrity[autogen]"
+```
+
+```bash Agno
+pip install "agentegrity[agno]"
+```
+
+```bash Bedrock Agents
+pip install "agentegrity[bedrock-agents]"
+```
+
+</CodeGroup>
+
+## Capability extras
+
+| Extra | Pulls in | Unlocks |
+|---|---|---|
+| `crypto` | `cryptography>=41.0` | Ed25519 signing and signature verification on attestation and decision records |
+| `llm` | `anthropic>=0.40.0` | [`CorticalLLMLayer`](/docs/guides/semantic-layers) and `AdversarialLLMLayer` — Claude-backed semantic checks |
+| `stats` | `scipy>=1.10` | `CorticalLayer(metric="wasserstein")` for ordinal drift support |
+| `otel` | `opentelemetry-{api,sdk,exporter-otlp}` | [`OTelSessionExporter`](/docs/export/opentelemetry) — one trace per session plus metrics |
+| `kms` | `boto3>=1.34` | `KMSCheckpoint` — envelope-encrypted checkpoints against an AWS KMS CMK |
+| `all` | everything above plus every framework | Kitchen sink; useful in CI |
+| `dev` | pytest, ruff, mypy, jsonschema | Contributing to the library itself |
+
+<Tip>
+  `AdversarialSLMLayer` runs a local semantic classifier against Ollama, llama.cpp, vLLM, or
+  LM Studio over the OpenAI-compatible chat-completions protocol using **stdlib `urllib`
+  only**. It needs no extra at all.
+</Tip>
+
+Extras compose the way you would expect:
+
+```bash
+pip install "agentegrity[claude,crypto,otel]"
+```
+
+<Warning>
+  Without the `crypto` extra, records are built and hash-linked but never **signed**. Hash
+  linkage alone is not tamper-evidence against an attacker who controls the serialized
+  chain — `content_hash` is an unkeyed SHA-256, so anyone who edits a record can recompute
+  the links. Install `crypto` for any chain that crosses a trust boundary. See
+  [Signing and keys](/docs/guides/signing-and-keys).
+</Warning>
+
+## TypeScript / Bun / Node
+
+Six npm packages mirror the Python adapters. Install only the one matching your framework —
+each depends on the shared `@agentegrity/client` core.
+
+```bash
+npm i @agentegrity/claude-sdk      # Claude Agent SDK
+npm i @agentegrity/langchain       # LangChain JS / LangGraph JS
+npm i @agentegrity/openai-agents   # OpenAI Agents SDK
+npm i @agentegrity/crewai          # CrewAI JS
+npm i @agentegrity/google-adk      # Google ADK JS
+npm i @agentegrity/vercel-ai       # Vercel AI SDK (TypeScript-native)
+```
+
+See [TypeScript overview](/docs/typescript/overview) for the full surface.
+
+## Verify the install
+
+```bash
+python -m agentegrity
+```
+
+```text
+agentegrity 0.10.0
+
+Adapters:
+  claude        [not installed]  — pip install "agentegrity[claude]"
+  langchain     [not installed]  — pip install "agentegrity[langchain]"
+  openai_agents [not installed]  — pip install "agentegrity[openai-agents]"
+  crewai        [not installed]  — pip install "agentegrity[crewai]"
+  google_adk    [not installed]  — pip install "agentegrity[google-adk]"
+  autogen       [not installed]  — pip install "agentegrity[autogen]"
+  agno          [not installed]  — pip install "agentegrity[agno]"
+  bedrock_agents[not installed]  — pip install "agentegrity[bedrock-agents]"
+
+Layers shipped: adversarial, cortical, governance, recovery
+
+Optional LLM cortical checks: [not installed]  — pip install "agentegrity[llm]"
+```
+
+Then run the end-to-end self-check:
+
+```bash
+python -m agentegrity doctor
+```
+
+```text
+agentegrity 0.10.0 — self-check
+  profile:   AgentProfile('doctor-agent', type=tool_using, risk=medium, channels=2)
+  composite: 0.929
+  action:    pass
+  layers:    adversarial, cortical, governance, recovery
+OK
+```
+
+If `doctor` prints a composite score and `OK`, the install is wired correctly. The
+`agentegrity` console script is installed too, so `agentegrity doctor` works identically.
+
+## Telemetry, and turning it off
+
+Agentegrity sends **anonymous, shape-only** usage analytics by default: adapter names, enum
+values, counts, and rounded scores. Never prompts, tool arguments, agent names, or file
+paths. Nothing is sent on import.
+
+Opt out with no code change:
+
+```bash
+export DO_NOT_TRACK=1                      # the cross-tool standard
+export AGENTEGRITY_TELEMETRY_DISABLED=1    # agentegrity-specific
+```
+
+Or at runtime:
+
+```python
+import agentegrity
+agentegrity.disable_telemetry()
+```
+
+When disabled, no ID file is written, no thread starts, and no network is touched. Every
+event is documented on the [Telemetry](/docs/export/telemetry) page.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/docs/get-started/quickstart">
+    Three lines per framework.
+  </Card>
+  <Card title="Your first attestation" icon="signature" href="/docs/get-started/first-attestation">
+    Build, sign, and verify a real chain.
+  </Card>
+</CardGroup>

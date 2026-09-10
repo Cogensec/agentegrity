@@ -1,0 +1,262 @@
+---
+title: "Attestation chain"
+description: "Signed, hash-linked records that turn an integrity evaluation into evidence a third party can check."
+icon: "link"
+---
+
+An `AttestationChain` is an ordered, tamper-evident sequence of records for one agent. It
+holds two kinds of record — the evaluator's verdict and the agent's decision rationale — in
+a single linked history.
+
+<CardGroup cols={2}>
+  <Card title="AttestationRecord" icon="clipboard-check">
+    What we observed about the agent **from the outside**: the full `IntegrityScore`,
+    per-layer states, and supporting evidence. Written *after* an evaluation.
+  </Card>
+  <Card title="DecisionRecord" icon="code-branch">
+    The agent's candidate action and the inputs that justified it, captured **before** the
+    action executes. See [Decision provenance](/docs/concepts/decision-provenance).
+  </Card>
+</CardGroup>
+
+Both satisfy the `ChainedRecord` structural Protocol, so chain operations are kind-agnostic:
+
+```python
+class ChainedRecord(Protocol):
+    record_kind: str
+    chain_previous: str | None
+    signature: bytes | None
+    public_key: bytes | None
+
+    @property
+    def content_hash(self) -> str: ...
+    def verify(self, public_key=None) -> bool: ...
+    def to_dict(self) -> dict: ...
+```
+
+## Anatomy of an attestation
+
+```python
+AttestationRecord(
+    agent_id="25b4742d-...",
+    integrity_score={...},        # the full IntegrityScore.to_dict()
+    layer_states={               # layer_name -> LayerResult.to_dict()
+        "adversarial": {...}, "cortical": {...},
+        "governance": {...},  "recovery": {...},
+    },
+    evidence=[Evidence(...), ...],
+    record_id="...",              # UUID4
+    timestamp=datetime(...),      # UTC
+    chain_previous="e14884f6...", # predecessor's content_hash
+    signature=b"...",             # Ed25519 over canonical_payload
+    public_key=b"...",            # 32 raw bytes
+    record_kind="attestation",
+)
+```
+
+### Canonical payload
+
+Signing and hashing both operate on a deterministic JSON serialization:
+
+```python
+json.dumps(payload, sort_keys=True, separators=(",", ":"))
+```
+
+The payload contains `record_kind`, `record_id`, `agent_id`, `timestamp`,
+`integrity_score`, `layer_states`, `evidence`, and **`chain_previous`**.
+
+<Info>
+  `chain_previous` being inside the signed payload is the load-bearing detail. It means a
+  signature covers the record's **position in the chain**, not just its contents. You cannot
+  lift a validly-signed record out of one chain and splice it into another.
+</Info>
+
+`content_hash` is `sha256(canonical_payload)`, computed on demand — it is never stored, so
+it cannot go stale.
+
+## Evidence
+
+Each attestation carries `Evidence` entries: typed pointers to the things it commits to.
+
+| `evidence_type` | `source` | What it commits to |
+|---|---|---|
+| `layer_result` | layer name | SHA-256 over that layer's canonical result JSON |
+| `decision` | decision `record_id` | A `DecisionRecord` earlier in this chain |
+| `topology` | `topology_id` | The topology snapshot live at evaluation time |
+| `topology_change` | previous `topology_id` | A structural diff since the last attestation |
+| `peer_message` / `handoff` | `"<peer_agent_id>:<record_id>"` | A record in **another agent's** chain |
+
+```python
+Evidence(
+    evidence_type="layer_result",
+    source="adversarial",
+    content_hash="9f2c...",
+    summary="adversarial: 0.600 (alert)",
+    timestamp=datetime(...),
+)
+```
+
+<Warning>
+  Before v0.7, `Evidence.content_hash` used Python's built-in `hash()`, which is
+  **process-salted** — the same layer result hashed differently in different processes,
+  making cross-process verification impossible. It is now a real SHA-256 over canonical JSON.
+
+  Chains serialized before v0.7 fail `verify_chain()` after upgrading. Rebuild from a fresh
+  root; there is no migration path, because the old hashes were never meaningful.
+</Warning>
+
+## Appending
+
+```python
+chain = AttestationChain()
+chain.append(record)
+```
+
+`append()` has two modes:
+
+- `record.chain_previous is None` → the chain **sets** it to the previous record's hash.
+- `record.chain_previous` already set → the chain **validates** it and raises `ValueError`
+  on mismatch.
+
+The second mode is what makes signed chains work: `build_attestation_record(...,
+previous_record_hash=prev)` bakes the link in *before* signing, so the signature covers it,
+and the append then confirms the link is the one the chain expected.
+
+## Verification, four ways
+
+Each method proves something different. Using the wrong one is the most common mistake.
+
+<AccordionGroup>
+  <Accordion title="verify_chain() → bool" icon="link">
+    Every record correctly references its predecessor's `content_hash`.
+
+    **Proves:** internal consistency.
+
+    **Does not prove:** authenticity. `content_hash` is an unkeyed SHA-256, so an attacker
+    who controls the serialized chain can edit a record and recompute every downstream link.
+
+    `verify_chain_detailed()` returns `(ok, broken_index, broken_record_kind)`.
+  </Accordion>
+
+  <Accordion title="verify_signatures(trusted_keys=...) → (bool, int | None)" icon="key">
+    Every record is signed **and** its signature verifies. Returns `(False, first_bad_index)`
+    on the first unsigned or invalid record.
+
+    **This is the real tamper-evidence check.**
+
+    ```python
+    ok, bad_index = chain.verify_signatures(trusted_keys={pinned_public_key})
+    ```
+
+    <Warning>
+      Without `trusted_keys`, a chain forged wholesale and signed with an attacker-generated
+      key **self-verifies**, because every record embeds its own public key. Always pass a
+      pinned key set anywhere the chain crosses a trust boundary.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="verify_decision_links() → bool" icon="code-branch">
+    Every `decision`-type Evidence entry points at a real `DecisionRecord` that
+
+    1. exists in this chain,
+    2. sits strictly **before** the attestation referencing it, and
+    3. still hashes to the value the attestation committed to.
+
+    **Proves:** decision rationales were bound at decision time, not retrofitted afterwards.
+  </Accordion>
+
+  <Accordion title="verify_cross_agent_links(peer_chains, key_provider=...) → bool" icon="users">
+    Every `peer_message` / `handoff` Evidence resolves to a real record in the named peer's
+    chain, with a matching `content_hash`.
+
+    **Strict since v0.10.0:** a chain that *carries* cross-agent evidence but is handed no
+    peer chains returns `False`. Unverifiable is not verified. A chain with no cross-agent
+    evidence trivially returns `True`.
+
+    ```python
+    ok = adapter.attestation_chain.verify_cross_agent_links(
+        {"peer-1": peer1.attestation_chain, "peer-2": peer2.attestation_chain},
+        key_provider=FileKeyProvider("/etc/agentegrity/keys"),
+    )
+    ```
+
+    With a `key_provider`, each referenced peer record must be signed with **exactly** the
+    pinned key for that `agent_id` and its signature must verify.
+  </Accordion>
+</AccordionGroup>
+
+## Serialization
+
+```python
+text  = chain.to_json()
+chain = AttestationChain.from_json(text)
+```
+
+`from_dict_list` dispatches on each dict's `record_kind`, defaulting to `"attestation"` for
+chains serialized before the discriminator existed. Unknown kinds raise `ValueError`.
+
+`from_records` is a **restore**, not a re-append: existing `chain_previous` values are
+preserved verbatim so link hashes survive a round-trip. This is what makes
+[checkpoint restore](/docs/guides/checkpoints-and-recovery) keep `verify_chain()` passing.
+
+## Signing
+
+```python
+from agentegrity.core.attestation import generate_signing_key
+
+key = generate_signing_key()          # Ed25519PrivateKey
+record.sign(key)
+record.verify()                       # uses the embedded public key
+record.verify(some_other_public_key)  # or an explicit one
+```
+
+Requires `pip install "agentegrity[crypto]"`; without it, `sign()` raises `ImportError` with
+the install command.
+
+Wire the key in once and every record is signed automatically:
+
+```python
+IntegrityMonitor(..., signing_key=key)
+client.create_adapter("claude", profile=profile)   # see below
+```
+
+<Note>
+  Adapters accept `signing_key` on the underlying `_BaseAdapter` constructor. The zero-config
+  module entry points (`hooks()`, `instrument_chain()`, …) do not expose it — construct the
+  adapter class directly when you need signing on an adapter path.
+</Note>
+
+## Building records by hand
+
+```python
+from agentegrity.core.attestation import build_attestation_record
+
+record = build_attestation_record(
+    profile, score,
+    previous_record_hash=chain.latest.content_hash if chain.latest else None,
+    signing_key=key,
+    recent_decisions=[...],      # → Evidence(evidence_type="decision")
+    topology=topology,           # → Evidence(evidence_type="topology")
+    topology_change=change,      # → Evidence(evidence_type="topology_change")
+)
+```
+
+This is the single construction path used by the adapter base, `IntegrityMonitor`, and
+`AgentegrityClient.attest` — there is no second implementation to drift.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Verifying chains" icon="circle-check" href="/docs/guides/verifying-chains">
+    CLI and programmatic verification end to end.
+  </Card>
+  <Card title="Signing and keys" icon="key" href="/docs/guides/signing-and-keys">
+    KeyProvider, trust anchors, rotation.
+  </Card>
+  <Card title="Decision provenance" icon="code-branch" href="/docs/concepts/decision-provenance">
+    The second record kind.
+  </Card>
+  <Card title="Compliance reports" icon="file-lines" href="/docs/guides/compliance-reports">
+    Turning a chain into an audit artifact.
+  </Card>
+</CardGroup>

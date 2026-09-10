@@ -1,0 +1,244 @@
+---
+title: "Agent profiles"
+description: "AgentProfile describes what the agent is, what it can do, where it runs, and how much risk it carries."
+icon: "id-card"
+---
+
+Every agent under evaluation is described by an `AgentProfile`. The profile is not
+decoration — it **drives** which input channels the adversarial layer scans, which
+governance rules apply, and which recovery capabilities are checked for.
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+
+profile = AgentProfile(
+    name="research-assistant",
+    agent_type=AgentType.TOOL_USING,
+    capabilities=["tool_use", "web_access", "memory_access"],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.MEDIUM,
+    framework="langchain",
+    model_provider="anthropic",
+    model_id="claude-sonnet-4-20250514",
+    metadata={"team": "research", "cost_center": "R&D"},
+)
+```
+
+## Fields
+
+<ResponseField name="agent_type" type="AgentType" required>
+  `CONVERSATIONAL` · `TOOL_USING` · `AUTONOMOUS` · `MULTI_AGENT` · `EMBODIED`.
+
+  The last three make `profile.is_autonomous` true.
+</ResponseField>
+
+<ResponseField name="capabilities" type="list[str]" required>
+  What the agent can do. Use the `CAPABILITY_*` constants or any custom string — unknown
+  strings are preserved but open no channel.
+</ResponseField>
+
+<ResponseField name="deployment_context" type="DeploymentContext" required>
+  `CLOUD` · `EDGE` · `HYBRID` · `MULTI_AGENT` · `FEDERATED` · `PHYSICAL`.
+</ResponseField>
+
+<ResponseField name="risk_tier" type="RiskTier" required>
+  `LOW` · `MEDIUM` · `HIGH` · `CRITICAL`. Determines default thresholds, monitoring
+  frequency, and escalation sensitivity. `GOV-001` fires only for `HIGH` and `CRITICAL`.
+</ResponseField>
+
+<ResponseField name="agent_id" type="str">
+  Auto-generated UUID4 unless supplied. This is the identity a `KeyProvider` maps to a
+  public key and the key under which behavioral baselines are stored — **pin it explicitly**
+  for any agent whose baseline or signing identity must survive a restart.
+</ResponseField>
+
+<ResponseField name="name" type="str | None">
+  Human-readable label. Never leaves the process: telemetry excludes it by design.
+</ResponseField>
+
+<ResponseField name="framework" type="str | None">
+  `"langchain"`, `"crewai"`, `"autogen"`, `"custom"`, …
+</ResponseField>
+
+<ResponseField name="model_provider" type="str | None">
+  `"anthropic"`, `"openai"`, `"google"`, `"open_source"`, …
+</ResponseField>
+
+<ResponseField name="model_id" type="str | None">
+  Specific model identifier.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict">
+  Free-form. Carried through serialization; not interpreted by any layer.
+</ResponseField>
+
+<ResponseField name="created_at" type="datetime">
+  UTC, auto-set.
+</ResponseField>
+
+## Capabilities determine the attack surface
+
+This is the most consequential thing the profile does.
+
+```python
+profile.input_channels
+# ['direct_prompt', 'tool_responses', 'memory_reads', 'web_content']
+```
+
+| Capability constant | String | Channel opened |
+|---|---|---|
+| — | — | `direct_prompt` *(always)* |
+| `CAPABILITY_TOOL_USE` | `tool_use` | `tool_responses` |
+| `CAPABILITY_MEMORY_ACCESS` | `memory_access` | `memory_reads` |
+| `CAPABILITY_MULTI_AGENT_COMM` | `multi_agent_comm` | `peer_messages` |
+| `CAPABILITY_WEB_ACCESS` | `web_access` | `web_content` |
+| `CAPABILITY_CODE_EXECUTION` | `code_execution` | `code_outputs` |
+| `CAPABILITY_PHYSICAL_ACTUATION` | `physical_actuation` | `sensor_inputs` |
+
+Two more constants exist and are used by governance rather than channel mapping:
+`CAPABILITY_FILE_SYSTEM` (`file_system`) and `CAPABILITY_FINANCIAL_TRANSACTIONS`
+(`financial_transactions`).
+
+<Warning>
+  **Under-declaring capabilities inflates your score.** An agent that reads memory but does
+  not declare `memory_access` is never evaluated on the `memory_reads` channel, so memory
+  poisoning is structurally invisible to the adversarial layer. Declare what the agent can
+  actually do, not what you wish it did.
+</Warning>
+
+## Recovery capabilities
+
+The recovery layer looks for these in `capabilities`:
+
+```python
+{"state_restore", "checkpoint", "rollback", "session_reset", "peer_quarantine"}
+```
+
+Declaring them is a claim the recovery layer scores. Attaching a real
+[`Checkpoint` backend](/docs/guides/checkpoints-and-recovery) is what makes the claim
+substantive.
+
+## Derived properties
+
+```python
+profile.has_capability("tool_use")     # membership test
+profile.is_autonomous                  # AUTONOMOUS | MULTI_AGENT | EMBODIED
+profile.is_embodied                    # EMBODIED, or PHYSICAL context,
+                                       # or physical_actuation capability
+profile.input_channels                 # see above
+```
+
+## The default profile
+
+Zero-config entry points use this:
+
+```python
+AgentProfile.default(name="claude-agent")
+```
+
+```python
+AgentProfile(
+    name=name,
+    agent_type=AgentType.TOOL_USING,
+    capabilities=[CAPABILITY_TOOL_USE],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.MEDIUM,
+)
+```
+
+<Note>
+  The default is deliberately conservative — two channels, medium risk. It gets you a real
+  evaluation in three lines, but it is a placeholder. Any agent going to production deserves
+  an explicit profile.
+</Note>
+
+## String-keyed convenience
+
+`AgentegrityClient.create_profile` takes plain strings and converts to enums, raising on an
+invalid value:
+
+```python
+profile = client.create_profile(
+    name="support-bot",
+    agent_type="tool_using",
+    capabilities=["tool_use", "memory_access"],
+    deployment_context="cloud",
+    risk_tier="high",
+    framework="crewai",          # extra kwargs pass through to AgentProfile
+)
+```
+
+## Serialization
+
+```python
+data = profile.to_dict()
+restored = AgentProfile.from_dict(data)
+```
+
+`to_dict()` emits enum **values** (not names) and an ISO-8601 `created_at`. This is the
+exact shape delivered to `SessionExporter.on_session_start` and validated against
+`schemas/exporter/common.json#/$defs/AgentProfile`.
+
+<Warning>
+  `from_dict()` does **not** restore `created_at` — a round-trip produces a profile with a
+  fresh timestamp. If baseline age matters to you, persist `created_at` alongside.
+</Warning>
+
+## Worked examples
+
+<CodeGroup>
+
+```python High-risk financial
+AgentProfile(
+    name="payments-agent",
+    agent_type=AgentType.AUTONOMOUS,
+    capabilities=["tool_use", "financial_transactions",
+                  "memory_access", "checkpoint", "rollback"],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.CRITICAL,
+)
+```
+
+```python Multi-agent member
+AgentProfile(
+    name="research-worker",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "web_access", "multi_agent_comm",
+                  "peer_quarantine"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.MEDIUM,
+)
+```
+
+```python Embodied
+AgentProfile(
+    name="warehouse-robot",
+    agent_type=AgentType.EMBODIED,
+    capabilities=["tool_use", "physical_actuation", "session_reset"],
+    deployment_context=DeploymentContext.PHYSICAL,
+    risk_tier=RiskTier.CRITICAL,
+)
+```
+
+```python Read-only assistant
+AgentProfile(
+    name="docs-qa",
+    agent_type=AgentType.CONVERSATIONAL,
+    capabilities=["web_access"],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.LOW,
+)
+```
+
+</CodeGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Governance layer" icon="gavel" href="/docs/layers/governance">
+    How `risk_tier` gates sensitive tools.
+  </Card>
+  <Card title="Adversarial layer" icon="crosshairs" href="/docs/layers/adversarial">
+    How capabilities become scanned channels.
+  </Card>
+</CardGroup>
