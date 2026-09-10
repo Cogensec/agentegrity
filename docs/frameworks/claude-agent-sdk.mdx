@@ -30,18 +30,18 @@ summarizes the whole session.
 | SDK hook | Canonical event | Evaluates | Decision record |
 |---|---|---|---|
 | `PreToolUse` | `pre_tool_use` | ✅ | ✅ `tool_call` |
-| `PostToolUse` | `post_tool_use` | ✅ | — |
-| `PostToolUseFailure` | `post_tool_use_failure` | — | — |
-| `UserPromptSubmit` | `user_prompt_submit` | ✅ | — |
+| `PostToolUse` | `post_tool_use` | ✅ | no |
+| `PostToolUseFailure` | `post_tool_use_failure` | no | no |
+| `UserPromptSubmit` | `user_prompt_submit` | ✅ | no |
 | `Stop` | `stop` | ✅ | ✅ `final_output` |
-| `SubagentStart` | `subagent_start` | — | ✅ lifecycle |
-| `SubagentStop` | `subagent_stop` | — | — |
-| `PreCompact` | `pre_compact` | — | — |
+| `SubagentStart` | `subagent_start` | no | ✅ lifecycle |
+| `SubagentStop` | `subagent_stop` | no | no |
+| `PreCompact` | `pre_compact` | no | no |
 
 <Note>
   `HookMatcher` is imported **at call time**, not module import time, so
   `agentegrity.claude` imports cleanly even without the SDK installed. Every hook is wrapped
-  in a try/except that logs and swallows — a failure in instrumentation never breaks the agent.
+  in a try/except that logs and swallows: a failure in instrumentation never breaks the agent.
 </Note>
 
 `PreCompact` is worth knowing about: it archives the reasoning chain before the SDK compacts
@@ -92,7 +92,7 @@ adapter = ClaudeAdapter(
 options = ClaudeAgentOptions(hooks=adapter.create_hooks())
 ```
 
-Constructing the adapter class directly is also the only way to pass `signing_key` — the
+Constructing the adapter class directly is also the only way to pass `signing_key`: the
 zero-config `hooks()` entry point does not expose it.
 
 ## A production profile
@@ -118,13 +118,13 @@ options = ClaudeAgentOptions(hooks=hooks(profile=profile, enforce=True))
 <Warning>
   `risk_tier=HIGH` activates `GOV-001`, so sensitive tools now require approval. With
   `enforce=True` and no approval handler, those calls are **denied**. That is the intended
-  fail-closed behaviour — wire a handler before shipping.
+  fail-closed behaviour: wire a handler before shipping.
 </Warning>
 
 ## Single-agent by design
 
 The Claude Agent SDK has no multi-agent topology primitive, so the adapter declares none.
-The conformance suite **pins that absence** — a future change that silently starts declaring
+The conformance suite **pins that absence**: a future change that silently starts declaring
 a topology fails CI.
 
 Subagents still flow through `SubagentStart` / `SubagentStop` and get the base orphan-stop
@@ -152,7 +152,7 @@ await query({ prompt: "hi", options: { hooks: hooks() } });
 
 ## Claude Code
 
-Instrumenting Claude Code itself is a separate integration — a `PreToolUse` plugin hook with
+Instrumenting Claude Code itself is a separate integration: a `PreToolUse` plugin hook with
 its own decision chain. See [Claude Code plugin](/docs/integrations/claude-code).
 
 ## Reference

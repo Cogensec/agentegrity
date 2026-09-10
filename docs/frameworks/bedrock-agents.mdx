@@ -15,7 +15,7 @@ One adapter, two entry points, different guarantees.
     Registers typed hooks on a Strands `Agent`. **Real enforcement** via `event.cancel_tool`.
   </Card>
   <Card title="wrap_client(boto3_client)" icon="eye">
-    Patches `bedrock-agent-runtime.invoke_agent`. **Observation-only** — the trace is post-hoc.
+    Patches `bedrock-agent-runtime.invoke_agent`. **Observation-only**: the trace is post-hoc.
   </Card>
 </CardGroup>
 
@@ -46,7 +46,7 @@ the reason, and Strands cancels the call before it executes.
 <Note>
   The before-tool hook is `async` specifically so the adapter can `await on_event(...)` and
   inspect the verdict in time to write `cancel_tool`. If a future Strands version makes
-  `cancel_tool` read-only, the adapter logs a warning rather than crashing — enforcement
+  `cancel_tool` read-only, the adapter logs a warning rather than crashing, enforcement
   degrades to observation, visibly.
 </Note>
 
@@ -62,7 +62,7 @@ response = client.invoke_agent(agentId="...", sessionId="...", inputText="...")
 `wrap_client` replaces `invoke_agent` on the same client object and:
 
 1. Injects `enableTrace=True` (unless `force_trace=False`)
-2. Iterates the response's `TracePart` variants — action group, collaborator, failure
+2. Iterates the response's `TracePart` variants: action group, collaborator, failure
 3. Maps them onto canonical events
 4. **Re-yields every event** so your streaming consumption is unchanged
 
@@ -71,7 +71,7 @@ response = client.invoke_agent(agentId="...", sessionId="...", inputText="...")
   records what would have been blocked.
 
   With `force_trace=False` and `enableTrace` unset by the caller, the adapter warns that **no
-  agentegrity events will fire at all** — without the trace stream there is nothing to
+  agentegrity events will fire at all**: without the trace stream there is nothing to
   observe.
 </Warning>
 
@@ -84,7 +84,7 @@ Both paths build a `HUB_SPOKE` topology incrementally:
   `topology_change`
 
 This means the chain records **which collaborators actually participated**, not which ones
-were configured — a meaningful difference when a collaborator is conditionally invoked.
+were configured: a meaningful difference when a collaborator is conditionally invoked.
 
 ## Overrides
 
@@ -117,7 +117,7 @@ runtime = agentegrity.init()
 agent = runtime.instrument(strands_agent)     # → instrument_strands
 ```
 
-The boto3 path has no dispatch entry — call `wrap_client` explicitly.
+The boto3 path has no dispatch entry: call `wrap_client` explicitly.
 
 ## KMS checkpoints
 

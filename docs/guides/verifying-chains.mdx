@@ -11,8 +11,8 @@ should run them.
 
 | Method | Proves | Does not prove |
 |---|---|---|
-| `verify_chain()` | Records reference their predecessors correctly | Authenticity — hashes are recomputable |
-| `verify_signatures(trusted_keys=…)` | Records were signed by a pinned key | Completeness — a truncated chain still verifies |
+| `verify_chain()` | Records reference their predecessors correctly | Authenticity: hashes are recomputable |
+| `verify_signatures(trusted_keys=…)` | Records were signed by a pinned key | Completeness: a truncated chain still verifies |
 | `verify_decision_links()` | Rationales were bound at decision time | That the rationale is truthful |
 | `verify_cross_agent_links(peers, key_provider=…)` | Cross-agent references resolve to real, pinned peer records | Anything about peers not referenced |
 
@@ -94,7 +94,7 @@ if not (linkage_ok and sigs_ok and links_ok):
     chain.verify_signatures()     # (False, 1)
     ```
 
-    An attacker who recomputes every downstream hash defeats `verify_chain()` alone — which is
+    An attacker who recomputes every downstream hash defeats `verify_chain()` alone: which is
     exactly why signatures are not optional.
   </Accordion>
 
@@ -119,14 +119,14 @@ if not (linkage_ok and sigs_ok and links_ok):
     peer's chain and compares content hashes. With a `key_provider`, the peer record must also
     be signed with that agent's pinned key.
 
-    Without peer chains, a chain carrying cross-agent evidence returns `False` — strict since
+    Without peer chains, a chain carrying cross-agent evidence returns `False`, strict since
     v0.10.0.
   </Accordion>
 </AccordionGroup>
 
 <Warning>
   **No method detects truncation.** A chain with records 5 through 9 removed from the end
-  verifies perfectly — every remaining record links correctly and signs correctly.
+  verifies perfectly: every remaining record links correctly and signs correctly.
 
   Defend against this at the storage layer: append-only logs, external timestamping, or
   streaming to an [exporter](/docs/export/session-exporters) that records what it received.
@@ -154,7 +154,7 @@ if not (linkage_ok and sigs_ok and links_ok):
 
 <Warning>
   **Always pass `--trusted-key` in CI.** Without an anchor, `report` exits `0` on an unsigned
-  chain — correct for the tool, silent failure for your pipeline.
+  chain: correct for the tool, silent failure for your pipeline.
 </Warning>
 
 ## As a gate in an evaluation harness
@@ -186,7 +186,7 @@ chain = AttestationChain.from_dict_list(list_of_dicts)   # from to_records_dict(
 chain = AttestationChain.from_records(record_objects)    # from objects
 ```
 
-All three **preserve** existing `chain_previous` values verbatim — they are restores, not
+All three **preserve** existing `chain_previous` values verbatim: they are restores, not
 re-appends. That is what keeps signatures valid across a round trip.
 
 `from_dict_list` dispatches on `record_kind`, defaulting to `"attestation"` for chains

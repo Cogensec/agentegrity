@@ -5,7 +5,7 @@ icon: "cloud-arrow-up"
 ---
 
 `HTTPExporter` is a stdlib-only sink that POSTs session data to any backend implementing the
-published wire format — including the commercial `agentegrity-pro` dashboard.
+published wire format, including the commercial `agentegrity-pro` dashboard.
 
 ## Two environment variables
 
@@ -26,7 +26,7 @@ agent changes.
 Both must be present. With either missing, nothing attaches and the SDK stays fully local.
 
 <Info>
-  These variables were **inert before v0.10.0** — they existed but activated nothing. If you
+  These variables were **inert before v0.10.0**: they existed but activated nothing. If you
   set them on an older version expecting streaming, you got silence.
 </Info>
 
@@ -65,7 +65,7 @@ agentegrity pro --ingest-token agk_live_… --url https://your-dashboard -- pyth
 |---|---|
 | No token | `no ingest token. Pass --ingest-token or set AGENTEGRITY_TOKEN. Mint one in Settings -> Ingest Tokens.` |
 | HTTP 401 | `token rejected. Mint a fresh one in Settings -> Ingest Tokens.` |
-| HTTP 404 | `<url> has no /ingest/verify — is this an agentegrity-pro backend, and is it up to date?` |
+| HTTP 404 | `<url> has no /ingest/verify: is this an agentegrity-pro backend, and is it up to date?` |
 | Unreachable | `cannot reach <url>: <reason>` |
 | Command missing | exit `127` |
 
@@ -78,7 +78,7 @@ from agentegrity.openai_agents import register_exporter
 register_exporter(HTTPExporter("https://your-dashboard", "agk_live_…", timeout=5.0))
 ```
 
-Usually unnecessary — the environment path covers most deployments.
+Usually unnecessary: the environment path covers most deployments.
 
 ## Delivery semantics
 
@@ -95,7 +95,7 @@ Usually unnecessary — the environment path covers most deployments.
     drop count.
   </Card>
   <Card title="Non-blocking" icon="bolt">
-    `_enqueue` uses `put_nowait` — it never blocks the caller's event loop.
+    `_enqueue` uses `put_nowait`: it never blocks the caller's event loop.
   </Card>
 </CardGroup>
 
@@ -104,7 +104,7 @@ At-exit flush runs with a 5-second deadline.
 <Warning>
   **Drops are silent to the agent and loud in the log.** If your dashboard is slow enough to
   fill a 1000-entry queue, you lose events. Watch for
-  `agentegrity exporter: queue full, dropped … (N total)` — the running total is the signal.
+  `agentegrity exporter: queue full, dropped … (N total)`: the running total is the signal.
 </Warning>
 
 ## Endpoints
@@ -114,7 +114,7 @@ At-exit flush runs with a 5-second deadline.
 | `POST` | `/sessions` | `{session_id, adapter_name, profile}` |
 | `POST` | `/sessions/{id}/events` | `{session_id, event}` |
 | `POST` | `/sessions/{id}/end` | `{session_id, summary}` |
-| `GET` | `/ingest/verify` | — (used by `agentegrity pro`) |
+| `GET` | `/ingest/verify` |, (used by `agentegrity pro`) |
 
 Full definitions in [wire format](/docs/export/wire-format).
 
@@ -137,7 +137,7 @@ report()["exporters"]
 ```
 
 <Info>
-  The INFO log is a convenience — Python's default level is WARNING and will swallow it. The
+  The INFO log is a convenience: Python's default level is WARNING and will swallow it. The
   **durable** disclosure is the `exporters` entry in `get_summary()`, which is why that field
   exists.
 
@@ -153,7 +153,7 @@ three endpoints and validating each payload against `schemas/exporter/*.json` wi
 `jsonschema.Draft202012Validator`.
 
 <Warning>
-  It is **not a production backend** — in-memory store, no auth. It exists so you can adopt the
+  It is **not a production backend**: in-memory store, no auth. It exists so you can adopt the
   wire format without `agentegrity-pro`.
 </Warning>
 

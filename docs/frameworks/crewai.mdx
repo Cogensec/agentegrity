@@ -17,7 +17,7 @@ print(report())
 ```
 
 Calling `instrument()` with no crew subscribes to the global event bus without declaring a
-topology — useful when the crew is constructed after instrumentation.
+topology: useful when the crew is constructed after instrumentation.
 
 ## Event mapping
 
@@ -59,7 +59,7 @@ The adapter subscribes to `crewai.events` and maps:
 | `hierarchical` | `HIERARCHICAL_DAG` | Manager as `SUPERVISOR`, rest as `WORKER` |
 
 <Note>
-  In a **sequential** crew there is no single fixed orchestrator — work simply flows agent to
+  In a **sequential** crew there is no single fixed orchestrator: work simply flows agent to
   agent. The adapter reflects that honestly rather than inventing a leader, which is why
   sequential crews get `MEMBER` roles throughout.
 </Note>

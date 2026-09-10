@@ -38,9 +38,9 @@ See [TypeScript overview](/docs/typescript/overview).
   **Observation-only adapters warn at construction** when you pass `enforce=True`. They record
   what the verdict would have been but cannot prevent the action:
 
-  - **Google ADK** — `before_*` callbacks expose no veto mechanism.
-  - **AutoGen** — the OTel `SpanProcessor` sees spans after the fact.
-  - **Bedrock via boto3** — the trace stream is post-hoc; the action already happened.
+  - **Google ADK**: `before_*` callbacks expose no veto mechanism.
+  - **AutoGen**: the OTel `SpanProcessor` sees spans after the fact.
+  - **Bedrock via boto3**: the trace stream is post-hoc; the action already happened.
 
   If enforcement is a hard requirement, check this before choosing a framework.
 </Warning>
@@ -65,7 +65,7 @@ instrument(target, profile=..., client=..., enforce=True, api_key=...)
 
 <Warning>
   Passing **any** override builds a *new* adapter instead of reusing the module-global one.
-  That is deliberate — it supports independent evaluations in one process — but the
+  That is deliberate (it supports independent evaluations in one process) but the
   module-level `report()` will not see it. Keep the returned adapter, or call
   `adapter().get_summary()` on the one you built.
 </Warning>
@@ -91,7 +91,7 @@ Three more are emitted for instrumentation health: `capture_failure` (decision c
 failed), `subagent_orphan` (a stop with no matching start), and `<channel>_overflow` (a
 buffer hit its 1000-entry cap).
 
-Only some events trigger an evaluation — `post_tool_use_failure`, `subagent_stop`,
+Only some events trigger an evaluation: `post_tool_use_failure`, `subagent_stop`,
 `pre_compact`, and the health events do not. That is why `events` in the session summary
 exceeds `evaluations`.
 
@@ -119,7 +119,7 @@ Detection probes for an importable module per adapter:
 | `bedrock_agents` | `strands` |
 
 `runtime.instrument(obj)` dispatches on the object's class module, checking prefixes in
-order — `langgraph` before `langchain` so compiled graphs get topology introspection.
+order: `langgraph` before `langchain` so compiled graphs get topology introspection.
 
 <Note>
   Only CrewAI auto-attaches at `init()` time, because subscribing to its global event bus is
@@ -130,7 +130,7 @@ order — `langgraph` before `langchain` so compiled graphs get topology introsp
 ## Conformance
 
 `tests/test_adapter_conformance.py` runs the same canonical event stream and lifecycle
-assertions across every shipped adapter — 91 tests covering 12 invariants × 8 adapters plus
+assertions across every shipped adapter: 91 tests covering 12 invariants × 8 adapters plus
 two multi-agent invariants. Adding an adapter means adding one line to `ADAPTER_CLASSES` and
 inheriting the whole matrix.
 

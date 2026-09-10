@@ -51,10 +51,10 @@ one **composite** score. Both steps are explicit and configurable.
     An agent possesses verifiable assurance if its integrity state is represented by an
     attestation record **R** satisfying:
 
-    1. **Completeness** — R contains enough evidence to independently reconstruct the evaluation
-    2. **Tamper-evidence** — any modification to R is cryptographically detectable
-    3. **Non-repudiation** — R is signed such that the evaluator cannot deny producing it
-    4. **Chain integrity** — R references its predecessor, forming a verifiable history
+    1. **Completeness**: R contains enough evidence to independently reconstruct the evaluation
+    2. **Tamper-evidence**: any modification to R is cryptographically detectable
+    3. **Non-repudiation**: R is signed such that the evaluator cannot deny producing it
+    4. **Chain integrity**: R references its predecessor, forming a verifiable history
 
     | Band | Interpretation |
     |---|---|
@@ -133,7 +133,7 @@ These matter, because they decide what a partial pipeline reports.
     Falls back to the score of the first layer whose `layer_name` contains `adversarial`.
   </Card>
   <Card title="EP" icon="globe">
-    Falls back to the **minimum** score across all layers — the weakest link.
+    Falls back to the **minimum** score across all layers: the weakest link.
   </Card>
   <Card title="VA" icon="signature">
     Falls back to the **average** score across all layers.
@@ -141,7 +141,7 @@ These matter, because they decide what a partial pipeline reports.
 </CardGroup>
 
 RI has no fallback: a pipeline without a recovery layer scores RI = 0.0, which drags the
-composite down by its full weight. That is deliberate — an agent with no recovery
+composite down by its full weight. That is deliberate: an agent with no recovery
 verification genuinely has no recovery assurance.
 
 ## Confidence
@@ -154,7 +154,7 @@ detail_completeness = mean(1.0 if r.details else 0.5 for r in results)
 ```
 
 Confidence drops when a `fail_fast` short-circuit truncated the run, or when a layer
-returned an empty detail dict. **Read it alongside the composite** — a 0.95 composite at
+returned an empty detail dict. **Read it alongside the composite**: a 0.95 composite at
 0.50 confidence is a claim about one quarter of the pipeline.
 
 ## Custom layers participate for free
@@ -211,7 +211,7 @@ Measured p95 over 200 iterations, default four layers, no LLM paths:
 
 Budgets are pinned in `tests/test_perf_budget.py` at 50 ms per layer and 100 ms
 full-pipeline, with sentinel tests so the ceilings cannot be raised silently. LLM-backed
-layers change this entirely — they add network latency per evaluation and are opt-in for
+layers change this entirely: they add network latency per evaluation and are opt-in for
 exactly that reason.
 
 ## Next

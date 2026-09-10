@@ -49,7 +49,7 @@ Contradiction heuristics, applied to consecutive steps:
 consistency = max(0, 1 − (contradictions / chain_length) × 2)
 ```
 
-An empty chain scores **0.85** — a moderate default, not a pass. There was nothing to
+An empty chain scores **0.85**: a moderate default, not a pass. There was nothing to
 validate, and the score says so rather than pretending the check succeeded.
 
 ### Goal conflict
@@ -59,7 +59,7 @@ An instruction containing `ignore your goal`, `new objective`, or `override` set
 
 <Info>
   A conflict escalates rather than blocks. The framework's position is that a detected goal
-  conflict is exactly the situation a human should adjudicate — it is too consequential to
+  conflict is exactly the situation a human should adjudicate: it is too consequential to
   auto-allow and too ambiguous to auto-deny.
 </Info>
 
@@ -86,7 +86,7 @@ conflict_penalty = conflicts_with_baseline × 0.15
 integrity        = max(0, clean_ratio − conflict_penalty)
 ```
 
-No memory reads scores **1.0** — nothing to poison.
+No memory reads scores **1.0**: nothing to poison.
 
 <Warning>
   This is a **structural** check. It verifies that provenance metadata is present and marked
@@ -100,8 +100,8 @@ No memory reads scores **1.0** — nothing to poison.
 The most valuable and most subtle dimension. Drift is compared across two distributions the
 adapter buffer maintains automatically:
 
-- `action_distribution` — counts by action type (`tool_call`, `user_prompt`, …)
-- `tool_usage` — counts by tool name
+- `action_distribution`: counts by action type (`tool_call`, `user_prompt`, …)
+- `tool_usage`: counts by tool name
 
 ### Jensen-Shannon distance
 
@@ -122,7 +122,7 @@ CorticalLayer(metric="wasserstein")     # needs pip install "agentegrity[stats]"
 ```
 
 1D Earth Mover's Distance with each support point indexed at its sorted-key position. Use it
-only when the support has genuine **ordinal** meaning — latency buckets, risk tiers. For
+only when the support has genuine **ordinal** meaning: latency buckets, risk tiers. For
 `action_distribution` and `tool_usage`, whose keys carry no order, JS is the correct choice.
 
 If scipy is missing, the layer logs **one** warning at construction and falls back to JS.
@@ -135,7 +135,7 @@ distributions before drift is computed. Below it, the dimension is recorded as
 
 <Warning>
   `action_distribution__insufficient_samples` in the details means "checked and skipped", not
-  "passed". A fresh session always looks drift-free — that is honesty about sample size, not
+  "passed". A fresh session always looks drift-free: that is honesty about sample size, not
   a clean bill of health.
 </Warning>
 
@@ -177,7 +177,7 @@ and writes through on every `update_baseline()`.
 
 <Warning>
   Write-through failures are **deliberately not silenced**. A misconfigured store should fail
-  loudly rather than masquerade as working persistence — the failure mode of silent
+  loudly rather than masquerade as working persistence: the failure mode of silent
   non-persistence is an agent that never accumulates a baseline and therefore never detects
   drift.
 </Warning>
@@ -241,7 +241,7 @@ evaluator = IntegrityEvaluator(layers=default_layers(prefer_llm=True))
 memory-provenance analysis, and drift classification.
 
 <Info>
-  Its **sync `evaluate()` stays pattern-based** — only `aevaluate()` calls Claude. Opting in
+  Its **sync `evaluate()` stays pattern-based**, only `aevaluate()` calls Claude. Opting in
   never penalises sync callers with surprise network latency. All LLM paths fail open on API
   error or a missing key.
 </Info>

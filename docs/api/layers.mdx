@@ -21,7 +21,7 @@ layers = default_layers(
 Returns `[AdversarialLayer, CorticalLayer | CorticalLLMLayer, GovernanceLayer, RecoveryLayer]`.
 
 `prefer_llm=True` probes for `anthropic` at construction and raises `ImportError` with the
-install command if missing — a clear error now rather than a confusing one on first evaluate.
+install command if missing: a clear error now rather than a confusing one on first evaluate.
 
 ## AdversarialLayer
 
@@ -247,7 +247,7 @@ class CheckpointSnapshot:
 
 <Warning>
   `save()` **may return a different id** than the one on the snapshot. The returned id is
-  canonical — always use it.
+  canonical, always use it.
 </Warning>
 
 ```python
@@ -255,7 +255,7 @@ from agentegrity.layers.checkpoint import validate_storage_identifier
 validate_storage_identifier(value, kind="identifier")
 ```
 
-Call this in any custom backend before an identifier reaches a path or key — it is the
+Call this in any custom backend before an identifier reaches a path or key: it is the
 allow-list closing path traversal (**T-E1**).
 
 ## Baseline stores

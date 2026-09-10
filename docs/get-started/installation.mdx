@@ -4,7 +4,7 @@ description: "Install Agentegrity, pick the right extras, and confirm the wiring
 icon: "download"
 ---
 
-Agentegrity requires **Python 3.10+**. The base package has **zero required dependencies** —
+Agentegrity requires **Python 3.10+**. The base package has **zero required dependencies**:
 every optional capability lives behind an extra.
 
 ```bash
@@ -60,10 +60,10 @@ pip install "agentegrity[bedrock-agents]"
 | Extra | Pulls in | Unlocks |
 |---|---|---|
 | `crypto` | `cryptography>=41.0` | Ed25519 signing and signature verification on attestation and decision records |
-| `llm` | `anthropic>=0.40.0` | [`CorticalLLMLayer`](/docs/guides/semantic-layers) and `AdversarialLLMLayer` — Claude-backed semantic checks |
+| `llm` | `anthropic>=0.40.0` | [`CorticalLLMLayer`](/docs/guides/semantic-layers) and `AdversarialLLMLayer`: Claude-backed semantic checks |
 | `stats` | `scipy>=1.10` | `CorticalLayer(metric="wasserstein")` for ordinal drift support |
-| `otel` | `opentelemetry-{api,sdk,exporter-otlp}` | [`OTelSessionExporter`](/docs/export/opentelemetry) — one trace per session plus metrics |
-| `kms` | `boto3>=1.34` | `KMSCheckpoint` — envelope-encrypted checkpoints against an AWS KMS CMK |
+| `otel` | `opentelemetry-{api,sdk,exporter-otlp}` | [`OTelSessionExporter`](/docs/export/opentelemetry): one trace per session plus metrics |
+| `kms` | `boto3>=1.34` | `KMSCheckpoint`: envelope-encrypted checkpoints against an AWS KMS CMK |
 | `all` | everything above plus every framework | Kitchen sink; useful in CI |
 | `dev` | pytest, ruff, mypy, jsonschema | Contributing to the library itself |
 
@@ -82,14 +82,14 @@ pip install "agentegrity[claude,crypto,otel]"
 <Warning>
   Without the `crypto` extra, records are built and hash-linked but never **signed**. Hash
   linkage alone is not tamper-evidence against an attacker who controls the serialized
-  chain — `content_hash` is an unkeyed SHA-256, so anyone who edits a record can recompute
+  chain: `content_hash` is an unkeyed SHA-256, so anyone who edits a record can recompute
   the links. Install `crypto` for any chain that crosses a trust boundary. See
   [Signing and keys](/docs/guides/signing-and-keys).
 </Warning>
 
 ## TypeScript / Bun / Node
 
-Six npm packages mirror the Python adapters. Install only the one matching your framework —
+Six npm packages mirror the Python adapters. Install only the one matching your framework:
 each depends on the shared `@agentegrity/client` core.
 
 ```bash

@@ -5,7 +5,7 @@ icon: "terminal"
 ---
 
 Every tool call in a Claude Code session passes through a `PreToolUse` hook that evaluates it
-locally — no backend, no network round-trip, no GPU.
+locally: no backend, no network round-trip, no GPU.
 
 <Warning>
   Marked **experimental** in STATUS.md. The hook, the decision chain, the status command, and
@@ -42,9 +42,9 @@ per-session record counts.
     sensitive set also gates `mcp__filesystem__file_delete`; `mcp__db__*` gates a whole server.
   </Step>
   <Step title="Verdict mapped to the permission flow">
-    **allow** — the hook stays silent.
-    **ask** — inline approval with the reason.
-    **deny** — blocked before the tool runs.
+    **allow**: the hook stays silent.
+    **ask**: inline approval with the reason.
+    **deny**: blocked before the tool runs.
   </Step>
   <Step title="Decision recorded">
     A hash-linked `DecisionRecord` is appended to a per-session chain.
@@ -63,12 +63,12 @@ agentegrity verify-decisions ~/.agentegrity/claude-code/<session>.chain.json
 
 <Info>
   The session itself becomes verifiable evidence: what Claude Code was asked to do, what the
-  verdict was, and in what order — hash-linked so a later edit is detectable.
+  verdict was, and in what order: hash-linked so a later edit is detectable.
 </Info>
 
 <Warning>
   **Unsigned in v1** (self-vouched). Signing lands with the `KeyProvider` work. The chain proves
-  internal consistency, not authorship — see
+  internal consistency, not authorship, see
   [Signing and keys](/docs/guides/signing-and-keys).
 </Warning>
 
@@ -84,7 +84,7 @@ All optional:
 | `AGENTEGRITY_CC_CHAIN_DIR` | `~/.agentegrity/claude-code` | Decision-chain directory |
 
 <Note>
-  `AGENTEGRITY_CC_RISK_TIER` defaults to `high` specifically so `GOV-001` is active — a coding
+  `AGENTEGRITY_CC_RISK_TIER` defaults to `high` specifically so `GOV-001` is active: a coding
   agent with filesystem and shell access is a high-risk agent by any reasonable reading.
 </Note>
 
@@ -116,7 +116,7 @@ A fail-open event is logged to stderr, and `/agentegrity-status` reports it.
 ## Performance
 
 The full evaluation runs in the hook, typically **single-digit milliseconds** after
-interpreter startup. Interpreter startup dominates — the hook has a 20-second timeout
+interpreter startup. Interpreter startup dominates: the hook has a 20-second timeout
 configured, which is generous headroom rather than an expected duration.
 
 ## What it is not

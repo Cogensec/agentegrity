@@ -24,7 +24,7 @@ Adapters capture a decision at each of these:
 
 <Note>
   `subagent_start` is honest about itself. The parent's decision to delegate already happened
-  earlier — often at the parent's own `pre_tool_use`. So the record carries
+  earlier: often at the parent's own `pre_tool_use`. So the record carries
   `boundary_category: "lifecycle_attestation"`, telling a downstream verifier this is a
   lifecycle event recorded for completeness, not a deliberation captured at the moment of
   choice.
@@ -58,8 +58,8 @@ DecisionRecord(
 )
 ```
 
-`DecisionRecord` mirrors `AttestationRecord` exactly — same `canonical_payload` /
-`content_hash` / `sign` / `verify` semantics, same chain-link field — so both kinds live in
+`DecisionRecord` mirrors `AttestationRecord` exactly, same `canonical_payload` /
+`content_hash` / `sign` / `verify` semantics, same chain-link field: so both kinds live in
 one chain with no dispatch in the chain itself.
 
 ## Capture tiers
@@ -68,16 +68,16 @@ How much rationale was actually available at the boundary. The tier is **inferre
 which fields are populated, never asserted:
 
 <CardGroup cols={3}>
-  <Card title="Tier C — MINIMAL" icon="circle">
+  <Card title="Tier C, MINIMAL" icon="circle">
     Neither reasoning chain nor rejected alternatives. The record attests the candidate
     action and its inputs.
 
     **This is what production ships today.**
   </Card>
-  <Card title="Tier B — PARTIAL" icon="circle-half-stroke">
+  <Card title="Tier B, PARTIAL" icon="circle-half-stroke">
     A reasoning chain is present, but no rejected alternatives.
   </Card>
-  <Card title="Tier A — FULL" icon="circle-dot">
+  <Card title="Tier A, FULL" icon="circle-dot">
     Rejected alternatives present: the agent considered other actions and rejected them with
     stated reasons.
   </Card>
@@ -95,7 +95,7 @@ def infer_capture_tier(reasoning_chain, rejected_alternatives):
   agent's internal deliberation. Tiers B and A unlock as adapter-specific deliberation
   surfaces get wired in (Claude reasoning streams, OpenAI Responses reasoning content).
 
-  A chain full of Tier C records is not a defect — it is the framework telling you honestly
+  A chain full of Tier C records is not a defect: it is the framework telling you honestly
   how much it could see.
 </Warning>
 
@@ -113,7 +113,7 @@ DecisionInput(
 ```
 
 `redacted=True` is the default and records that fact in the signed payload. You can still
-prove a specific prompt produced a specific decision — hash the prompt you hold and compare —
+prove a specific prompt produced a specific decision: hash the prompt you hold and compare:
 without the chain itself becoming a data-exfiltration surface.
 
 The `stop` boundary uses the same treatment for final output: a content hash plus a
@@ -156,14 +156,14 @@ Provenance capture must never break the agent. On any exception, `record_decisio
 
 1. logs a warning **with** the traceback locally,
 2. emits a structured `capture_failure` `FrameworkEvent`, and
-3. returns `None` — the calling handler continues normally.
+3. returns `None`: the calling handler continues normally.
 
 The `capture_failure` event carries only `decision_point` and `exception_class`. The raw
 message is deliberately excluded: this event fans out to exporters, and framework internals
 routinely embed tokens, URLs, or PII in exception text.
 
 <Info>
-  The gap stays queryable downstream — you can see *that* capture failed and where — without
+  The gap stays queryable downstream (you can see *that* capture failed and where) without
   the failure becoming a leak.
 </Info>
 

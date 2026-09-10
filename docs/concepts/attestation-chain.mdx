@@ -5,7 +5,7 @@ icon: "link"
 ---
 
 An `AttestationChain` is an ordered, tamper-evident sequence of records for one agent. It
-holds two kinds of record — the evaluator's verdict and the agent's decision rationale — in
+holds two kinds of record (the evaluator's verdict and the agent's decision rationale) in
 a single linked history.
 
 <CardGroup cols={2}>
@@ -71,7 +71,7 @@ The payload contains `record_kind`, `record_id`, `agent_id`, `timestamp`,
   lift a validly-signed record out of one chain and splice it into another.
 </Info>
 
-`content_hash` is `sha256(canonical_payload)`, computed on demand — it is never stored, so
+`content_hash` is `sha256(canonical_payload)`, computed on demand: it is never stored, so
 it cannot go stale.
 
 ## Evidence
@@ -98,7 +98,7 @@ Evidence(
 
 <Warning>
   Before v0.7, `Evidence.content_hash` used Python's built-in `hash()`, which is
-  **process-salted** — the same layer result hashed differently in different processes,
+  **process-salted**: the same layer result hashed differently in different processes,
   making cross-process verification impossible. It is now a real SHA-256 over canonical JSON.
 
   Chains serialized before v0.7 fail `verify_chain()` after upgrading. Rebuild from a fresh
@@ -222,7 +222,7 @@ client.create_adapter("claude", profile=profile)   # see below
 
 <Note>
   Adapters accept `signing_key` on the underlying `_BaseAdapter` constructor. The zero-config
-  module entry points (`hooks()`, `instrument_chain()`, …) do not expose it — construct the
+  module entry points (`hooks()`, `instrument_chain()`, …) do not expose it, construct the
   adapter class directly when you need signing on an adapter path.
 </Note>
 
@@ -242,7 +242,7 @@ record = build_attestation_record(
 ```
 
 This is the single construction path used by the adapter base, `IntegrityMonitor`, and
-`AgentegrityClient.attest` — there is no second implementation to drift.
+`AgentegrityClient.attest`: there is no second implementation to drift.
 
 ## Next
 

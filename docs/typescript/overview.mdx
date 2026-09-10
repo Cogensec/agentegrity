@@ -27,7 +27,7 @@ same published versions.
     native hook to `emit()` and re-exports the shared lifecycle helpers.
   </Step>
   <Step title="createDefaultAdapter">
-    A lazy singleton in `@agentegrity/client` mirroring the Python `_BaseAdapter` — one
+    A lazy singleton in `@agentegrity/client` mirroring the Python `_BaseAdapter`: one
     session id per adapter, fail-open exporter fan-out, idempotent start/end, and a
     `process.beforeExit` shutdown hook so `session_end` fires on clean exit.
   </Step>
@@ -42,7 +42,7 @@ same published versions.
 <Warning>
   The TypeScript packages are **reporters**, not evaluators. They emit the same event stream
   and the same topology types, but the four-layer evaluation runs on whatever backend
-  receives the events — they do not run the layers in-process.
+  receives the events: they do not run the layers in-process.
 
   Practically: no in-process `enforce=True`, no local attestation chain. If you need
   in-process evaluation, run the Python library.
@@ -60,8 +60,8 @@ Everything comes from the environment, so nothing changes in your agent code:
 
 <Info>
   **The token is TLS-gated.** It is only sent when `baseUrl` is HTTPS or a loopback host
-  (`localhost`, `*.localhost`, `127.0.0.1`, `::1`). Anything else — including a URL that fails
-  to parse — is treated as unsafe and the credential is withheld, so a misconfigured
+  (`localhost`, `*.localhost`, `127.0.0.1`, `::1`). Anything else (including a URL that fails
+  to parse) is treated as unsafe and the credential is withheld, so a misconfigured
   `http://remote` endpoint never leaks it.
 </Info>
 
@@ -99,7 +99,7 @@ const consoleExporter: SessionExporter = {
 registerExporter(consoleExporter);
 ```
 
-Fan-out is fail-open — `safeCall` catches and logs every exporter error, so a broken
+Fan-out is fail-open: `safeCall` catches and logs every exporter error, so a broken
 subscriber can never break the agent. Registration is idempotent by reference equality.
 
 ## Custom frameworks

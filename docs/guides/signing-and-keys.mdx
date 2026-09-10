@@ -86,7 +86,7 @@ public_key_hex = chain.records[0].public_key.hex()
 open("agent.pub", "w").write(public_key_hex)
 ```
 
-That format — raw Ed25519 public key, hex-encoded, one per file — is what `--trusted-key` and
+That format (raw Ed25519 public key, hex-encoded, one per file) is what `--trusted-key` and
 `FileKeyProvider` both read.
 
 ## Verifying with an anchor
@@ -193,12 +193,12 @@ chain to walk.
 
 <Steps>
   <Step title="One key per agent identity">
-    Not per process, not per deployment. The `agent_id` is the identity a verifier resolves —
+    Not per process, not per deployment. The `agent_id` is the identity a verifier resolves:
     so pin `agent_id` explicitly too.
   </Step>
   <Step title="Private keys never touch the chain">
     Only the 32-byte public key is embedded. Signing key disclosure via debug logging is
-    threat **T-I2** — never log the private key object.
+    threat **T-I2**: never log the private key object.
   </Step>
   <Step title="Distribute public keys out of band">
     A key that travels with the chain it authenticates is not an anchor. Ship `.pub` files
@@ -210,7 +210,7 @@ chain to walk.
   </Step>
   <Step title="Plan rotation">
     A chain signed with the old key stays valid under the old key. Keep retired keys in the
-    trusted set for as long as you retain the chains they signed — the spec's minimum retention
+    trusted set for as long as you retain the chains they signed: the spec's minimum retention
     is 90 days.
   </Step>
 </Steps>

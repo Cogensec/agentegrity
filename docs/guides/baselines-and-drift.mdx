@@ -64,7 +64,7 @@ and writes through on every `update_baseline()`.
 
 <Warning>
   **Write-through failures are deliberately not silenced.** A misconfigured store fails loudly
-  rather than pretending to persist — because the failure mode of silent non-persistence is an
+  rather than pretending to persist: because the failure mode of silent non-persistence is an
   agent that never accumulates a baseline and therefore never detects drift. That failure is
   invisible unless the store shouts.
 </Warning>
@@ -114,7 +114,7 @@ is **not factored into the score**.
     ```
 
     Symmetric, bounded in `[0, 1]`, well-defined under Laplace smoothing. **Correct for
-    unordered support** — which is what `action_distribution` and `tool_usage` are, since
+    unordered support**: which is what `action_distribution` and `tool_usage` are, since
     "web_search" is not greater or less than "read_file".
 
     Always available; no extra dependency.
@@ -125,7 +125,7 @@ is **not factored into the score**.
     ```
 
     1D Earth Mover's Distance with each support point at its sorted-key index. Use it **only
-    when the support has genuine ordinal meaning** — latency buckets, risk tiers, severity
+    when the support has genuine ordinal meaning**: latency buckets, risk tiers, severity
     bands.
 
     Applied to tool names, the sorted-key indexing invents an ordering that does not exist,
@@ -154,7 +154,7 @@ is **not factored into the score**.
 
 <Warning>
   With `enforce=True`, a drift score above `2 × tolerance` **blocks the action**. At the
-  default that is 0.30 — reachable during a legitimate workload shift, like a seasonal change
+  default that is 0.30: reachable during a legitimate workload shift, like a seasonal change
   in which tools the agent reaches for.
 
   Widen the tolerance, or run drift in measure-only mode, before enforcing on it.
@@ -199,7 +199,7 @@ nothing.
 
 `drift_score` is the **mean** across computed dimensions, so a severe shift in one dimension
 is diluted by a stable one. `drifted_dimensions` names which ones actually crossed the
-tolerance — read that, not just the aggregate.
+tolerance: read that, not just the aggregate.
 
 `baseline_age_hours` matters downstream: the recovery layer scores a baseline older than a
 week at 0.5.
@@ -227,7 +227,7 @@ week at 0.5.
 ## Semantic drift
 
 `CorticalLLMLayer` adds Claude-driven drift **classification** on top of the statistical
-signal — distinguishing "the agent is doing a different kind of work" from "the agent has
+signal: distinguishing "the agent is doing a different kind of work" from "the agent has
 been redirected".
 
 ```python

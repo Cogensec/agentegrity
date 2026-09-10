@@ -28,7 +28,7 @@ Agno 2.x exposes three hook lists, and the adapter uses all three:
 | `tool_hooks` | Middleware chain wrapping **every** tool call | `pre_tool_use` / `post_tool_use` |
 
 <Info>
-  `tool_hooks` is a middleware chain, so it captures **tools added after instrumentation** —
+  `tool_hooks` is a middleware chain, so it captures **tools added after instrumentation**:
   a genuinely useful property when tools are registered dynamically. Adapters that snapshot a
   tool list at instrument time miss those.
 </Info>

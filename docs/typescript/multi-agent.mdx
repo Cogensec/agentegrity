@@ -66,7 +66,7 @@ const shrunk = topology.withoutMember("w-1");
 const wired  = topology.withChannels("broadcast_channels");
 ```
 
-Each returns a new snapshot preserving `topologyId` with a fresh `contentHash` — identical
+Each returns a new snapshot preserving `topologyId` with a fresh `contentHash`, identical
 semantics to Python's `with_member` / `without_member` / `with_channels`.
 
 ## Declaring from an adapter
@@ -82,7 +82,7 @@ await adapter().setTopology(topology, AgentRole.MEMBER);
 |---|---|
 | First | Emits `topology_declared` |
 | Structurally distinct | Emits `topology_change` with a `TopologyChange` diff in `data.change` |
-| Structurally identical | **No-op** — nothing to attest |
+| Structurally identical | **No-op**: nothing to attest |
 
 Mirrors Python's `_BaseAdapter.set_topology(topology, my_role)` exactly.
 
@@ -94,8 +94,8 @@ Mirrors Python's `_BaseAdapter.set_topology(topology, my_role)` exactly.
 | `@agentegrity/openai-agents` | `onAgentStart` + each `onHandoff` | `PEER_TO_PEER`, grown incrementally |
 | `@agentegrity/crewai` | `crew.agents` + `crew.process` | `HUB_SPOKE` / `HIERARCHICAL_DAG` |
 | `@agentegrity/google-adk` | `agent.subAgents` / `sub_agents` | `HIERARCHICAL_DAG` |
-| `@agentegrity/claude-sdk` | — | *none, pinned by conformance* |
-| `@agentegrity/vercel-ai` | — | *none, pinned by conformance* |
+| `@agentegrity/claude-sdk` | none | *none, pinned by conformance* |
+| `@agentegrity/vercel-ai` | none | *none, pinned by conformance* |
 
 ## Roles
 
@@ -141,7 +141,7 @@ ok = python_agent.attestation_chain.verify_cross_agent_links(
 ```
 
 <Warning>
-  The TypeScript packages are reporters — they do not build a local attestation chain. The
+  The TypeScript packages are reporters: they do not build a local attestation chain. The
   peer chain in that example is reconstructed on the backend from the emitted event stream.
   See [TypeScript overview](/docs/typescript/overview).
 </Warning>

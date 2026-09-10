@@ -67,8 +67,8 @@ tool from running.
 </CardGroup>
 
 <Note>
-  If graph introspection fails for any reason — a graph object that does not expose
-  `get_graph()`, an unexpected node structure — the adapter **falls back to single-agent**
+  If graph introspection fails for any reason: a graph object that does not expose
+  `get_graph()`, an unexpected node structure: the adapter **falls back to single-agent**
   rather than raising. Instrumentation degrading is always preferable to instrumentation
   breaking the agent.
 </Note>
@@ -83,7 +83,7 @@ watches for cascade. See [Multi-agent topology](/docs/concepts/multi-agent-topol
 chain = instrument_chain(my_chain, enforce=True)
 ```
 
-`block` denies. `escalate` denies unless an `approval_handler` approves — construct
+`block` denies. `escalate` denies unless an `approval_handler` approves, construct
 `LangChainAdapter` directly to pass one.
 
 ## Overrides

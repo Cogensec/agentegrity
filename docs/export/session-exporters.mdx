@@ -1,6 +1,6 @@
 ---
 title: "Session exporters"
-description: "The SessionExporter protocol — three async methods that receive every evaluated event."
+description: "The SessionExporter protocol: three async methods that receive every evaluated event."
 icon: "share-nodes"
 ---
 
@@ -48,7 +48,7 @@ class SessionExporter(Protocol):
   Fires from `close()` / `__aexit__` / `agentegrity.shutdown()`, with `get_summary()`.
 </ResponseField>
 
-Every method is async by contract. Registration is **idempotent** — the same instance is
+Every method is async by contract. Registration is **idempotent**: the same instance is
 never added twice.
 
 ## Optional describe()
@@ -59,7 +59,7 @@ def describe(self) -> dict[str, str]:
 ```
 
 A **convention**, not a Protocol member, so exporters written before it existed keep working
-— those are reported by class name. Whatever `describe()` returns is serialized into the
+those are reported by class name. Whatever `describe()` returns is serialized into the
 session summary, so **it must never include credentials**.
 
 ## Fail-open by design
@@ -73,7 +73,7 @@ async def _safe_await(coro, method_name):
 ```
 
 Exporter exceptions are caught and logged, never propagated. **A broken sink can never break
-the instrumented agent** — that is mitigation **M-7**.
+the instrumented agent**: that is mitigation **M-7**.
 
 Synchronous exceptions raised while *constructing* the coroutine are caught too.
 
@@ -102,7 +102,7 @@ Synchronous exceptions raised while *constructing* the coroutine are caught too.
 }
 ```
 
-`evaluation_result` is `null` for events that do not trigger an evaluation —
+`evaluation_result` is `null` for events that do not trigger an evaluation:
 `post_tool_use_failure`, `subagent_stop`, `pre_compact`, and the health events.
 
 Every payload validates against the published [wire format](/docs/export/wire-format).

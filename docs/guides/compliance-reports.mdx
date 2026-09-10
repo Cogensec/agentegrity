@@ -101,7 +101,7 @@ approval wiring. A session run with `enforce=False`, or with `enforce=True` and 
 
 <Info>
   Approvals are captured on the **adapter** enforcement path. `IntegrityMonitor` consults its
-  handler to decide whether to block but does not write an approval decision record — so a
+  handler to decide whether to block but does not write an approval decision record: so a
   monitor-based deployment shows an empty approvals table even when approvals happened.
 
   See [Enforcement and approvals](/docs/guides/enforcement-and-approvals).
@@ -143,7 +143,7 @@ Use this to feed a GRC platform, a dashboard, or your own reporting.
 | Everything verified | `0` |
 | Hash linkage or decision links broken | `1` |
 | Signatures failed **and** `--trusted-key` was passed | `1` |
-| Signatures absent, no `--trusted-key` | `0` — disclosed in the report, not treated as tamper |
+| Signatures absent, no `--trusted-key` | `0`: disclosed in the report, not treated as tamper |
 | Unreadable file / unparseable JSON / bad key | `2` |
 
 <Warning>
@@ -187,7 +187,7 @@ Stated plainly so nobody infers coverage that is not there:
 ## Retention
 
 The specification's control `VA-05` sets a **90-day minimum** for attestation record
-retention. Chains are plain JSON, so retention is your storage policy — but keep the
+retention. Chains are plain JSON, so retention is your storage policy: but keep the
 corresponding public keys for at least as long, or the chains become unverifiable.
 
 ## Next

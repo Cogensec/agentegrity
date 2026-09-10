@@ -24,7 +24,7 @@ rule = PolicyRule(
 
 <ResponseField name="rule_id" type="str" required>
   Appears in every `PolicyEvaluation`, the audit log, and the serialized `layer_states`. Use a
-  stable scheme — this is the identifier an auditor will ask about.
+  stable scheme: this is the identifier an auditor will ask about.
 </ResponseField>
 
 <ResponseField name="condition" type="callable" required>
@@ -60,7 +60,7 @@ rule = PolicyRule(
 | `DENY` | `block` | **Denied**, never approvable |
 | `REQUIRE_APPROVAL` | `escalate` | **Denied** unless an approval handler approves |
 | `CONDITIONAL` | `alert` | Proceeds; recorded |
-| `ALLOW` | — | Not triggered |
+| `ALLOW` | none | Not triggered |
 
 Pick `DENY` for things that must never happen, `REQUIRE_APPROVAL` for things a human should
 decide, and `CONDITIONAL` for things worth knowing about.
@@ -197,7 +197,7 @@ Adding rules **dilutes** each one's individual impact. With `enterprise-default`
 <Warning>
   If a single high-consequence rule must dominate the score, keep the rule set small, or run
   it in a separate `GovernanceLayer` instance. The action (`block` / `escalate`) is unaffected
-  by dilution — only the numeric `assurance_score` is.
+  by dilution, only the numeric `assurance_score` is.
 </Warning>
 
 ## Testing

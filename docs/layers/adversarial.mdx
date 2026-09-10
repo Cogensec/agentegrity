@@ -29,7 +29,7 @@ layer = AdversarialLayer(
     `(channel, threat_type)` pair.
   </Step>
   <Step title="Run the sequence detector">
-    Behavioral check over ordered tool-call history — sensitive read followed by external send.
+    Behavioral check over ordered tool-call history: sensitive read followed by external send.
   </Step>
   <Step title="Run custom detectors">
     Each in a try/except: a broken detector logs a warning and is skipped, never breaking the
@@ -49,7 +49,7 @@ layer = AdversarialLayer(
 | `reasoning_chain` | `reasoning` | Hostile objectives stated in the agent's own reasoning, before any action |
 | `memory_reads[].content` | `memory_reads` | Model-context / memory-poisoning attacks |
 | `tool_outputs[].content` \| `.result` | `tool_responses` | Model-in-the-middle via a compromised tool |
-| `tool_definitions[]` | `tool_definitions` | **MCP tool poisoning** — directives in tool descriptions and schema field descriptions |
+| `tool_definitions[]` | `tool_definitions` | **MCP tool poisoning**: directives in tool descriptions and schema field descriptions |
 | `retrieved_documents[].content` \| `.text` \| `.body` | `retrieved_documents` | Indirect injection via a poisoned RAG corpus |
 | `peer_messages[].content` | `peer_messages` | A compromised peer injecting into this agent |
 | `topology_context.shared_memory[]` | `shared_memory` | Cross-agent poisoning through shared state |
@@ -62,7 +62,7 @@ layer = AdversarialLayer(
 </Info>
 
 A `tool_outputs` entry carrying an `error` also raises a low-severity `tool_manipulation`
-signal (severity 0.30, confidence 0.40) — "verify tool integrity", not an accusation.
+signal (severity 0.30, confidence 0.40): "verify tool integrity", not an accusation.
 
 ## The pattern taxonomy
 
@@ -117,7 +117,7 @@ different flags. `severity` and `confidence` are validated into `[0, 1]` at cons
 
 <Note>
   The taxonomy is deliberately conservative. In a measurement library, false positives are
-  worse than false negatives — an operator who learns to ignore alerts has lost more than one
+  worse than false negatives: an operator who learns to ignore alerts has lost more than one
   who never had them.
 </Note>
 
@@ -186,7 +186,7 @@ DEFAULT_TOOL_CATEGORIES = ToolCategories(
 ```
 
 <Warning>
-  Generic verbs are deliberately **excluded** — `read_file` alone would flag every coding
+  Generic verbs are deliberately **excluded**: `read_file` alone would flag every coding
   agent. Passing `tool_categories=` **replaces** the defaults; extend by unioning:
 
   ```python
@@ -211,7 +211,7 @@ for threat in threats:
 score = clamp(score, 0.0, 1.0)
 ```
 
-A single severity-0.80 / confidence-0.85 injection costs **0.34**, landing at 0.66 — below
+A single severity-0.80 / confidence-0.85 injection costs **0.34**, landing at 0.66, below
 the default 0.70 threshold, so the layer alerts.
 
 ### Action
@@ -239,7 +239,7 @@ ThreatAssessment(
 ```
 
 Confidence 0.85 is justified because this is a **structural fact**, not a text heuristic.
-The check only runs when a topology is declared — no topology, no false positives.
+The check only runs when a topology is declared: no topology, no false positives.
 
 ## Extending
 
@@ -308,7 +308,7 @@ The regex taxonomy is **tier 1**. Two more sit above it:
     Requires `pip install "agentegrity[llm]"`.
   </Card>
   <Card title="AdversarialSLMLayer" icon="microchip">
-    Local small model over the OpenAI-compatible protocol — Ollama, llama.cpp, vLLM,
+    Local small model over the OpenAI-compatible protocol, Ollama, llama.cpp, vLLM,
     LM Studio. **Zero extra dependencies** (stdlib `urllib`).
   </Card>
 </CardGroup>

@@ -14,7 +14,7 @@ No configuration, no server, no signup.
     ```
   </Step>
   <Step title="Attach the adapter">
-    One call. Measure-only by default — it never blocks a tool call unless you pass
+    One call. Measure-only by default: it never blocks a tool call unless you pass
     `enforce=True`.
   </Step>
   <Step title="Read the session summary">
@@ -52,7 +52,7 @@ runtime.adapters["openai_agents"].create_run_hooks()
 
 <Note>
   `init()` is convenience wiring only. Every adapter it builds behaves exactly as if you had
-  constructed it via `AgentegrityClient.create_adapter`. It is idempotent — a second call
+  constructed it via `AgentegrityClient.create_adapter`. It is idempotent: a second call
   warns and returns the existing runtime until you call `shutdown()`.
 </Note>
 
@@ -118,7 +118,7 @@ The per-framework modules are the fully explicit path, and the one most people u
     instrument(agent)
     print(report())
     ```
-    Observation-only — ADK's `before_*` callbacks expose no veto mechanism.
+    Observation-only, ADK's `before_*` callbacks expose no veto mechanism.
     [Full guide](/docs/frameworks/google-adk)
   </Tab>
 
@@ -169,7 +169,7 @@ hooks(
 
 <Warning>
   Passing **any** of these builds a *new* adapter rather than reusing the module-global one.
-  That is deliberate — it lets you run independent evaluations in one process — but it means
+  That is deliberate (it lets you run independent evaluations in one process) but it means
   the module-level `report()` will not see that adapter's session. Keep the returned adapter
   if you need its summary.
 </Warning>

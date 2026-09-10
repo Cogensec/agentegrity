@@ -1,6 +1,6 @@
 ---
 title: "Threat model"
-description: "STRIDE against the framework itself — what an attacker can do to Agentegrity, and what Agentegrity does about it."
+description: "STRIDE against the framework itself: what an attacker can do to Agentegrity, and what Agentegrity does about it."
 icon: "skull"
 ---
 
@@ -9,15 +9,15 @@ threats against **Agentegrity itself**: what an adversary who wants to defeat th
 measurement can do, and which mitigation stands in the way.
 
 <Card title="Full threat model" icon="file-shield" href="https://github.com/cogensec/agentegrity/blob/main/spec/threat-model.md" horizontal>
-  The complete document — every threat with its mitigation, residual risk, and the test that
-  pins it — lives in the repository at `spec/threat-model.md`. This page is the orientation.
+  The complete document (every threat with its mitigation, residual risk, and the test that
+  pins it) lives in the repository at `spec/threat-model.md`. This page is the orientation.
 </Card>
 
 ## Scope
 
 The system under analysis is this repository plus the published `agentegrity` PyPI package
 and the `@agentegrity/*` npm scope. The agent's LLM, the framework SDK being instrumented,
-and the operator's exporter backend are **external** — modelled as what they can do *to*
+and the operator's exporter backend are **external**: modelled as what they can do *to*
 Agentegrity.
 
 ## Trust boundaries
@@ -25,7 +25,7 @@ Agentegrity.
 | # | Boundary | What crosses it |
 |---|---|---|
 | **TB-1** | Framework SDK ↔ Adapter | Arbitrary content into adapter event handlers |
-| **TB-2** | LLM ↔ Adapter | Tool responses, retrieved documents, peer messages, shared memory, broadcasts — everything the adversarial layer scans |
+| **TB-2** | LLM ↔ Adapter | Tool responses, retrieved documents, peer messages, shared memory, broadcasts: everything the adversarial layer scans |
 | **TB-3** | Adapter ↔ Layers | In-process; **trusted** |
 | **TB-4** | Layers ↔ Persistence | Checkpoint and baseline writes to disk or sqlite |
 | **TB-5** | Adapter ↔ Exporter | Session start / events / end fanned out to registered exporters |
@@ -34,7 +34,7 @@ Agentegrity.
 
 <Note>
   TB-3 being trusted is a deliberate, stated assumption. An attacker with in-process code
-  execution has already won — they can patch the layers directly. Agentegrity does not claim
+  execution has already won: they can patch the layers directly. Agentegrity does not claim
   to defend against that, and **T-T4** says so explicitly.
 </Note>
 
@@ -63,7 +63,7 @@ Agentegrity.
     | **T-T4** | Tampering with the regex taxonomy at runtime |
 
     T-T1 is closed by Ed25519 signatures over a canonical payload that **includes
-    `chain_previous`** — you cannot edit a record or move it between chains.
+    `chain_previous`**: you cannot edit a record or move it between chains.
 
     T-T2 has real residual risk: file and sqlite checkpoints are not signed. `KMSCheckpoint`
     binds at-rest secrecy to a KMS-managed CMK and verifies the encryption context at load,
@@ -77,7 +77,7 @@ Agentegrity.
     | **T-R2** | Agent denies it received an injection |
 
     Both are addressed by the chain: signed, ordered, hash-linked, with per-record content
-    hashes. The interop gap — a generic verifier needing the framework to check a record — is
+    hashes. The interop gap (a generic verifier needing the framework to check a record) is
     tracked as JWS / COSE serialization work.
   </Accordion>
 
@@ -88,7 +88,7 @@ Agentegrity.
     | **T-I2** | Signing key disclosure via debug logging |
     | **T-I3** | Cross-tenant leakage in checkpoint stores |
 
-    T-I1 is not a bug — it is the exporter's **purpose**, and the design response is
+    T-I1 is not a bug: it is the exporter's **purpose**, and the design response is
     disclosure rather than prevention. Attaching a sink logs the destination at INFO and adds
     it to `report()["exporters"]`. **An empty `exporters` list is the proof a run stayed
     local.** Neither surface ever contains the token.
@@ -120,7 +120,7 @@ Agentegrity.
     | **T-E2** | Arbitrary code execution via a custom validator |
     | **T-E3** | Supply-chain attack on `agentegrity` itself |
 
-    T-E1 is closed by `validate_storage_identifier` — storage identifiers are allow-listed,
+    T-E1 is closed by `validate_storage_identifier`: storage identifiers are allow-listed,
     so an `agent_id` of `../../etc/passwd` is rejected before it reaches the filesystem.
 
     T-E2 is accepted and stated: a custom validator is your code running in your process.
@@ -137,7 +137,7 @@ talk to each other.
 | ID | Threat | Mitigation |
 |---|---|---|
 | **T-CASCADE** | Compromise propagates through peer channels | Recovery layer tracks `peer_score_history`; correlated degradation across ≥2 peers raises `cascade_compromise_suspected` and escalates to `alert` |
-| **T-ROLE-DRIFT** | A member starts acting outside its declared role | Cortical baselines keyed `(agent_id, role)` — drift is measured against the role, not the agent |
+| **T-ROLE-DRIFT** | A member starts acting outside its declared role | Cortical baselines keyed `(agent_id, role)`: drift is measured against the role, not the agent |
 | **T-SHARED-MEM-MISATTRIB** | Poisoning attributed to the reader, not the writer | `writer_agent_id` captured at ingest on every `shared_memory_write` |
 | **T-ORPHAN-LIFECYCLE** | A lifecycle event dropped by sampling corrupts the topology view | `subagent_stop` without a matching start emits a `subagent_orphan` event so the gap is visible |
 | **T-BROADCAST-AMP** | One broadcast × N members = N evaluations | Adapters rate-limit at the source; buffer cap is the defensive ceiling |
@@ -169,19 +169,19 @@ a claim, not a control.
 
 v0.8.1 closed every finding from a full adversarial audit of the v0.8.0 surface:
 
-- **Trust model** — `verify_signatures(trusted_keys=…)`; `verify-decisions` stopped reporting
+- **Trust model**: `verify_signatures(trusted_keys=…)`; `verify-decisions` stopped reporting
   unsigned chains as verified.
-- **Enforcement** — `escalate` now fails closed under `enforce=True`, so the built-in
+- **Enforcement**: `escalate` now fails closed under `enforce=True`, so the built-in
   `REQUIRE_APPROVAL` policies actually gate instead of being silently advisory.
-- **Deserialization** — the embedding-similarity cache moved from `pickle` to JSON, closing
+- **Deserialization**: the embedding-similarity cache moved from `pickle` to JSON, closing
   RCE via a poisoned cache.
-- **Hardening** — bounded context buffers, exception text kept out of serialized records,
+- **Hardening**: bounded context buffers, exception text kept out of serialized records,
   allow-listed storage identifiers, TLS-gated reporter token, restrictive store-file
   permissions, TOCTOU-free store I/O.
 
 v0.9.0 closed two injection paths: tool arguments could shadow the fields governance matches
 on (an agent could name an argument `tool` and skip `GOV-001` entirely), and the LLM
-classifier did not cover `shared_memory` or `broadcast_channels` — the exact cross-agent
+classifier did not cover `shared_memory` or `broadcast_channels`: the exact cross-agent
 cascade path those v0.8 channels exist to defend.
 
 ## Out of scope

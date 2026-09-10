@@ -40,7 +40,7 @@ layer = AdversarialLayer(extra_patterns=healthcare_patterns)
 ### DetectorPattern fields
 
 <ResponseField name="name" type="str" required>
-  Appears in `ThreatAssessment.indicators`. Make it greppable — this is how a false positive
+  Appears in `ThreatAssessment.indicators`. Make it greppable: this is how a false positive
   gets traced back to one rule.
 </ResponseField>
 
@@ -71,7 +71,7 @@ want to happen:
 
 | Goal | Severity | Confidence | Coherence cost |
 |---|---:|---:|---:|
-| Block immediately | ≥ 0.90 | any | — (`block_on_critical` fires) |
+| Block immediately | ≥ 0.90 | any |, (`block_on_critical` fires) |
 | Push below the 0.70 threshold alone | 0.80 | 0.80 | 0.32 → 0.68 |
 | Contribute without alerting alone | 0.50 | 0.40 | 0.10 → 0.90 |
 
@@ -85,7 +85,7 @@ want to happen:
 
 ## 2. Callable detectors
 
-For logic regex cannot express — timing, rate, cross-field correlation, an external
+For logic regex cannot express: timing, rate, cross-field correlation, an external
 reputation service.
 
 ```python
@@ -108,7 +108,7 @@ def rate_limit_detector(profile, context):
 layer = AdversarialLayer(threat_detectors=[rate_limit_detector])
 ```
 
-A detector receives `(profile, context)` and returns a list of `ThreatAssessment` — empty for
+A detector receives `(profile, context)` and returns a list of `ThreatAssessment`, empty for
 "nothing found".
 
 <Info>
@@ -185,7 +185,7 @@ layer = AdversarialLayer(tool_categories=categories)
   `DEFAULT_TOOL_CATEGORIES` as above unless you genuinely want to drop them.
 </Warning>
 
-Names match exactly, by glob, or by MCP suffix — the same semantics as `GOV-001`.
+Names match exactly, by glob, or by MCP suffix: the same semantics as `GOV-001`.
 
 ## Embedding similarity
 

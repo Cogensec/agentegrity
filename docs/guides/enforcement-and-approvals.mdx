@@ -26,10 +26,10 @@ runtime = agentegrity.init(enforce=True)
   **`escalate` fails closed.** With `enforce=True` and no approval handler, every escalation is
   denied.
 
-  This is the v0.8.1 fix for a real gap: before it, the built-in `REQUIRE_APPROVAL` policies
-  — `GOV-001` through `GOV-004`, the ones most deployments rely on — were **silently
-  advisory** under enforcement. An operator who turned enforcement on believed sensitive tool
-  calls were being gated, and they were not.
+  This is the v0.8.1 fix for a real gap. Before it, the built-in `REQUIRE_APPROVAL` policies
+  (`GOV-001` through `GOV-004`, the ones most deployments rely on) were **silently advisory**
+  under enforcement. An operator who turned enforcement on believed sensitive tool calls were
+  being gated, and they were not.
 </Warning>
 
 Escalations come from three places, and all three now gate:
@@ -65,7 +65,7 @@ def approve(profile, score, candidate_action) -> bool:
 
 <Warning>
   A handler that **raises** is treated as a denial, logged with the exception class. Approval
-  fails closed in every direction — there is no exception path that accidentally allows.
+  fails closed in every direction: there is no exception path that accidentally allows.
 </Warning>
 
 ## ApprovalWorkflow
@@ -172,7 +172,7 @@ reads, and what maps to **EU AI Act Art. 14 (human oversight)**.
 
 ## Wiring it up
 
-Zero-config entry points do not expose `approval_handler` — construct the adapter class:
+Zero-config entry points do not expose `approval_handler`: construct the adapter class:
 
 ```python
 from agentegrity import AgentegrityClient, AgentProfile, ApprovalWorkflow
@@ -238,7 +238,7 @@ except IntegrityViolationError as exc:
             for e in adapter.events if e.evaluation_result)
     ```
     Every `escalate` is an action that would have been denied. If that set contains routine
-    work, fix the policy — not the enforcement setting.
+    work, fix the policy: not the enforcement setting.
   </Step>
   <Step title="Tune the sensitive-tool set">
     `GOV-001` is usually the noisy one. Enumerate the tools you genuinely consider sensitive
@@ -255,7 +255,7 @@ except IntegrityViolationError as exc:
 
 ## Observation-only adapters
 
-Google ADK, AutoGen, and the Bedrock boto3 path **cannot enforce** — they warn at
+Google ADK, AutoGen, and the Bedrock boto3 path **cannot enforce**: they warn at
 construction and record what would have been blocked. See
 [Limitations](/docs/concepts/limitations).
 

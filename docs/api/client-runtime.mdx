@@ -66,7 +66,7 @@ runtime.shutdown() -> None
 ```
 
 `skipped` records frameworks whose probe succeeded but whose adapter dependencies were
-missing — e.g. `autogen` installed without `opentelemetry-sdk`. Those do not fail `init()`.
+missing, e.g. `autogen` installed without `opentelemetry-sdk`. Those do not fail `init()`.
 
 ### instrument dispatch
 
@@ -86,7 +86,7 @@ Dispatches on the target's class module, first prefix match wins:
 
 | Error | When |
 |---|---|
-| `TypeError` | No prefix matched — use `runtime.adapters[name]` directly |
+| `TypeError` | No prefix matched: use `runtime.adapters[name]` directly |
 | `RuntimeError` | Prefix matched but `init()` did not build that adapter |
 
 Hook-style frameworks have no dispatch entry:
@@ -113,7 +113,7 @@ agentegrity.detect_frameworks()     # -> list[str], in registry order
 | `agno` | `agno` |
 | `bedrock_agents` | `strands` |
 
-Only `crewai` auto-attaches at `init()` — its event-bus subscription is purely additive.
+Only `crewai` auto-attaches at `init()`: its event-bus subscription is purely additive.
 AutoGen is deliberately excluded because `instrument()` installs a global OTel
 `TracerProvider`.
 
@@ -184,7 +184,7 @@ Valid names: `claude` · `langchain` · `openai_agents` · `crewai` · `google_a
 `agno` · `bedrock_agents`. An unknown name raises `ValueError` listing the valid set.
 
 <Info>
-  The registry is **lazy** — the framework module is imported only when its adapter is
+  The registry is **lazy**: the framework module is imported only when its adapter is
   requested, so a process that never asks for `"crewai"` never pays the crewai import cost.
 
   When the framework is not installed, `ImportError` propagates *and* a telemetry event fires

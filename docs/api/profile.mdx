@@ -54,7 +54,7 @@ profile = AgentProfile(
 <ResponseField name="created_at" type="datetime" default="now(UTC)" />
 
 <Warning>
-  The first four fields are **positional** — `AgentProfile` is a plain dataclass and they carry
+  The first four fields are **positional**: `AgentProfile` is a plain dataclass and they carry
   no defaults. Every keyword-only-looking argument after them does. Use keywords throughout to
   avoid surprises.
 </Warning>
@@ -72,7 +72,7 @@ AgentProfile.default(name="my-agent")  # -> AgentProfile
 ```
 
 <Warning>
-  `from_dict()` does **not** restore `created_at` — a round trip produces a profile with a
+  `from_dict()` does **not** restore `created_at`: a round trip produces a profile with a
   fresh timestamp. Persist it separately if baseline age matters.
 </Warning>
 

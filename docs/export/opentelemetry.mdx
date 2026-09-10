@@ -51,7 +51,7 @@ OTelSessionExporter(tracer_provider=tp, meter_provider=mp)
 
 <Info>
   `agentegrity.health_events` is the one to alert on first. It counts **instrumentation
-  failures** — decision capture that failed, lifecycle events that arrived orphaned, buffers
+  failures**: decision capture that failed, lifecycle events that arrived orphaned, buffers
   that overflowed. A rising health-event rate means your evidence has gaps, which is a
   different and more urgent problem than a falling score.
 </Info>
@@ -63,8 +63,8 @@ OTelSessionExporter(capture_content=True)
 ```
 
 <Warning>
-  With `capture_content=False` (the default), content-bearing keys — `prompt`, `tool_input`,
-  `tool_response`, `output`, `content` — are **hashed**, not recorded.
+  With `capture_content=False` (the default), content-bearing keys: `prompt`, `tool_input`,
+  `tool_response`, `output`, `content`: are **hashed**, not recorded.
 
   With it enabled, they are truncated to **512 characters** and attached to the span. Turning
   it on sends prompts and tool arguments to your OTLP backend. Make that a deliberate decision
@@ -82,7 +82,7 @@ register_exporter(OTelSessionExporter(
 ))
 ```
 
-With a `chain_provider`, the exporter reports cryptographic chain verification as telemetry —
+With a `chain_provider`, the exporter reports cryptographic chain verification as telemetry:
 so a tampered chain becomes an alertable metric rather than something you discover during an
 audit.
 
@@ -104,8 +104,8 @@ session (root span)
 └── stop                  [action=pass,     composite=0.91]
 ```
 
-Attributes cover adapter name, event type, composite score, action, per-layer scores, and —
-when a topology is declared — its kind and member count.
+Attributes cover adapter name, event type, composite score, action, per-layer scores, and:
+when a topology is declared: its kind and member count.
 
 ## describe()
 

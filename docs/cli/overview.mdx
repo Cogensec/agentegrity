@@ -12,7 +12,7 @@ python -m agentegrity ...            # identical
 The console script is installed by the package; `python -m agentegrity` works without it
 being on PATH.
 
-## No arguments — info
+## No arguments, info
 
 ```bash
 agentegrity
@@ -59,7 +59,7 @@ pipeline. **If it prints a composite score and `OK`, the install is wired correc
 | Exit | Meaning |
 |---|---|
 | `0` | Composite &gt; 0 |
-| `1` | Composite is 0 — something is broken |
+| `1` | Composite is 0: something is broken |
 
 ## verify-decisions
 
@@ -85,7 +85,7 @@ agentegrity 0.10.0 — verify-decisions chain.json
 
 <ResponseField name="--trusted-key <path>" type="repeatable">
   A file containing one hex-encoded raw Ed25519 public key. **Without it, the anchor line reads
-  `[UNPINNED (self-vouched)]`** — a chain forged with an attacker-generated key self-verifies.
+  `[UNPINNED (self-vouched)]`**: a chain forged with an attacker-generated key self-verifies.
 </ResponseField>
 
 ### Failure output
@@ -123,7 +123,7 @@ and a control mapping to EU AI Act Art. 12 / Art. 14 and NIST AI RMF.
 </ResponseField>
 
 <ResponseField name="--trusted-key <path>" type="repeatable">
-  Pin a signing key. **Gates the exit code** — see below.
+  Pin a signing key. **Gates the exit code**, see below.
 </ResponseField>
 
 ### Exit semantics
@@ -133,7 +133,7 @@ and a control mapping to EU AI Act Art. 12 / Art. 14 and NIST AI RMF.
 | Everything verified | `0` |
 | Hash linkage or decision links broken | `1` |
 | Signatures failed **and** `--trusted-key` passed | `1` |
-| Signatures absent, no `--trusted-key` | `0` — disclosed in the report, not treated as tamper |
+| Signatures absent, no `--trusted-key` | `0`: disclosed in the report, not treated as tamper |
 | Unreadable file / bad JSON / bad key | `2` |
 
 <Warning>
@@ -208,7 +208,7 @@ An unknown command prints to stderr and exits `2`.
 | `AGENTEGRITY_OFFLINE` | Test runs work without a reporter |
 | `ANTHROPIC_API_KEY` | Fallback for LLM-backed layers |
 | `AGENTEGRITY_SLM_BASE_URL` | Local SLM server. Default `http://localhost:11434/v1` |
-| `AGENTEGRITY_SLM_MODEL` | Local SLM model name — no default |
+| `AGENTEGRITY_SLM_MODEL` | Local SLM model name: no default |
 | `AGENTEGRITY_SLM_API_KEY` | Optional bearer token for the SLM server |
 | `AGENTEGRITY_CC_MODE` | Claude Code plugin: `enforce` (default) or `alert` |
 | `AGENTEGRITY_CC_DISABLED` | `1` disables the Claude Code hook |

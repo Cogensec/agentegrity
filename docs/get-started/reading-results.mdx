@@ -31,13 +31,13 @@ print(report())
 ```
 
 <ResponseField name="adapter" type="string">
-  Registry key of the adapter that produced the session — `claude`, `langchain`,
+  Registry key of the adapter that produced the session: `claude`, `langchain`,
   `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno`, `bedrock_agents`.
 </ResponseField>
 
 <ResponseField name="agent_id" type="string | null">
   The `AgentProfile.agent_id` under evaluation. `null` when the module-global adapter was
-  never constructed — `report()` always returns a well-formed summary, so you never have to
+  never constructed: `report()` always returns a well-formed summary, so you never have to
   guard against `None`.
 </ResponseField>
 
@@ -53,11 +53,11 @@ print(report())
 </ResponseField>
 
 <ResponseField name="attestation_records" type="int">
-  Records of kind `attestation` in the chain — the evaluator's verdict at each boundary.
+  Records of kind `attestation` in the chain: the evaluator's verdict at each boundary.
 </ResponseField>
 
 <ResponseField name="decision_records" type="int">
-  Records of kind `decision` — the agent's candidate action captured *before* it executed.
+  Records of kind `decision`: the agent's candidate action captured *before* it executed.
   See [Decision provenance](/docs/concepts/decision-provenance).
 </ResponseField>
 
@@ -77,7 +77,7 @@ print(report())
 <ResponseField name="exporters" type="list[dict]">
   Every network sink attached to this session. **An empty list is the proof a run stayed
   local.** Entries carry a `type` and, where the sink has a nameable destination, a
-  `target` — never a token.
+  `target`, never a token.
 </ResponseField>
 
 <Warning>
@@ -97,7 +97,7 @@ print(score.to_dict())
 
 <ResponseField name="composite" type="float">
   The weighted aggregation of the four property scores, rounded to 4 decimals. This is the
-  number people quote. Weights are configurable — see
+  number people quote. Weights are configurable, see
   [Properties and scoring](/docs/concepts/properties-and-scoring).
 </ResponseField>
 
@@ -122,7 +122,7 @@ print(score.to_dict())
 
 <ResponseField name="confidence" type="float">
   Reduced when layers are missing or return empty detail dicts. `min(coverage,
-  detail_completeness)` — coverage is `layers_run / layers_configured`, so a fail-fast
+  detail_completeness)`: coverage is `layers_run / layers_configured`, so a fail-fast
   short-circuit lowers confidence, correctly signalling an incomplete picture.
 </ResponseField>
 
@@ -179,7 +179,7 @@ recovery     0.750  pass     0.02ms
 </ResponseField>
 
 <ResponseField name="passed" type="bool">
-  Layer-local pass/fail. Note a layer can be `passed=True` with `action="alert"` — the
+  Layer-local pass/fail. Note a layer can be `passed=True` with `action="alert"`: the
   governance layer does exactly this for conditional triggers.
 </ResponseField>
 
@@ -250,7 +250,7 @@ score across layers (weakest link), assurance becomes the **average**.
     }
     ```
     A `dimensions` key suffixed `__insufficient_samples` means that dimension was checked
-    but skipped for lack of data — not that it passed.
+    but skipped for lack of data: not that it passed.
     [Cortical layer](/docs/layers/cortical)
   </Accordion>
 
@@ -289,7 +289,7 @@ score across layers (weakest link), assurance becomes the **average**.
       "quarantine_capable": false
     }
     ```
-    `recovery_capable: false` on a fresh profile is expected — it means the profile does not
+    `recovery_capable: false` on a fresh profile is expected: it means the profile does not
     declare any of `state_restore` / `checkpoint` / `rollback` / `session_reset` /
     `peer_quarantine` as capabilities. [Recovery layer](/docs/layers/recovery)
   </Accordion>
@@ -314,8 +314,8 @@ for r in score.layer_results:
     print(f"  {r.layer_name:12} {r.score:.3f}  {r.action}")
 ```
 
-The adversarial layer fires on two families at once — `prompt_injection`
-(`ignore_previous`) and `data_exfiltration` — collapsing them into one
+The adversarial layer fires on two families at once: `prompt_injection`
+(`ignore_previous`) and `data_exfiltration`: collapsing them into one
 `ThreatAssessment` per `(channel, threat_type)` pair with severity and confidence taken as
 the max across matching patterns. Coherence degrades by `severity × confidence × 0.5` per
 threat.

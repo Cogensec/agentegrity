@@ -14,7 +14,7 @@ integrity to stay coherent when those external controls cannot reach inside its 
 process?**
 
 <Card title="Agentegrity" icon="triangle-exclamation" horizontal>
-  *agent + integrity* — the discipline of building AI agents that can defend themselves,
+  *agent + integrity*: the discipline of building AI agents that can defend themselves,
   stabilize themselves, and recover themselves, and then verifying that they actually can.
 </Card>
 
@@ -94,7 +94,7 @@ await query({ prompt: "hi", options: { hooks: hooks() } });
 
 </CodeGroup>
 
-Fourteen zero-config adapters — eight in Python, six in TypeScript — produce the same
+Fourteen zero-config adapters (eight in Python, six in TypeScript) produce the same
 evaluator pipeline, the same event stream, and the same signed attestation chain.
 
 ## What it is, precisely
@@ -112,7 +112,7 @@ evaluator pipeline, the same event stream, and the same signed attestation chain
   </Accordion>
 
   <Accordion title="What it deliberately is not" icon="circle-xmark">
-    It is not a guardrail. It does not block agent actions on its own — when an action is
+    It is not a guardrail. It does not block agent actions on its own: when an action is
     blocked, that is the result of an explicit governance policy, not inferred risk.
 
     It is not a runtime enforcement layer competing with WAF-style products. It is not a
@@ -123,7 +123,7 @@ evaluator pipeline, the same event stream, and the same signed attestation chain
 
   <Accordion title="Where it is weak" icon="triangle-exclamation">
     The adversarial layer's first tier is a regex taxonomy. It scores 1.000 TPR / 0.000 FPR
-    on InjecAgent (N=2,108) — but those patterns were **calibrated on that suite**, so read
+    on InjecAgent (N=2,108): but those patterns were **calibrated on that suite**, so read
     it as in-distribution recall. On AgentDojo's goal-text projection it scores 0.286 TPR /
     0.113 FPR, and regex cannot close that gap because separating an injected goal from a
     legitimate user task requires session context, not content patterns.

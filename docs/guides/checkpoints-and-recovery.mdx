@@ -57,7 +57,7 @@ A `CheckpointSnapshot` captures:
 
 <ResponseField name="checkpoint_id" type="str">
   Defaults to a fresh UUID. A backend's `save()` **may return a different id**, in which case
-  the returned id is canonical — always use the return value, not the field you passed in.
+  the returned id is canonical: always use the return value, not the field you passed in.
 </ResponseField>
 
 <ResponseField name="created_at" type="str">
@@ -95,7 +95,7 @@ link hashes are preserved verbatim.
 <Info>
   That property is load-bearing. If restoration re-appended records, every `chain_previous`
   would be recomputed, every signature would break, and the restored agent would carry an
-  unverifiable chain — making recovery self-defeating. It is pinned by
+  unverifiable chain: making recovery self-defeating. It is pinned by
   `tests/test_recovery_restore.py` (mitigation **M-14**).
 </Info>
 
@@ -201,7 +201,7 @@ at least `degradation_threshold` is `sustained_degradation`.
   shape a slow-drift attack produces.
 </Note>
 
-Fewer than three samples returns 1.0 and `sustained=False` — not enough history to claim
+Fewer than three samples returns 1.0 and `sustained=False`: not enough history to claim
 anything.
 
 ## An operational pattern
@@ -211,7 +211,7 @@ anything.
     After a successful deploy, at the start of a shift, after a reviewed baseline update.
   </Step>
   <Step title="Tag the reason in metadata">
-    `{"reason": "pre-deploy", "release": "v4.2.0"}` — you will want this when choosing which
+    `{"reason": "pre-deploy", "release": "v4.2.0"}`: you will want this when choosing which
     snapshot to restore.
   </Step>
   <Step title="Watch for the escalate">
@@ -224,7 +224,7 @@ anything.
     assert recovery._chain.verify_chain()
     ok, bad = recovery._chain.verify_signatures(trusted_keys=pinned)
     ```
-    Check signatures too — hash linkage alone would survive a substituted snapshot.
+    Check signatures too: hash linkage alone would survive a substituted snapshot.
   </Step>
   <Step title="Record the restoration">
     The restored chain has a gap in wall-clock time. Write an attestation after restoring so

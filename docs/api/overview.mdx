@@ -115,7 +115,7 @@ from agentegrity.claude import hooks, report
   to import cleanly **without** their framework installed. Framework SDK imports happen lazily
   at call time.
 
-  `AgentegrityClient.create_adapter` is likewise lazy — requesting `"crewai"` is the first
+  `AgentegrityClient.create_adapter` is likewise lazy, requesting `"crewai"` is the first
   moment `crewai` is imported.
 </Warning>
 
@@ -179,13 +179,13 @@ Recent breaking changes worth knowing:
 
 | Version | Change |
 |---|---|
-| v0.7.0 | `Evidence.content_hash` became a real SHA-256. Pre-v0.7 chains fail `verify_chain()` — rebuild from a fresh root |
+| v0.7.0 | `Evidence.content_hash` became a real SHA-256. Pre-v0.7 chains fail `verify_chain()`: rebuild from a fresh root |
 | v0.8.1 | `chain_valid` renamed `chain_hash_linked` in the session summary |
 | v0.9.0 | Tool-call actions nest arguments under `action["arguments"]` |
 
 <Info>
   v1.0.0 is not a date. It is declared when the public API has been unchanged for a full minor
   cycle, when there are production deployments at three or more external organizations, and
-  when the framework has been cited in at least one peer-reviewed publication — a signal that
+  when the framework has been cited in at least one peer-reviewed publication: a signal that
   adoption happened beyond the maintainers' direct influence.
 </Info>

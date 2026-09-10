@@ -18,7 +18,7 @@ await query({ prompt: "Summarize the latest safety papers",
 console.log(report());
 ```
 
-Mirrors the Python Claude adapter's hook surface. **Single-agent by framework design** — the
+Mirrors the Python Claude adapter's hook surface. **Single-agent by framework design**: the
 conformance suite pins that no topology is ever declared.
 
 ## @agentegrity/langchain
@@ -84,7 +84,7 @@ close();
 console.log(report());
 ```
 
-Walks `agent.subAgents` — or `sub_agents`, since ADK JS naming varies. `SequentialAgent`,
+Walks `agent.subAgents`, or `sub_agents`, since ADK JS naming varies. `SequentialAgent`,
 `ParallelAgent`, and `LoopAgent` produce `HIERARCHICAL_DAG`; a plain `Agent` stays
 single-agent.
 
@@ -104,7 +104,7 @@ await streamText({
 console.log(report());
 ```
 
-TypeScript-native — **no Python equivalent**. Uses the AI SDK's OpenTelemetry tracer surface
+TypeScript-native: **no Python equivalent**. Uses the AI SDK's OpenTelemetry tracer surface
 rather than callbacks.
 
 <Warning>

@@ -61,7 +61,7 @@ class DecisionInput:
 ```
 
 <Warning>
-  Carries a **SHA-256 of the content plus a short summary** — the raw text never enters the
+  Carries a **SHA-256 of the content plus a short summary**: the raw text never enters the
   chain. `redacted=True` records that fact in the signed payload.
 
   You can still prove a specific prompt produced a specific decision by hashing the prompt you
@@ -163,7 +163,7 @@ topology.content_hash()          # sha256 hex
 <Info>
   `topology_id` and `created_at` are **excluded** from the payload. The hash captures the
   structural shape only, which is why two structurally identical topologies built in different
-  sessions — or in different **runtimes** — produce the same digest.
+  sessions (or in different **runtimes**) produce the same digest.
 
   `@agentegrity/client`'s `contentHash()` matches this byte-for-byte.
 </Info>

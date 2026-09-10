@@ -39,7 +39,7 @@ Aggregation across all triggered rules:
 | none | `pass` | ✓ |
 
 <Note>
-  A conditional trigger passes. It is recorded and surfaced but does not fail the layer — the
+  A conditional trigger passes. It is recorded and surfaced but does not fail the layer: the
   distinction between "worth knowing" and "worth stopping" is deliberate.
 </Note>
 
@@ -92,7 +92,7 @@ Three matching modes, shared with the adversarial layer's tool categories via
     MCP server.
   </Card>
   <Card title="MCP suffix" icon="plug">
-    `mcp__<server>__<tool>` also matches an entry naming the bare `<tool>` — the prefix is
+    `mcp__<server>__<tool>` also matches an entry naming the bare `<tool>`: the prefix is
     transport namespacing, not a different tool. `"file_delete"` gates
     `mcp__filesystem__file_delete`.
   </Card>
@@ -108,7 +108,7 @@ A per-call `context["sensitive_tools"]` overrides the constructor value.
 
 <Warning>
   Four default entries is a starting point, not a policy. Enumerate the tools your deployment
-  actually considers sensitive — an ungated tool is invisible to `GOV-001` no matter how
+  actually considers sensitive: an ungated tool is invisible to `GOV-001` no matter how
   destructive it is.
 </Warning>
 
@@ -165,8 +165,8 @@ If a condition raises, the rule is treated as a **soft trigger** resolving to
 
 <Info>
   Only the exception **class** reaches the audit log and the serialized `layer_states`. The
-  full exception with traceback goes to the local log. A custom condition can touch anything —
-  databases, HTTP APIs, secret stores — and those exception messages routinely embed
+  full exception with traceback goes to the local log. A custom condition can touch anything:
+  databases, HTTP APIs, secret stores: and those exception messages routinely embed
   credentials and PII.
 </Info>
 
@@ -224,7 +224,7 @@ Fires once per triggered `REQUIRE_APPROVAL` rule.
 
 <Warning>
   The escalation callback is a **notification**, not a decision. It does not gate anything.
-  To actually gate an escalation, wire an `approval_handler` on the adapter or monitor — see
+  To actually gate an escalation, wire an `approval_handler` on the adapter or monitor, see
   [Enforcement and approvals](/docs/guides/enforcement-and-approvals).
 </Warning>
 
@@ -242,7 +242,7 @@ Break-glass suspension, recorded in the audit log.
 
 <Info>
   Before v0.8 it gated on a synthetic `action.type == "multi_agent_coordination"` that **no
-  adapter ever produced** — the rule was dead code in every real deployment. The legacy path
+  adapter ever produced**: the rule was dead code in every real deployment. The legacy path
   still works for callers passing that action explicitly.
 </Info>
 

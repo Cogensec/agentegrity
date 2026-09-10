@@ -1,6 +1,6 @@
 ---
 title: "Client reference"
-description: "@agentegrity/client — reporter, adapter core, and every exported type."
+description: "@agentegrity/client: reporter, adapter core, and every exported type."
 icon: "code"
 ---
 
@@ -53,7 +53,7 @@ const reporter = new AgentegrityReporter({
 </ResponseField>
 
 <ResponseField name="apiKey" type="string">
-  Bearer token for `Authorization`. **TLS-gated** — see below.
+  Bearer token for `Authorization`. **TLS-gated**, see below.
 </ResponseField>
 
 <ResponseField name="fetchImpl" type="typeof fetch">
@@ -66,8 +66,8 @@ const reporter = new AgentegrityReporter({
 
 <Warning>
   **The token is only sent over a credential-safe URL**: HTTPS, or a loopback host
-  (`localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`). Everything else — including a URL
-  that fails to parse — is treated as unsafe and the credential is withheld.
+  (`localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`). Everything else (including a URL
+  that fails to parse) is treated as unsafe and the credential is withheld.
 
   A misconfigured `http://remote-host` endpoint therefore never leaks the credential in
   cleartext. It fails to authenticate instead, which is the correct failure.
@@ -110,7 +110,7 @@ Resolution order for the base URL: `reporterOptions.baseUrl` → `AGENTEGRITY_UR
 ### DefaultAdapter
 
 <ResponseField name="reporter" type="AgentegrityReporter">
-  The wrapped reporter — escape hatch for advanced use.
+  The wrapped reporter: escape hatch for advanced use.
 </ResponseField>
 
 <ResponseField name="adapterName" type="string">

@@ -33,7 +33,7 @@ chain.append(record)
 
 <ResponseField name="verify_signatures(trusted_keys=None)" type="tuple[bool, int | None]">
   `(True, None)` iff every record is signed and verifies. `(False, first_bad_index)` otherwise.
-  **`trusted_keys` is the trust anchor** — without it a forged chain self-verifies.
+  **`trusted_keys` is the trust anchor**: without it a forged chain self-verifies.
 </ResponseField>
 
 <ResponseField name="verify_decision_links()" type="bool">
@@ -61,7 +61,7 @@ AttestationChain.from_dict_list(dicts)   # dispatches on record_kind
 AttestationChain.from_json(text)
 ```
 
-All three constructors are **restores** — existing `chain_previous` values are preserved
+All three constructors are **restores**, existing `chain_previous` values are preserved
 verbatim, which is what keeps signatures valid across a round trip.
 
 ## AttestationRecord

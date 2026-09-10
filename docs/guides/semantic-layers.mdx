@@ -5,19 +5,19 @@ icon: "microchip"
 ---
 
 The regex taxonomy is a floor. Paraphrase, translation, and novel framings evade it by
-construction. The semantic layers are the backstop — and they are opt-in because they cost
+construction. The semantic layers are the backstop: and they are opt-in because they cost
 latency and money.
 
 ## Three tiers
 
 <CardGroup cols={3}>
-  <Card title="Tier 1 — regex" icon="asterisk">
+  <Card title="Tier 1, regex" icon="asterisk">
     32 patterns, 8 families. Microseconds. Always on.
   </Card>
-  <Card title="Tier 2 — embedding" icon="vector-square">
+  <Card title="Tier 2, embedding" icon="vector-square">
     Cosine similarity against a corpus of known attacks. Zero-dependency n-gram fallback.
   </Card>
-  <Card title="Tier 3 — LLM / SLM" icon="brain">
+  <Card title="Tier 3: LLM / SLM" icon="brain">
     Semantic classification. Cloud (Claude) or local (Ollama, llama.cpp, vLLM).
   </Card>
 </CardGroup>
@@ -47,7 +47,7 @@ evaluator = IntegrityEvaluator(layers=[
 </ResponseField>
 
 <ResponseField name="model" type="str">
-  Default `claude-haiku-4-5-20251001` — chosen for latency and cost on a per-evaluation path.
+  Default `claude-haiku-4-5-20251001`: chosen for latency and cost on a per-evaluation path.
 </ResponseField>
 
 <ResponseField name="timeout" type="float">
@@ -67,7 +67,7 @@ evaluator = IntegrityEvaluator(layers=[
 </ResponseField>
 
 <ResponseField name="include_session_context" type="bool">
-  Prefix each target with recent tool-call names. Default `False` — see below.
+  Prefix each target with recent tool-call names. Default `False`, see below.
 </ResponseField>
 
 It also accepts every `AdversarialLayer` argument (`coherence_threshold`, `patterns`,
@@ -126,7 +126,7 @@ Bounded on three axes:
 </Steps>
 
 <Info>
-  The cache matters more than it sounds. **Adapter buffers only grow** — every evaluation
+  The cache matters more than it sounds. **Adapter buffers only grow**: every evaluation
   re-presents text already classified in an earlier pass. Without the cache you re-bill the
   same tool output on every subsequent boundary in the session.
 
@@ -141,7 +141,7 @@ AdversarialLLMLayer(include_session_context=True)
 ```
 
 Prefixes each classification target with a compact header of recent tool-call names, so the
-classifier can judge **"was this action part of what the session was doing?"** — the signal
+classifier can judge **"was this action part of what the session was doing?"**: the signal
 content-only classification structurally lacks.
 
 <Warning>
@@ -178,7 +178,7 @@ first evaluation.
 ## Fail-open everywhere
 
 Every LLM and SLM path fails **open**: API error, timeout, missing key, unparseable
-response — the layer logs and falls back to the regex verdict.
+response: the layer logs and falls back to the regex verdict.
 
 <Warning>
   Fail-open is the right default for a measurement library, but understand the consequence:
@@ -216,7 +216,7 @@ Sync layers are wrapped in `asyncio.to_thread`, so a mixed pipeline works.
 | Multi-step attacks matter | Any tier + `ToolSequenceDetector` (default-on) + `include_session_context=True` |
 
 <Warning>
-  The cloud LLM layer sends **channel content** — prompts, tool outputs, retrieved documents —
+  The cloud LLM layer sends **channel content**: prompts, tool outputs, retrieved documents:
   to the Anthropic API for classification. That is a different disclosure than
   [telemetry](/docs/export/telemetry), which is shape-only. If content cannot leave your
   process, use the SLM layer against a local server.

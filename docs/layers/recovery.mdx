@@ -52,7 +52,7 @@ The recovery score is the plain mean of four sub-scores.
     | `drop > 0` but not sustained | `max(0.5, 1 − drop)` |
     | no drop | 1.00 |
 
-    Fewer than 3 samples returns 1.0 and `sustained=False` — not enough history to claim
+    Fewer than 3 samples returns 1.0 and `sustained=False`: not enough history to claim
     anything.
 
     <Note>
@@ -76,7 +76,7 @@ The recovery score is the plain mean of four sub-scores.
     | 1 | 0.70 |
     | 0 | 0.40 |
 
-    An attached `Checkpoint` backend counts as a synthetic `checkpoint` capability — wiring a
+    An attached `Checkpoint` backend counts as a synthetic `checkpoint` capability, wiring a
     real backend should not be undercounted just because the profile string is missing.
 
     <Warning>
@@ -148,7 +148,7 @@ class Checkpoint(Protocol):
 <Info>
   `KMSCheckpoint` binds at-rest secrecy to a KMS-managed CMK and **verifies the KMS encryption
   context at load time**, so a compromised inner backend cannot roll the agent back to
-  attacker-chosen state. That check is the point — encryption alone would still let an
+  attacker-chosen state. That check is the point: encryption alone would still let an
   attacker substitute a validly-encrypted older snapshot.
 </Info>
 
@@ -167,10 +167,10 @@ snap = layer.restore_to(cid)
 A `CheckpointSnapshot` carries:
 
 - `agent_id`, `checkpoint_id`, `created_at`
-- `score_history` — restored verbatim
-- `chain_records` — every record as `to_dict()`
-- `baseline` — optional behavioural baseline
-- `metadata` — persisted verbatim, never mutated by a backend
+- `score_history`, restored verbatim
+- `chain_records`: every record as `to_dict()`
+- `baseline`, optional behavioural baseline
+- `metadata`: persisted verbatim, never mutated by a backend
 
 <Warning>
   `snapshot()` and `restore_to()` raise `RuntimeError` when no checkpoint backend was
@@ -183,7 +183,7 @@ A `CheckpointSnapshot` carries:
 rather than a re-append: original `chain_previous` link hashes are kept intact, so
 `verify_chain()` still returns `True` after restoration.
 
-This round-trip is pinned by `tests/test_recovery_restore.py` (mitigation **M-14**) — an
+This round-trip is pinned by `tests/test_recovery_restore.py` (mitigation **M-14**): an
 unverifiable post-restore chain would make recovery self-defeating.
 
 ## Multi-agent cascade detection

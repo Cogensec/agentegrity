@@ -5,7 +5,7 @@ icon: "id-card"
 ---
 
 Every agent under evaluation is described by an `AgentProfile`. The profile is not
-decoration — it **drives** which input channels the adversarial layer scans, which
+decoration: it **drives** which input channels the adversarial layer scans, which
 governance rules apply, and which recovery capabilities are checked for.
 
 ```python
@@ -33,7 +33,7 @@ profile = AgentProfile(
 </ResponseField>
 
 <ResponseField name="capabilities" type="list[str]" required>
-  What the agent can do. Use the `CAPABILITY_*` constants or any custom string — unknown
+  What the agent can do. Use the `CAPABILITY_*` constants or any custom string, unknown
   strings are preserved but open no channel.
 </ResponseField>
 
@@ -48,7 +48,7 @@ profile = AgentProfile(
 
 <ResponseField name="agent_id" type="str">
   Auto-generated UUID4 unless supplied. This is the identity a `KeyProvider` maps to a
-  public key and the key under which behavioral baselines are stored — **pin it explicitly**
+  public key and the key under which behavioral baselines are stored, **pin it explicitly**
   for any agent whose baseline or signing identity must survive a restart.
 </ResponseField>
 
@@ -87,7 +87,7 @@ profile.input_channels
 
 | Capability constant | String | Channel opened |
 |---|---|---|
-| — | — | `direct_prompt` *(always)* |
+| *(none)* | *(none)* | `direct_prompt` *(always)* |
 | `CAPABILITY_TOOL_USE` | `tool_use` | `tool_responses` |
 | `CAPABILITY_MEMORY_ACCESS` | `memory_access` | `memory_reads` |
 | `CAPABILITY_MULTI_AGENT_COMM` | `multi_agent_comm` | `peer_messages` |
@@ -147,7 +147,7 @@ AgentProfile(
 ```
 
 <Note>
-  The default is deliberately conservative — two channels, medium risk. It gets you a real
+  The default is deliberately conservative: two channels, medium risk. It gets you a real
   evaluation in three lines, but it is a placeholder. Any agent going to production deserves
   an explicit profile.
 </Note>
@@ -180,7 +180,7 @@ exact shape delivered to `SessionExporter.on_session_start` and validated agains
 `schemas/exporter/common.json#/$defs/AgentProfile`.
 
 <Warning>
-  `from_dict()` does **not** restore `created_at` — a round-trip produces a profile with a
+  `from_dict()` does **not** restore `created_at`: a round-trip produces a profile with a
   fresh timestamp. If baseline age matters to you, persist `created_at` alongside.
 </Warning>
 

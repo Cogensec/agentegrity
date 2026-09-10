@@ -56,8 +56,8 @@ surface fired it.
 </Warning>
 
 This is enforced, not just promised. All payload construction lives in **one auditable
-module** — [`_telemetry_props.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py)
-— and leak-guard tests in `tests/test_telemetry.py` assert that every shape builder emits only
+module**, [`_telemetry_props.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py)
+and leak-guard tests in `tests/test_telemetry.py` assert that every shape builder emits only
 allow-listed keys and **no string longer than 64 characters**.
 
 That length cap is the interesting part: it makes accidental content leakage structurally
@@ -66,7 +66,7 @@ impossible to ship, because a prompt cannot fit through a 64-character allow-lis
 ## The anonymous ID
 
 A random UUID at `~/.agentegrity/id`, file mode `0600`, written on first **instrumented
-use** — never on import, and never when telemetry is disabled.
+use**: never on import, and never when telemetry is disabled.
 
 If the file cannot be written (read-only home, sandbox), an ephemeral per-process `anon-` ID
 is used instead. The ID carries no machine or user information. Deleting the file resets it.
@@ -91,7 +91,7 @@ export AGENTEGRITY_TELEMETRY_DISABLE_GEOIP=1
 
 </CodeGroup>
 
-Truthy values: `1`, `true`, `yes`, `on`, `t`, `y` — case-insensitive.
+Truthy values: `1`, `true`, `yes`, `on`, `t`, `y`, case-insensitive.
 
 ## Transport
 
@@ -100,7 +100,7 @@ overflow**, batching to US-hosted PostHog (`us.i.posthog.com`).
 
 <Info>
   Telemetry can never break or block the host process. Every failure is swallowed, and offline
-  use simply drops events. The embedded project key is **write-only** — it can ingest events
+  use simply drops events. The embedded project key is **write-only**: it can ingest events
   but never read them back.
 </Info>
 
@@ -129,8 +129,8 @@ ls ~/.agentegrity/          # no id file created
 
 The two files to read if you want to check the claims rather than take them:
 
-- [`core/telemetry.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/telemetry.py) — transport, tags, opt-out
-- [`core/_telemetry_props.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py) — every payload builder, in one place
+- [`core/telemetry.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/telemetry.py), transport, tags, opt-out
+- [`core/_telemetry_props.py`](https://github.com/cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py): every payload builder, in one place
 
 ## Next
 

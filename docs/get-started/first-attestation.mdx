@@ -73,7 +73,7 @@ This walkthrough produces one end to end.
     asyncio.run(main())
     ```
 
-    The second call trips `GOV-001` — a `high` risk-tier agent touching a sensitive tool —
+    The second call trips `GOV-001`: a `high` risk-tier agent touching a sensitive tool:
     which resolves to `escalate`. The `approval_handler` approves it, so execution proceeds.
     Remove the handler and the same call raises `IntegrityViolationError`: escalations
     **fail closed**.
@@ -104,7 +104,7 @@ This walkthrough produces one end to end.
 
 ## Verify it from the CLI
 
-The chain is a plain JSON file. Anyone with the file and the public key can check it —
+The chain is a plain JSON file. Anyone with the file and the public key can check it:
 no library state, no network.
 
 ```bash
@@ -169,7 +169,7 @@ supporting evidence, explicitly **not** a compliance determination. See
 Exit codes matter in CI:
 
 - Structural tamper (broken hash linkage or a dangling decision link) **always** exits `1`.
-- Signature failures gate the exit code **only when `--trusted-key` is passed** — without an
+- Signature failures gate the exit code **only when `--trusted-key` is passed**: without an
   anchor, no cryptographic claim was requested, so an unsigned chain is disclosed in the
   report rather than treated as tampered.
 
@@ -195,9 +195,9 @@ Each `@monitor.guard` call ran the full four-layer pipeline, produced an `Integr
 and appended an `AttestationRecord` carrying:
 
 - the complete score (composite, per-property, per-layer)
-- `layer_states` — the full detail dict from every layer
+- `layer_states`: the full detail dict from every layer
 - one `Evidence` entry per layer result, hashed with SHA-256 over canonical JSON
-- `chain_previous` — the predecessor's content hash, baked in **before** signing
+- `chain_previous`: the predecessor's content hash, baked in **before** signing
 
 <Info>
   Adapters do more than the standalone monitor: at `pre_tool_use`, `stop`, and

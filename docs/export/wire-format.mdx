@@ -1,6 +1,6 @@
 ---
 title: "Wire format"
-description: "JSON Schema and OpenAPI 3.1 for the exporter contract — build a backend in any language."
+description: "JSON Schema and OpenAPI 3.1 for the exporter contract: build a backend in any language."
 icon: "file-code"
 ---
 
@@ -9,10 +9,10 @@ and a TypeScript reporter emit the same shapes.
 
 <CardGroup cols={2}>
   <Card title="JSON Schema (Draft 2020-12)" icon="brackets-curly" href="https://github.com/cogensec/agentegrity/tree/main/schemas/exporter">
-    `schemas/exporter/` — `common.json`, `session_start.json`, `event.json`, `session_end.json`
+    `schemas/exporter/`: `common.json`, `session_start.json`, `event.json`, `session_end.json`
   </Card>
   <Card title="OpenAPI 3.1" icon="server" href="https://github.com/cogensec/agentegrity/blob/main/schemas/openapi.yaml">
-    `schemas/openapi.yaml` — the three ingest endpoints
+    `schemas/openapi.yaml`: the three ingest endpoints
   </Card>
 </CardGroup>
 
@@ -153,7 +153,7 @@ examples/exporter_receiver/
 11 smoke tests cover the happy path (202) and validation errors (422).
 
 <Warning>
-  **Not a production backend** — in-memory store, no auth. It exists so you can adopt the wire
+  **Not a production backend**: in-memory store, no auth. It exists so you can adopt the wire
   format without `agentegrity-pro`.
 </Warning>
 

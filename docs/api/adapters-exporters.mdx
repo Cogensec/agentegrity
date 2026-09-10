@@ -123,7 +123,7 @@ adapter.get_summary()
 ## Context buffer
 
 Per-channel cap of **1000 entries per session** (`_BUFFER_CAP`). On overflow, the item is
-dropped and a one-time `<channel>_overflow` event fires — once per channel, so a sustained
+dropped and a one-time `<channel>_overflow` event fires: once per channel, so a sustained
 flood cannot flood the event stream in turn.
 
 `get_collected_context()` returns the evaluation context:
@@ -158,7 +158,7 @@ def describe(self) -> dict[str, str]:
     return {"type": "MyExporter", "target": "https://sink"}
 ```
 
-Not a Protocol member — exporters without it are reported by class name. **Must never include
+Not a Protocol member: exporters without it are reported by class name. **Must never include
 credentials**, since the summary is serialized to the sink and into logs.
 
 Fan-out is fail-open and registration is idempotent by reference equality.
@@ -226,7 +226,7 @@ OTelSessionExporter(
 
 The module imports without the extra; the **constructor** raises `ImportError`.
 
-`describe()` returns `{"type": ...}` with **no target** — the OTLP destination belongs to the
+`describe()` returns `{"type": ...}` with **no target**: the OTLP destination belongs to the
 OpenTelemetry SDK's configuration, not this class.
 
 ## See also

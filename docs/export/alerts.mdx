@@ -11,7 +11,7 @@ from agentegrity.claude import register_exporter
 register_exporter(SlackAlertExporter("https://hooks.slack.com/services/T…/B…/…"))
 ```
 
-Stdlib-only, fail-open, and **shape-only** — no prompts, no tool arguments.
+Stdlib-only, fail-open, and **shape-only**: no prompts, no tool arguments.
 
 ## Configuration
 
@@ -33,7 +33,7 @@ WebhookAlertExporter(url, alert_on={"block", "escalate", "alert"}, timeout=10.0)
 
 <Warning>
   Adding `"alert"` to `alert_on` is usually a mistake in production. `alert` fires on any
-  detected threat above severity 0.50 — a busy agent generates a steady stream, and an alert
+  detected threat above severity 0.50: a busy agent generates a steady stream, and an alert
   channel nobody reads is worse than no channel.
 
   Start with the default `{"block", "escalate"}`: those are the verdicts that would have
@@ -76,7 +76,7 @@ SlackAlertExporter("https://hooks.slack.com/services/…")
 ```
 
 Subclasses `WebhookAlertExporter` and overrides `_format` to shape the payload for a Slack
-incoming webhook. Everything else — queueing, flushing, fail-open, `describe()` — is
+incoming webhook. Everything else, queueing, flushing, fail-open, `describe()`: is
 inherited.
 
 ## Your own format
@@ -98,7 +98,7 @@ class PagerDutyAlertExporter(WebhookAlertExporter):
         }
 ```
 
-`_format` is the single extension point — a payload-shape hook subclasses adapt to a service.
+`_format` is the single extension point: a payload-shape hook subclasses adapt to a service.
 
 ## Delivery
 
@@ -130,7 +130,7 @@ exporter.describe()
   `describe()` **strips the query string** before reporting the target, so a webhook token
   passed as `?token=…` never reaches `report()["exporters"]` or the logs.
 
-  Slack-style path-embedded secrets are still visible in the path — treat the whole webhook
+  Slack-style path-embedded secrets are still visible in the path: treat the whole webhook
   URL as a credential regardless.
 </Info>
 
@@ -147,14 +147,14 @@ Each receives every event independently. A failure in one never affects another.
 ## Sync methods
 
 Unlike `HTTPExporter` and `OTelSessionExporter`, the alert exporters' callbacks are
-**synchronous**. The adapter's fan-out handles both — `_notify_exporters` calls the method
+**synchronous**. The adapter's fan-out handles both: `_notify_exporters` calls the method
 and only awaits when it produced a coroutine.
 
 ## What to alert on
 
 <Steps>
   <Step title="Start with denials">
-    `{"block", "escalate"}` — the verdicts that stop an action.
+    `{"block", "escalate"}`: the verdicts that stop an action.
   </Step>
   <Step title="Add health events separately">
     `capture_failure`, `subagent_orphan`, and buffer overflows mean your **evidence** has gaps.
