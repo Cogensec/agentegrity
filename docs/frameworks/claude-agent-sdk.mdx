@@ -1,0 +1,167 @@
+---
+title: "Claude Agent SDK"
+description: "Eight hook surfaces with real enforcement via the hook return value."
+icon: "anthropic"
+---
+
+```bash
+pip install "agentegrity[claude]"
+```
+
+```python
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+from agentegrity.claude import hooks, report
+
+async with ClaudeSDKClient(options=ClaudeAgentOptions(hooks=hooks())) as sdk:
+    await sdk.query("Summarize the latest LLM safety papers")
+
+print(report())
+```
+
+`hooks()` lazily builds a process-global adapter with `AgentProfile.default()`, the full
+four-layer evaluator, and measure-only semantics. Subsequent calls reuse it, so `report()`
+summarizes the whole session.
+
+## Hook surfaces
+
+`create_hooks()` returns a dict of `HookMatcher` lists ready for
+`ClaudeAgentOptions(hooks=...)`:
+
+| SDK hook | Canonical event | Evaluates | Decision record |
+|---|---|---|---|
+| `PreToolUse` | `pre_tool_use` | ✅ | ✅ `tool_call` |
+| `PostToolUse` | `post_tool_use` | ✅ | — |
+| `PostToolUseFailure` | `post_tool_use_failure` | — | — |
+| `UserPromptSubmit` | `user_prompt_submit` | ✅ | — |
+| `Stop` | `stop` | ✅ | ✅ `final_output` |
+| `SubagentStart` | `subagent_start` | — | ✅ lifecycle |
+| `SubagentStop` | `subagent_stop` | — | — |
+| `PreCompact` | `pre_compact` | — | — |
+
+<Note>
+  `HookMatcher` is imported **at call time**, not module import time, so
+  `agentegrity.claude` imports cleanly even without the SDK installed. Every hook is wrapped
+  in a try/except that logs and swallows — a failure in instrumentation never breaks the agent.
+</Note>
+
+`PreCompact` is worth knowing about: it archives the reasoning chain before the SDK compacts
+context, so the chain length that fed earlier evaluations is preserved in the event stream.
+
+## Enforcement
+
+```python
+hooks(enforce=True)
+```
+
+The `PreToolUse` hook returns Claude Code's permission-decision payload:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Agentegrity integrity score 0.612 triggered block action"
+  }
+}
+```
+
+| Verdict | Under `enforce=True` |
+|---|---|
+| `block` | **Denied**, never approvable |
+| `escalate` | **Denied** unless an `approval_handler` approves |
+| `alert` / `pass` | Proceeds |
+
+To gate escalations with a human, construct the adapter directly:
+
+```python
+from agentegrity import AgentegrityClient, AgentProfile, ApprovalWorkflow
+from agentegrity.adapters.claude import ClaudeAdapter
+
+client = AgentegrityClient()
+adapter = ClaudeAdapter(
+    profile=AgentProfile.default(name="research-agent"),
+    evaluator=client.evaluator,
+    enforce=True,
+    approval_handler=ApprovalWorkflow(
+        my_approver, approver="oncall@example.com",
+        timeout=120, timeout_action="deny",
+    ),
+    signing_key=signing_key,
+)
+
+options = ClaudeAgentOptions(hooks=adapter.create_hooks())
+```
+
+Constructing the adapter class directly is also the only way to pass `signing_key` — the
+zero-config `hooks()` entry point does not expose it.
+
+## A production profile
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.claude import hooks
+
+profile = AgentProfile(
+    agent_id="research-agent-prod",     # pinned: baselines and keys depend on it
+    name="research-agent",
+    agent_type=AgentType.TOOL_USING,
+    capabilities=["tool_use", "web_access", "file_system", "checkpoint"],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.HIGH,
+    framework="claude-agent-sdk",
+    model_provider="anthropic",
+)
+
+options = ClaudeAgentOptions(hooks=hooks(profile=profile, enforce=True))
+```
+
+<Warning>
+  `risk_tier=HIGH` activates `GOV-001`, so sensitive tools now require approval. With
+  `enforce=True` and no approval handler, those calls are **denied**. That is the intended
+  fail-closed behaviour — wire a handler before shipping.
+</Warning>
+
+## Single-agent by design
+
+The Claude Agent SDK has no multi-agent topology primitive, so the adapter declares none.
+The conformance suite **pins that absence** — a future change that silently starts declaring
+a topology fails CI.
+
+Subagents still flow through `SubagentStart` / `SubagentStop` and get the base orphan-stop
+detection: a stop without a matching start emits `subagent_orphan`.
+
+## Exporters
+
+```python
+from agentegrity.claude import register_exporter
+from agentegrity.exporters.otel import OTelSessionExporter
+
+register_exporter(OTelSessionExporter())
+```
+
+Register **before** the first `hooks()` call so the exporter sees `on_session_start`.
+
+## TypeScript
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { hooks } from "@agentegrity/claude-sdk";
+
+await query({ prompt: "hi", options: { hooks: hooks() } });
+```
+
+## Claude Code
+
+Instrumenting Claude Code itself is a separate integration — a `PreToolUse` plugin hook with
+its own decision chain. See [Claude Code plugin](/docs/integrations/claude-code).
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Enforcement and approvals" icon="hand" href="/docs/guides/enforcement-and-approvals">
+    Wiring a real approval workflow.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The shared adapter surface.
+  </Card>
+</CardGroup>

@@ -1,0 +1,113 @@
+---
+title: "Google ADK"
+description: "Callback instrumentation over the Agent Development Kit, with workflow-agent topology."
+icon: "google"
+---
+
+```bash
+pip install "agentegrity[google-adk]"
+```
+
+```python
+from agentegrity.google_adk import instrument, report
+
+instrument(agent)
+runner.run(...)
+print(report())
+```
+
+<Warning>
+  **Observation-only.** ADK's `before_*` callbacks expose no veto mechanism, so the adapter
+  cannot prevent a tool call. Passing `enforce=True` emits a runtime warning: the verdict is
+  recorded, the action still runs.
+
+  If enforcement is a requirement, this is the constraint to know about before choosing ADK.
+</Warning>
+
+## Topology
+
+`instrument(agent)` walks `sub_agents` on ADK workflow agents:
+
+| Agent class | Topology |
+|---|---|
+| `SequentialAgent` | `HIERARCHICAL_DAG` |
+| `ParallelAgent` | `HIERARCHICAL_DAG` |
+| `LoopAgent` | `HIERARCHICAL_DAG` |
+| plain `Agent` | *single-agent* — no topology declared |
+
+```python
+from agentegrity.google_adk import instrument
+
+instrument(workflow_agent)     # HIERARCHICAL_DAG from sub_agents
+instrument(plain_agent)        # stays single-agent
+```
+
+Declaring a topology activates `GOV-004` gating on member count, peer-authority scanning,
+per-role baselines, and cascade detection. See
+[Multi-agent topology](/docs/concepts/multi-agent-topology).
+
+## What you still get
+
+Observation-only does not mean low-value. The adapter produces:
+
+- Full four-layer evaluation on every boundary
+- A signed, hash-linked attestation chain
+- `DecisionRecord`s at `pre_tool_use` and `stop`
+- The complete event stream to any registered exporter
+- Governance verdicts recorded as **what would have been blocked**
+
+That last point is what makes observation-only useful as a **dry run**: instrument in
+production, collect a week of verdicts, and see exactly what enforcement would have done
+before you commit to a framework that supports it.
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.google_adk import instrument
+
+profile = AgentProfile(
+    agent_id="adk-pipeline-prod",
+    name="adk-pipeline",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "memory_access", "multi_agent_comm"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.MEDIUM,
+    framework="google-adk",
+    model_provider="google",
+)
+
+instrument(workflow_agent, profile=profile)
+```
+
+## Via auto-detection
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+runtime.instrument(workflow_agent)     # dispatches on the google.adk module prefix
+```
+
+The framework probe is `google.adk`.
+
+## TypeScript
+
+```ts
+import { instrument } from "@agentegrity/google-adk";
+
+const close = instrument(workflowAgent);   // walks agent.subAgents or sub_agents
+```
+
+ADK JS naming varies between `subAgents` and `sub_agents`; the adapter handles both.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Limitations" icon="scale-balanced" href="/docs/concepts/limitations">
+    The full observation-only table.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The shared adapter surface.
+  </Card>
+</CardGroup>

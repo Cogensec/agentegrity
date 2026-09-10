@@ -1,0 +1,112 @@
+---
+title: "OpenAI Agents SDK"
+description: "RunHooks with real enforcement, and a peer-to-peer topology that grows on every handoff."
+icon: "robot"
+---
+
+```bash
+pip install "agentegrity[openai-agents]"
+```
+
+```python
+from agents import Runner
+from agentegrity.openai_agents import run_hooks, report
+
+await Runner.run(agent, input="Research and summarize", hooks=run_hooks())
+print(report())
+```
+
+`run_hooks()` returns a `RunHooks` instance ready to hand to `Runner.run`.
+
+## Incremental topology
+
+Unlike adapters that read a static structure at instrument time, this one **discovers the
+topology as it happens**:
+
+<Steps>
+  <Step title="First agent starts">
+    `on_agent_start` seeds a single-member `PEER_TO_PEER` topology and emits
+    `topology_declared`.
+  </Step>
+  <Step title="A handoff occurs">
+    `on_handoff(from, to)` appends the target as a `PEER` and emits `topology_change` with the
+    diff.
+  </Step>
+  <Step title="Every attestation commits">
+    The topology `Evidence` is sticky — it rides every subsequent attestation until the
+    topology changes again.
+  </Step>
+</Steps>
+
+No extra call is needed: `run_hooks()` already does this when used with handoffs.
+
+<Note>
+  The resulting chain lets a verifier reconstruct **exactly which agents participated and in
+  what order they were introduced**, because each `topology_change` carries
+  `added_members` and both the previous and new content hashes.
+</Note>
+
+## Enforcement
+
+```python
+await Runner.run(agent, input="...", hooks=run_hooks(enforce=True))
+```
+
+Enforcement rides the `RunHooks` return value, so a `block` verdict prevents the tool call.
+`escalate` denies unless an `approval_handler` approves.
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, RiskTier, DeploymentContext
+from agentegrity.openai_agents import run_hooks
+
+profile = AgentProfile(
+    agent_id="triage-swarm-prod",
+    name="triage-swarm",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "multi_agent_comm", "web_access"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.HIGH,
+    framework="openai-agents",
+    model_provider="openai",
+)
+
+hooks = run_hooks(profile=profile, enforce=True)
+```
+
+## Via auto-detection
+
+The framework probe is the `agents` module. Because this is a hook-style framework, reach it
+through the runtime's adapter map rather than `runtime.instrument()`:
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+hooks = runtime.adapters["openai_agents"].create_run_hooks()
+await Runner.run(agent, input="...", hooks=hooks)
+```
+
+## TypeScript
+
+```ts
+import { Agent, run } from "@openai/agents";
+import { runHooks } from "@agentegrity/openai-agents";
+
+await run(agent, "hi", { hooks: runHooks() });
+```
+
+`onAgentStart` seeds `PEER_TO_PEER`; each `onHandoff` appends the target via `setTopology`,
+emitting `topology_change`. Identical semantics to Python.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Multi-agent topology" icon="diagram-project" href="/docs/concepts/multi-agent-topology">
+    Handoffs, peer authority, cascade detection.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The shared adapter surface.
+  </Card>
+</CardGroup>

@@ -1,0 +1,142 @@
+---
+title: "AWS Bedrock Agents"
+description: "Two instrumentation surfaces in one adapter: Strands hooks with real enforcement, and boto3 trace observation."
+icon: "aws"
+---
+
+```bash
+pip install "agentegrity[bedrock-agents]"
+```
+
+One adapter, two entry points, different guarantees.
+
+<CardGroup cols={2}>
+  <Card title="instrument_strands(agent)" icon="shield-check">
+    Registers typed hooks on a Strands `Agent`. **Real enforcement** via `event.cancel_tool`.
+  </Card>
+  <Card title="wrap_client(boto3_client)" icon="eye">
+    Patches `bedrock-agent-runtime.invoke_agent`. **Observation-only** — the trace is post-hoc.
+  </Card>
+</CardGroup>
+
+## Strands path
+
+```python
+from agentegrity.bedrock_agents import instrument_strands, report
+
+agent = instrument_strands(strands_agent, enforce=True)
+agent(...)
+print(report())
+```
+
+Registers hooks on the Strands `HookRegistry`:
+
+| Strands event | Canonical event |
+|---|---|
+| `BeforeInvocationEvent` | `user_prompt_submit` |
+| `BeforeToolCallEvent` | `pre_tool_use` |
+| `AfterToolCallEvent` | `post_tool_use` |
+| `AfterInvocationEvent` | `stop` |
+
+### Enforcement
+
+When a `pre_tool_use` evaluation returns `block`, the adapter writes `event.cancel_tool` with
+the reason, and Strands cancels the call before it executes.
+
+<Note>
+  The before-tool hook is `async` specifically so the adapter can `await on_event(...)` and
+  inspect the verdict in time to write `cancel_tool`. If a future Strands version makes
+  `cancel_tool` read-only, the adapter logs a warning rather than crashing — enforcement
+  degrades to observation, visibly.
+</Note>
+
+## boto3 path
+
+```python
+from agentegrity.bedrock_agents import wrap_client
+
+client = wrap_client(boto3.client("bedrock-agent-runtime"))
+response = client.invoke_agent(agentId="...", sessionId="...", inputText="...")
+```
+
+`wrap_client` replaces `invoke_agent` on the same client object and:
+
+1. Injects `enableTrace=True` (unless `force_trace=False`)
+2. Iterates the response's `TracePart` variants — action group, collaborator, failure
+3. Maps them onto canonical events
+4. **Re-yields every event** so your streaming consumption is unchanged
+
+<Warning>
+  **Observation-only.** The trace arrives after the action executed. `enforce=True` warns and
+  records what would have been blocked.
+
+  With `force_trace=False` and `enableTrace` unset by the caller, the adapter warns that **no
+  agentegrity events will fire at all** — without the trace stream there is nothing to
+  observe.
+</Warning>
+
+## Topology
+
+Both paths build a `HUB_SPOKE` topology incrementally:
+
+- The supervisor agent seeds it as `LEADER`
+- Each collaborator discovered in the trace stream is appended as a `MEMBER` via
+  `topology_change`
+
+This means the chain records **which collaborators actually participated**, not which ones
+were configured — a meaningful difference when a collaborator is conditionally invoked.
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.bedrock_agents import instrument_strands
+
+profile = AgentProfile(
+    agent_id="bedrock-supervisor-prod",
+    name="bedrock-supervisor",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "multi_agent_comm", "memory_access"],
+    deployment_context=DeploymentContext.CLOUD,
+    risk_tier=RiskTier.CRITICAL,
+    framework="bedrock-agents",
+    model_provider="aws",
+)
+
+agent = instrument_strands(strands_agent, profile=profile, enforce=True)
+```
+
+## Via auto-detection
+
+The framework probe is `strands`, so `init()` detects the Strands path:
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+agent = runtime.instrument(strands_agent)     # → instrument_strands
+```
+
+The boto3 path has no dispatch entry — call `wrap_client` explicitly.
+
+## KMS checkpoints
+
+Bedrock deployments usually already have KMS. `KMSCheckpoint` uses envelope encryption with
+KMS-wrapped data keys and verifies the encryption context at load time:
+
+```bash
+pip install "agentegrity[kms]"
+```
+
+See [Checkpoints and recovery](/docs/guides/checkpoints-and-recovery).
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Limitations" icon="scale-balanced" href="/docs/concepts/limitations">
+    Enforcement guarantees per adapter.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The shared adapter surface.
+  </Card>
+</CardGroup>

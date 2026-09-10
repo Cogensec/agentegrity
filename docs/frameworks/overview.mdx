@@ -1,0 +1,160 @@
+---
+title: "Framework overview"
+description: "Fourteen adapters, one instrumentation shape, one attestation chain."
+icon: "plug"
+---
+
+Every adapter shares the same base class, the same canonical event stream, the same
+evaluator pipeline, and the same attestation chain. Swapping frameworks changes the import
+line, nothing else.
+
+## Python adapters
+
+| Framework | Module | Entry point | Enforcement | Topology |
+|---|---|---|---|---|
+| [Claude Agent SDK](/docs/frameworks/claude-agent-sdk) | `agentegrity.claude` | `hooks()` | ✅ hook return | *single-agent* |
+| [LangChain / LangGraph](/docs/frameworks/langchain) | `agentegrity.langchain` | `instrument_chain()` / `instrument_graph()` | ✅ callback return | `HIERARCHICAL_DAG` / `PEER_TO_PEER` |
+| [OpenAI Agents](/docs/frameworks/openai-agents) | `agentegrity.openai_agents` | `run_hooks()` | ✅ `RunHooks` return | `PEER_TO_PEER` |
+| [CrewAI](/docs/frameworks/crewai) | `agentegrity.crewai` | `instrument()` | ✅ event-bus deny | `HUB_SPOKE` / `HIERARCHICAL_DAG` |
+| [Google ADK](/docs/frameworks/google-adk) | `agentegrity.google_adk` | `instrument()` | 🟡 observation-only | `HIERARCHICAL_DAG` |
+| [AutoGen](/docs/frameworks/autogen) | `agentegrity.autogen` | `instrument()` | 🟡 observation-only | `GROUP_CHAT` |
+| [Agno](/docs/frameworks/agno) | `agentegrity.agno` | `instrument()` / `instrument_team()` | ✅ `StopAgentRun` | `HUB_SPOKE` |
+| [AWS Bedrock Agents](/docs/frameworks/bedrock-agents) | `agentegrity.bedrock_agents` | `instrument_strands()` / `wrap_client()` | ✅ Strands / 🟡 boto3 | `HUB_SPOKE` |
+
+## TypeScript packages
+
+| Framework | Package | Topology |
+|---|---|---|
+| Claude Agent SDK | `@agentegrity/claude-sdk` | *single-agent* |
+| LangChain JS / LangGraph JS | `@agentegrity/langchain` | `HIERARCHICAL_DAG` / `PEER_TO_PEER` |
+| OpenAI Agents SDK | `@agentegrity/openai-agents` | `PEER_TO_PEER` |
+| CrewAI JS | `@agentegrity/crewai` | `HUB_SPOKE` / `HIERARCHICAL_DAG` |
+| Google ADK | `@agentegrity/google-adk` | `HIERARCHICAL_DAG` |
+| Vercel AI SDK | `@agentegrity/vercel-ai` | *single-agent* |
+
+See [TypeScript overview](/docs/typescript/overview).
+
+<Warning>
+  **Observation-only adapters warn at construction** when you pass `enforce=True`. They record
+  what the verdict would have been but cannot prevent the action:
+
+  - **Google ADK** — `before_*` callbacks expose no veto mechanism.
+  - **AutoGen** — the OTel `SpanProcessor` sees spans after the fact.
+  - **Bedrock via boto3** — the trace stream is post-hoc; the action already happened.
+
+  If enforcement is a hard requirement, check this before choosing a framework.
+</Warning>
+
+## The identical module surface
+
+Every `agentegrity.<framework>` module exports the same five names:
+
+| Name | Purpose |
+|---|---|
+| *entry point* | `hooks()`, `instrument()`, `instrument_chain()`, `run_hooks()`, … |
+| `adapter()` | The module-global adapter, constructed on first use |
+| `report()` | Session summary dict; well-formed even before instrumentation |
+| `reset()` | Discard the module-global adapter |
+| `register_exporter(e)` | Attach a `SessionExporter` |
+
+And every entry point takes the same four overrides:
+
+```python
+instrument(target, profile=..., client=..., enforce=True, api_key=...)
+```
+
+<Warning>
+  Passing **any** override builds a *new* adapter instead of reusing the module-global one.
+  That is deliberate — it supports independent evaluations in one process — but the
+  module-level `report()` will not see it. Keep the returned adapter, or call
+  `adapter().get_summary()` on the one you built.
+</Warning>
+
+## Canonical events
+
+Eight core event types, extended to fourteen for multi-agent:
+
+<CardGroup cols={2}>
+  <Card title="Core" icon="circle-dot">
+    `pre_tool_use` · `post_tool_use` · `post_tool_use_failure`
+    `user_prompt_submit` · `stop`
+    `subagent_start` · `subagent_stop` · `pre_compact`
+  </Card>
+  <Card title="Multi-agent" icon="diagram-project">
+    `topology_declared` · `topology_change`
+    `peer_message` · `shared_memory_write` · `broadcast`
+    `task_started`
+  </Card>
+</CardGroup>
+
+Three more are emitted for instrumentation health: `capture_failure` (decision capture
+failed), `subagent_orphan` (a stop with no matching start), and `<channel>_overflow` (a
+buffer hit its 1000-entry cap).
+
+Only some events trigger an evaluation — `post_tool_use_failure`, `subagent_stop`,
+`pre_compact`, and the health events do not. That is why `events` in the session summary
+exceeds `evaluations`.
+
+## Auto-detection
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+print(runtime.adapters)     # {'langchain': <LangChainAdapter>, ...}
+print(runtime.skipped)      # framework present but adapter deps missing
+```
+
+Detection probes for an importable module per adapter:
+
+| Adapter | Probe modules |
+|---|---|
+| `claude` | `claude_agent_sdk` |
+| `langchain` | `langchain_core` |
+| `openai_agents` | `agents` |
+| `crewai` | `crewai` |
+| `google_adk` | `google.adk` |
+| `autogen` | `autogen_agentchat`, `autogen_core` |
+| `agno` | `agno` |
+| `bedrock_agents` | `strands` |
+
+`runtime.instrument(obj)` dispatches on the object's class module, checking prefixes in
+order — `langgraph` before `langchain` so compiled graphs get topology introspection.
+
+<Note>
+  Only CrewAI auto-attaches at `init()` time, because subscribing to its global event bus is
+  purely additive. **AutoGen is deliberately excluded**: its `instrument()` installs a global
+  OTel `TracerProvider`, which must stay an explicit choice.
+</Note>
+
+## Conformance
+
+`tests/test_adapter_conformance.py` runs the same canonical event stream and lifecycle
+assertions across every shipped adapter — 91 tests covering 12 invariants × 8 adapters plus
+two multi-agent invariants. Adding an adapter means adding one line to `ADAPTER_CLASSES` and
+inheriting the whole matrix.
+
+The TypeScript mirror, `clients/typescript/test/cross-package-conformance.test.ts`, runs 52
+tests across 6 packages through the same shared-core seam.
+
+Two invariants are pinned as **absences**: single-agent adapters (Claude SDK, Vercel AI SDK)
+must never declare a topology, and multi-agent-capable adapters must expose `setTopology`.
+
+## Custom frameworks
+
+Not on the list? Two routes:
+
+<CardGroup cols={2}>
+  <Card title="IntegrityMonitor" icon="shield-halved" href="/docs/api/evaluation">
+    Wrap your agent's entry point with `@monitor.guard`. Full evaluation and attestation, no
+    adapter required.
+  </Card>
+  <Card title="Wire format" icon="file-code" href="/docs/export/wire-format">
+    Emit the published JSON Schema / OpenAPI 3.1 event stream from any language.
+  </Card>
+</CardGroup>
+
+<Info>
+  The Semantic Kernel adapter is deferred pending Microsoft Agent Framework GA (Q2 2026). MAF
+  absorbs SK, so one MAF adapter will cover both.
+</Info>

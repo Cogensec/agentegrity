@@ -1,0 +1,140 @@
+---
+title: "CrewAI"
+description: "Event-bus subscription with real enforcement, and crew topology from the process type."
+icon: "users"
+---
+
+```bash
+pip install "agentegrity[crewai]"
+```
+
+```python
+from agentegrity.crewai import instrument, report
+
+instrument(crew)        # pass the crew to declare topology
+crew.kickoff()
+print(report())
+```
+
+Calling `instrument()` with no crew subscribes to the global event bus without declaring a
+topology — useful when the crew is constructed after instrumentation.
+
+## Event mapping
+
+The adapter subscribes to `crewai.events` and maps:
+
+| CrewAI event | Canonical event |
+|---|---|
+| `CrewKickoffStartedEvent` | `user_prompt_submit` |
+| `CrewKickoffCompletedEvent` | `stop` |
+| `ToolUsageStartedEvent` | `pre_tool_use` |
+| `ToolUsageFinishedEvent` | `post_tool_use` |
+| `ToolUsageErrorEvent` | `post_tool_use_failure` |
+| `TaskStartedEvent` | **`task_started`** |
+| `AgentExecutionStartedEvent` | `subagent_start` |
+| `AgentExecutionCompletedEvent` | `subagent_stop` |
+
+<Warning>
+  **v0.8 semantic fix: tasks are not subagents.** Before v0.8, `TaskStartedEvent` mapped to
+  `subagent_start`, which inflated subagent counts and conflated two genuinely different
+  CrewAI primitives. Tasks now get their own `task_started` event, and `subagent_start` fires
+  only on real `AgentExecutionStartedEvent`s.
+
+  Pass `legacy_task_mapping=True` to restore the v0.7 behaviour. It emits a
+  `DeprecationWarning` and exists for one release cycle only.
+
+  ```python
+  from agentegrity.crewai import adapter
+  adapter().subscribe(crew, legacy_task_mapping=True)
+  ```
+</Warning>
+
+## Topology from the process type
+
+`instrument(crew)` reads `crew.process` and walks `crew.agents`:
+
+| `crew.process` | Topology | Roles |
+|---|---|---|
+| `sequential` | `HUB_SPOKE` | Every agent is a `MEMBER` |
+| `hierarchical` | `HIERARCHICAL_DAG` | Manager as `SUPERVISOR`, rest as `WORKER` |
+
+<Note>
+  In a **sequential** crew there is no single fixed orchestrator — work simply flows agent to
+  agent. The adapter reflects that honestly rather than inventing a leader, which is why
+  sequential crews get `MEMBER` roles throughout.
+</Note>
+
+`crewai.Process` is an enum, so `str(Process.sequential)` yields `'Process.sequential'`; the
+adapter normalizes for that.
+
+## Enforcement
+
+```python
+instrument(crew, enforce=True)
+```
+
+A `block` verdict denies through the event bus before the tool runs. `escalate` denies unless
+an `approval_handler` approves.
+
+## CrewAI 1.x
+
+v0.7 added a compatibility fix for the CrewAI 1.x event-bus relocation. Both layouts are
+handled; no configuration needed.
+
+## Auto-attach
+
+CrewAI is the **only** framework that auto-attaches at `init()` time, because subscribing to
+its global event bus is purely additive:
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()      # crewai adapter is already subscribed
+crew.kickoff()
+print(runtime.report())
+```
+
+To declare topology as well, pass the crew explicitly:
+
+```python
+runtime.instrument(crew)          # dispatches to CrewAIAdapter.subscribe
+```
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.crewai import instrument
+
+profile = AgentProfile(
+    agent_id="research-crew-prod",
+    name="research-crew",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "web_access", "multi_agent_comm", "session_reset"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.HIGH,
+    framework="crewai",
+)
+
+instrument(crew, profile=profile, enforce=True)
+```
+
+## TypeScript
+
+```ts
+import { instrument } from "@agentegrity/crewai";
+
+instrument({ crew });                  // walks crew.agents for topology
+instrument().attach(crew.events);      // event-bus only
+```
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Multi-agent topology" icon="diagram-project" href="/docs/concepts/multi-agent-topology">
+    Hub-spoke, hierarchical DAG, and what they unlock.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The shared adapter surface.
+  </Card>
+</CardGroup>

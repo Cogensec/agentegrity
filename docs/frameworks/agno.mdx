@@ -1,0 +1,121 @@
+---
+title: "Agno"
+description: "Hooks on Agno 2.x agents and teams, with real enforcement via StopAgentRun."
+icon: "bolt"
+---
+
+```bash
+pip install "agentegrity[agno]"
+```
+
+```python
+from agentegrity.agno import instrument, instrument_team, report
+
+agent = instrument(agent)
+team  = instrument_team(team)
+team.run("Research and summarize the market")
+print(report())
+```
+
+## Hook surfaces
+
+Agno 2.x exposes three hook lists, and the adapter uses all three:
+
+| Hook | Fires | Canonical event |
+|---|---|---|
+| `pre_hooks` | Before the agent or team processes input | `user_prompt_submit` |
+| `post_hooks` | After a run produces output | `stop` |
+| `tool_hooks` | Middleware chain wrapping **every** tool call | `pre_tool_use` / `post_tool_use` |
+
+<Info>
+  `tool_hooks` is a middleware chain, so it captures **tools added after instrumentation** —
+  a genuinely useful property when tools are registered dynamically. Adapters that snapshot a
+  tool list at instrument time miss those.
+</Info>
+
+`tool_hooks` is re-propagated from `agent.tool_hooks` onto every member when instrumenting a
+team, so members inherit the instrumentation.
+
+## Real enforcement
+
+```python
+agent = instrument(agent, enforce=True)
+```
+
+Under enforcement, the tool hook evaluates `pre_tool_use` **synchronously** and raises
+`agno.exceptions.StopAgentRun` before the tool runs.
+
+<Note>
+  `StopAgentRun` is chosen deliberately: it is the only `AgentRunException` subclass that
+  `FunctionCall.execute()` re-raises to halt the run. Any other exception type would be
+  swallowed by Agno's own error handling, and enforcement would silently not work.
+</Note>
+
+The synchronous evaluation path (`_evaluate_sync`) added in v0.7 is what makes real
+enforcement possible on a sync hook surface.
+
+## Team topology
+
+```python
+team = instrument_team(team)
+```
+
+Walks `team.members` and declares `HUB_SPOKE`:
+
+- The team itself becomes the `LEADER`
+- Each member becomes a `MEMBER` with `parent_id` set to the leader
+
+### Callable member providers
+
+Agno supports a callable that produces members dynamically. There is nothing to walk at
+instrument time, so the adapter declares a **leader-only topology** and grows it as members
+appear at runtime via `topology_change`.
+
+The chain therefore records the membership as it actually materialized, not as it was
+predicted.
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.agno import instrument_team
+
+profile = AgentProfile(
+    agent_id="agno-research-team-prod",
+    name="agno-research-team",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "web_access", "multi_agent_comm", "peer_quarantine"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.HIGH,
+    framework="agno",
+)
+
+team = instrument_team(team, profile=profile, enforce=True)
+```
+
+Declaring `peer_quarantine` sets `quarantine_capable` in the recovery layer's assessment,
+signalling the system can isolate a compromised member.
+
+## Via auto-detection
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+team  = runtime.instrument(my_team)    # agno.team prefix → instrument_team
+agent = runtime.instrument(my_agent)   # agno prefix      → instrument
+```
+
+The dispatch table checks `agno.team` before `agno`, so a `Team` reaches `instrument_team`
+and gets topology declaration.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Enforcement and approvals" icon="hand" href="/docs/guides/enforcement-and-approvals">
+    Gating escalations with a human.
+  </Card>
+  <Card title="Multi-agent topology" icon="diagram-project" href="/docs/concepts/multi-agent-topology">
+    What HUB_SPOKE unlocks.
+  </Card>
+</CardGroup>

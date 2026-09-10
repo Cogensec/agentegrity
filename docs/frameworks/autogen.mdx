@@ -1,0 +1,141 @@
+---
+title: "AutoGen"
+description: "OpenTelemetry SpanProcessor consuming GenAI semconv spans, with incremental group-chat topology."
+icon: "microsoft"
+---
+
+```bash
+pip install "agentegrity[autogen]"
+```
+
+```python
+from agentegrity.autogen import instrument, report
+
+instrument()          # installs the SpanProcessor on the global TracerProvider
+# ... run your AutoGen conversation ...
+print(report())
+```
+
+This adapter is architecturally different from the others: instead of framework callbacks, it
+installs an OpenTelemetry `SpanProcessor` that consumes AutoGen's **GenAI semantic
+convention** spans — `invoke_agent`, `execute_tool`.
+
+## Why spans
+
+AutoGen emits OTel spans natively. Consuming them means the adapter works across AutoGen
+versions without depending on internal callback APIs that change between releases.
+
+The cost is that spans arrive **after** the operation, which is why enforcement is not
+available.
+
+<Warning>
+  **Observation-only.** The `SpanProcessor` sees spans after the fact. Passing `enforce=True`
+  records block decisions but cannot prevent tool calls, and warns at construction.
+</Warning>
+
+## Global provider
+
+```python
+instrument(set_global=True)     # default
+instrument(set_global=False)    # attach to an existing provider instead
+```
+
+<Note>
+  AutoGen is deliberately **excluded** from `init()`'s auto-attach list. Every other
+  auto-attaching framework is purely additive; installing a global OTel `TracerProvider`
+  changes process-wide tracing behaviour and must stay an explicit choice.
+
+  ```python
+  runtime = agentegrity.init()             # autogen adapter built, NOT attached
+  runtime.adapters["autogen"].instrument() # explicit opt-in
+  ```
+</Note>
+
+If your process already configures OTel, pass `set_global=False` so Agentegrity attaches to
+your provider rather than replacing it.
+
+## Incremental group-chat topology
+
+<Steps>
+  <Step title="Root span seeds the topology">
+    The root `invoke_agent` span creates a single-member `GROUP_CHAT` topology.
+  </Step>
+  <Step title="Nested spans grow it">
+    Each nested `invoke_agent` span appends a member and emits `topology_change`.
+  </Step>
+  <Step title="Lazy seeding covers sampling">
+    If the root span is sampled out, the topology seeds from the first span that does arrive —
+    so a sampling configuration cannot silently produce an empty topology.
+  </Step>
+</Steps>
+
+## Honest limitations
+
+<AccordionGroup>
+  <Accordion title="Broadcasts surface as N spans, not 1" icon="tower-broadcast">
+    A GroupChat broadcast to N members produces N separate spans. The adapter cannot tell that
+    they are one logical broadcast, so evaluation count reflects the fan-out
+    (**T-BROADCAST-AMP**).
+
+    The context buffer's 1000-entry-per-channel cap is the defensive ceiling; a one-time
+    `broadcast_overflow` event fires if it is hit.
+  </Accordion>
+
+  <Accordion title="Relayed conversation history is invisible" icon="eye-slash">
+    AutoGen relays prior conversation history between agents, but that relay is not
+    represented in the span stream. The `SpanProcessor` cannot see it, so content that reached
+    an agent through relayed history is not scanned.
+
+    If that channel matters to your threat model, this is a real gap — not a limitation of
+    configuration but of what OTel spans carry.
+  </Accordion>
+
+  <Accordion title="Orphan lifecycle events" icon="link-slash">
+    Sampling can drop a start span while keeping its stop. The base adapter emits
+    `subagent_orphan` when it sees a `subagent_stop` with no matching start
+    (**T-ORPHAN-LIFECYCLE**), so the gap is visible in the event stream rather than silently
+    corrupting the topology view.
+  </Accordion>
+</AccordionGroup>
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.autogen import instrument
+
+profile = AgentProfile(
+    agent_id="autogen-groupchat-prod",
+    name="autogen-groupchat",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "multi_agent_comm", "code_execution"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.HIGH,
+    framework="autogen",
+)
+
+adapter = instrument(profile=profile)
+```
+
+`instrument()` returns the wired adapter so you can call `register_exporter`, read
+`adapter.events`, or inspect `adapter.attestation_chain` directly.
+
+## Extras
+
+The `[autogen]` extra pulls `autogen-agentchat`, `autogen-core`, **and**
+`opentelemetry-sdk` — the last is required, not optional, since the whole adapter is built
+on it.
+
+If `init()` detects AutoGen but the OTel dependency is missing, the adapter lands in
+`runtime.skipped` with the `ImportError` message rather than failing the whole init.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="OpenTelemetry export" icon="chart-line" href="/docs/export/opentelemetry">
+    Distinct from this adapter — exporting agentegrity's own traces.
+  </Card>
+  <Card title="Limitations" icon="scale-balanced" href="/docs/concepts/limitations">
+    The full adapter limitation table.
+  </Card>
+</CardGroup>

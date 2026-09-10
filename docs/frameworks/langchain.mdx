@@ -1,0 +1,144 @@
+---
+title: "LangChain & LangGraph"
+description: "One adapter covering both, with graph introspection for supervisor and swarm topologies."
+icon: "link"
+---
+
+```bash
+pip install "agentegrity[langchain]"
+```
+
+```python
+from agentegrity.langchain import instrument_chain, instrument_graph, report
+
+chain = instrument_chain(my_chain)
+chain.invoke({"input": "Summarize Q3 revenue"})
+
+graph = instrument_graph(my_compiled_graph)
+graph.invoke(state)
+
+print(report())
+```
+
+A single `LangChainAdapter` covers both. LangChain runnables are single-agent; compiled
+LangGraph graphs additionally get topology introspection.
+
+## Entry points
+
+| Function | Use for | Returns |
+|---|---|---|
+| `instrument_chain(chain)` | Any LangChain runnable | The chain, with the callback attached |
+| `instrument_graph(graph)` | A compiled LangGraph graph | The graph, plus a declared topology |
+| `callback_handler()` | Manual registration | A raw `BaseCallbackHandler` |
+
+```python
+from agentegrity.langchain import callback_handler
+
+llm = ChatAnthropic(callbacks=[callback_handler()])
+```
+
+## Callback mapping
+
+| LangChain callback | Canonical event |
+|---|---|
+| `on_chain_start` | `user_prompt_submit` |
+| `on_chain_end` | `stop` |
+| `on_tool_start` | `pre_tool_use` |
+| `on_tool_end` | `post_tool_use` |
+| `on_tool_error` | `post_tool_use_failure` |
+
+Enforcement rides on the `on_tool_start` return value, so a `block` verdict prevents the
+tool from running.
+
+## Graph topology
+
+`instrument_graph` introspects `graph.get_graph().nodes` and declares:
+
+<CardGroup cols={2}>
+  <Card title="HIERARCHICAL_DAG" icon="sitemap">
+    A node named `supervisor`, `supervisor_agent`, or `orchestrator` (case-insensitive) exists.
+    That node becomes the `SUPERVISOR`; every other node becomes a `WORKER` with
+    `parent_id` set to the supervisor.
+  </Card>
+  <Card title="PEER_TO_PEER" icon="circle-nodes">
+    No supervisor node found. Every node becomes a `PEER` with `parent_id=None`. This is the
+    swarm pattern.
+  </Card>
+</CardGroup>
+
+<Note>
+  If graph introspection fails for any reason — a graph object that does not expose
+  `get_graph()`, an unexpected node structure — the adapter **falls back to single-agent**
+  rather than raising. Instrumentation degrading is always preferable to instrumentation
+  breaking the agent.
+</Note>
+
+Once a topology is declared, `GOV-004` gates on member count, the adversarial layer runs
+peer-authority checks, the cortical layer uses per-role baselines, and the recovery layer
+watches for cascade. See [Multi-agent topology](/docs/concepts/multi-agent-topology).
+
+## Enforcement
+
+```python
+chain = instrument_chain(my_chain, enforce=True)
+```
+
+`block` denies. `escalate` denies unless an `approval_handler` approves — construct
+`LangChainAdapter` directly to pass one.
+
+## Overrides
+
+```python
+from agentegrity import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.langchain import instrument_graph
+
+profile = AgentProfile(
+    agent_id="support-graph-prod",
+    name="support-graph",
+    agent_type=AgentType.MULTI_AGENT,
+    capabilities=["tool_use", "memory_access", "multi_agent_comm"],
+    deployment_context=DeploymentContext.MULTI_AGENT,
+    risk_tier=RiskTier.HIGH,
+    framework="langgraph",
+)
+
+graph = instrument_graph(my_graph, profile=profile, enforce=True)
+```
+
+## Via auto-detection
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+graph = runtime.instrument(compiled_graph)   # dispatches to instrument_graph
+chain = runtime.instrument(my_runnable)      # dispatches to instrument_chain
+```
+
+The dispatch table checks `langgraph` before `langchain_core`, so a compiled graph reaches
+`instrument_graph` and gets topology introspection rather than being treated as a plain
+runnable.
+
+## TypeScript
+
+```ts
+import { ChatAnthropic } from "@langchain/anthropic";
+import { instrument, instrumentGraph } from "@agentegrity/langchain";
+
+await new ChatAnthropic({ callbacks: [instrument()] }).invoke("hi");
+instrumentGraph(compiledGraph);        // walks graph.getGraph().nodes
+```
+
+Same supervisor/swarm detection, and the topology `contentHash()` matches Python
+byte-for-byte.
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Multi-agent topology" icon="diagram-project" href="/docs/concepts/multi-agent-topology">
+    What a declared topology unlocks.
+  </Card>
+  <Card title="Framework overview" icon="plug" href="/docs/frameworks/overview">
+    The shared adapter surface.
+  </Card>
+</CardGroup>
