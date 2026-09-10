@@ -1,0 +1,241 @@
+---
+title: "Client reference"
+description: "@agentegrity/client — reporter, adapter core, and every exported type."
+icon: "code"
+---
+
+The shared core every framework package builds on. Use it directly for custom frameworks or
+advanced wiring.
+
+```bash
+npm i @agentegrity/client
+```
+
+## AgentegrityReporter
+
+Emits the published wire format over HTTP.
+
+```ts
+import { AgentegrityReporter } from "@agentegrity/client";
+
+const reporter = new AgentegrityReporter({
+  baseUrl: "https://dashboard.example.com",
+  apiKey: process.env.AGENTEGRITY_TOKEN,
+  adapterName: "my-framework",
+  profile: {
+    agent_id: "my-agent",
+    name: "my-agent",
+    agent_type: "tool_using",
+    capabilities: ["tool_use"],
+    deployment_context: "cloud",
+    risk_tier: "medium",
+    framework: "my-framework",
+    model_provider: null,
+    model_id: null,
+    metadata: {},
+  },
+});
+```
+
+### ReporterOptions
+
+<ResponseField name="baseUrl" type="string" required>
+  Backend origin. The reporter appends `/sessions`, `/sessions/{id}/events`, and
+  `/sessions/{id}/end`.
+</ResponseField>
+
+<ResponseField name="profile" type="AgentProfile" required>
+  Forwarded verbatim in the `session_start` call.
+</ResponseField>
+
+<ResponseField name="adapterName" type="string">
+  Sent as `adapter_name` on the wire. Defaults to `"typescript"`.
+</ResponseField>
+
+<ResponseField name="apiKey" type="string">
+  Bearer token for `Authorization`. **TLS-gated** — see below.
+</ResponseField>
+
+<ResponseField name="fetchImpl" type="typeof fetch">
+  Custom fetch implementation. Defaults to the global `fetch`.
+</ResponseField>
+
+<ResponseField name="onError" type="(err: unknown, step: string) => void">
+  Called when a request fails. Defaults to `console.warn`.
+</ResponseField>
+
+<Warning>
+  **The token is only sent over a credential-safe URL**: HTTPS, or a loopback host
+  (`localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`). Everything else — including a URL
+  that fails to parse — is treated as unsafe and the credential is withheld.
+
+  A misconfigured `http://remote-host` endpoint therefore never leaks the credential in
+  cleartext. It fails to authenticate instead, which is the correct failure.
+</Warning>
+
+## createDefaultAdapter
+
+```ts
+import { createDefaultAdapter } from "@agentegrity/client";
+
+const core = createDefaultAdapter({
+  adapterName: "my-framework",
+  profile: { risk_tier: "high", capabilities: ["tool_use", "web_access"] },
+  defaultBaseUrl: "http://localhost:8787",
+});
+```
+
+### AdapterConfig
+
+<ResponseField name="adapterName" type="string" required>
+  Adapter name, sent as `adapter_name`.
+</ResponseField>
+
+<ResponseField name="profile" type="Partial<AgentProfile>">
+  Merged with framework defaults to produce the `session_start` profile.
+</ResponseField>
+
+<ResponseField name="reporterOptions" type="Partial<ReporterOptions>">
+  Passed straight through to the underlying reporter.
+</ResponseField>
+
+<ResponseField name="defaultBaseUrl" type="string">
+  Fallback when both `reporterOptions.baseUrl` and `AGENTEGRITY_URL` are unset. Defaults to
+  `http://localhost:8787`.
+</ResponseField>
+
+Resolution order for the base URL: `reporterOptions.baseUrl` → `AGENTEGRITY_URL` →
+`defaultBaseUrl` → `http://localhost:8787`.
+
+### DefaultAdapter
+
+<ResponseField name="reporter" type="AgentegrityReporter">
+  The wrapped reporter — escape hatch for advanced use.
+</ResponseField>
+
+<ResponseField name="adapterName" type="string">
+  Mirrors Python's `_BaseAdapter.name`. Used by the conformance suite to verify each package
+  is wired to the correct seam.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string">
+  Stable for the lifetime of this adapter.
+</ResponseField>
+
+<ResponseField name="disabled" type="boolean">
+  True when `AGENTEGRITY_DISABLED=1`.
+</ResponseField>
+
+<ResponseField name="eventCount" type="number">
+  Running count of emitted events.
+</ResponseField>
+
+<ResponseField name="topology" type="AgentTopology | null">
+  `null` until `setTopology` is called. Single-agent packages never set it.
+</ResponseField>
+
+<ResponseField name="ensureStart()" type="Promise<void>">
+  Idempotent. Safe to call from framework hooks.
+</ResponseField>
+
+<ResponseField name="emit(event)" type="Promise<void>">
+  Emit a `FrameworkEvent`. Auto-starts the session and fans out to registered exporters.
+</ResponseField>
+
+<ResponseField name="end(summary?)" type="Promise<void>">
+  Fire `session_end`. Idempotent.
+</ResponseField>
+
+<ResponseField name="reset()" type="void">
+  Discard session state; the next `emit` starts a fresh session.
+</ResponseField>
+
+<ResponseField name="registerExporter(exporter)" type="void">
+  Add a subscriber. Idempotent by reference equality.
+</ResponseField>
+
+<ResponseField name="getSummary()" type="SessionSummary">
+  Snapshot for `report()` helpers.
+</ResponseField>
+
+<ResponseField name="setTopology(topology, myRole?)" type="Promise<void>">
+  Declare or update the topology. See [Multi-agent](/docs/typescript/multi-agent).
+</ResponseField>
+
+## Lifecycle
+
+`createDefaultAdapter` installs a `process.beforeExit` hook so `session_end` fires on clean
+exit. Sessions start lazily on the first event, not at construction, so importing an adapter
+you never use costs nothing on the wire.
+
+## Default profile
+
+When you supply no profile, each package produces:
+
+```ts
+{
+  agent_id: `${adapterName}-agent`,
+  name: adapterName,
+  agent_type: "unknown",
+  capabilities: [],
+  deployment_context: "development",
+  risk_tier: "medium",
+  framework: adapterName,
+  model_provider: null,
+  model_id: null,
+  metadata: {},
+}
+```
+
+<Warning>
+  `capabilities: []` means **no input channels beyond the direct prompt** are attributed to
+  the agent, and `agent_type: "unknown"` is not one of the Python `AgentType` values. Supply a
+  real profile for any agent whose evaluation you intend to trust.
+</Warning>
+
+## Exported types
+
+```ts
+export type {
+  AgentProfile, EventPayload, EventType, FrameworkEvent,
+  IntegrityScore, LayerResult, SessionEndPayload, SessionExporter,
+  SessionStartPayload, SessionSummary,
+} from "@agentegrity/client";
+
+export {
+  AgentMember, AgentRole, AgentTopology, TopologyChange, TopologyKind,
+} from "@agentegrity/client";
+
+export type {
+  AgentMemberInit, AgentTopologyInit, TopologyChangeData,
+  Evidence, EvidenceType,
+} from "@agentegrity/client";
+```
+
+All of them mirror the Python core and validate against the published
+[wire format](/docs/export/wire-format).
+
+## SessionExporter
+
+```ts
+interface SessionExporter {
+  onSessionStart?(sessionId: string, adapterName: string,
+                  profile: AgentProfile): void | Promise<void>;
+  onEvent?(sessionId: string, event: FrameworkEvent): void | Promise<void>;
+  onSessionEnd?(sessionId: string, summary: SessionSummary): void | Promise<void>;
+}
+```
+
+Every method is optional. Fan-out is fail-open: `safeCall` catches and reports each error
+through `onError` rather than propagating.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Wire format" icon="file-code" href="/docs/export/wire-format">
+    JSON Schema and OpenAPI 3.1.
+  </Card>
+  <Card title="Session exporters" icon="share-nodes" href="/docs/export/session-exporters">
+    The Python side of the same contract.
+  </Card>
+</CardGroup>

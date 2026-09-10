@@ -1,0 +1,158 @@
+---
+title: "Multi-agent in TypeScript"
+description: "Topology types with SHA-256 hashes that match Python byte-for-byte."
+icon: "diagram-project"
+---
+
+`@agentegrity/client` ships the full topology model, mirroring the Python core:
+
+```ts
+import {
+  AgentTopology, AgentMember, AgentRole, TopologyKind, TopologyChange,
+} from "@agentegrity/client";
+import type { Evidence, EvidenceType } from "@agentegrity/client";
+```
+
+## Cross-runtime hash parity
+
+<Card title="The guarantee" icon="fingerprint" horizontal>
+  `topology.contentHash()` in TypeScript and `topology.content_hash()` in Python produce the
+  **same SHA-256 digest** for structurally identical topologies.
+</Card>
+
+Both implementations hash the same canonical payload:
+
+```json
+{"comm_channels":[...],"kind":"hub_spoke","members":[...]}
+```
+
+serialized with sorted keys and no whitespace. `topologyId` and `createdAt` are **excluded**,
+so identity and timestamp never perturb the structural hash.
+
+That is what lets a Python supervisor and a TypeScript worker commit to the same topology
+hash in their respective attestation chains, and lets a single verifier check both.
+
+## Constructing
+
+```ts
+import { AgentTopology, AgentMember, AgentRole, TopologyKind } from "@agentegrity/client";
+
+const topology = new AgentTopology({
+  kind: TopologyKind.HUB_SPOKE,
+  members: [
+    new AgentMember({ agentId: "lead-1", name: "coordinator",
+                      role: AgentRole.LEADER,
+                      capabilities: ["tool_use", "multi_agent_comm"] }),
+    new AgentMember({ agentId: "w-1", name: "researcher",
+                      role: AgentRole.MEMBER, parentId: "lead-1" }),
+  ],
+  commChannels: new Set(["peer_messages", "shared_memory"]),
+});
+
+console.log(topology.contentHash());
+```
+
+Members and channels are frozen at construction, so the snapshot is immutable in practice as
+well as in intent.
+
+## Mutating
+
+```ts
+const grown  = topology.withMember(new AgentMember({
+  agentId: "w-2", name: "writer",
+  role: AgentRole.MEMBER, parentId: "lead-1",
+}));
+const shrunk = topology.withoutMember("w-1");
+const wired  = topology.withChannels("broadcast_channels");
+```
+
+Each returns a new snapshot preserving `topologyId` with a fresh `contentHash` — identical
+semantics to Python's `with_member` / `without_member` / `with_channels`.
+
+## Declaring from an adapter
+
+```ts
+import { adapter } from "@agentegrity/crewai";
+import { AgentRole } from "@agentegrity/client";
+
+await adapter().setTopology(topology, AgentRole.MEMBER);
+```
+
+| Call | Effect |
+|---|---|
+| First | Emits `topology_declared` |
+| Structurally distinct | Emits `topology_change` with a `TopologyChange` diff in `data.change` |
+| Structurally identical | **No-op** — nothing to attest |
+
+Mirrors Python's `_BaseAdapter.set_topology(topology, my_role)` exactly.
+
+## What each package declares
+
+| Package | Discovery point | Topology |
+|---|---|---|
+| `@agentegrity/langchain` | `graph.getGraph().nodes` | `HIERARCHICAL_DAG` (supervisor node) / `PEER_TO_PEER` (swarm) |
+| `@agentegrity/openai-agents` | `onAgentStart` + each `onHandoff` | `PEER_TO_PEER`, grown incrementally |
+| `@agentegrity/crewai` | `crew.agents` + `crew.process` | `HUB_SPOKE` / `HIERARCHICAL_DAG` |
+| `@agentegrity/google-adk` | `agent.subAgents` / `sub_agents` | `HIERARCHICAL_DAG` |
+| `@agentegrity/claude-sdk` | — | *none, pinned by conformance* |
+| `@agentegrity/vercel-ai` | — | *none, pinned by conformance* |
+
+## Roles
+
+```ts
+enum AgentRole {
+  LEADER = "leader",
+  MEMBER = "member",
+  SUPERVISOR = "supervisor",
+  WORKER = "worker",
+  PEER = "peer",
+}
+```
+
+```ts
+enum TopologyKind {
+  HUB_SPOKE = "hub_spoke",
+  HIERARCHICAL_DAG = "hierarchical_dag",
+  PEER_TO_PEER = "peer_to_peer",
+  GROUP_CHAT = "group_chat",
+}
+```
+
+Values match Python's enum values on the wire.
+
+## Evidence
+
+```ts
+import type { Evidence, EvidenceType } from "@agentegrity/client";
+```
+
+Mirrors the Python `Evidence` type, so a TS-produced topology Evidence reference resolves
+against a Python-built chain.
+
+## Verifying a mixed fleet
+
+Because the hashes match, a Python verifier handles both:
+
+```python
+ok = python_agent.attestation_chain.verify_cross_agent_links(
+    {"ts-worker-1": ts_worker_chain},          # rebuilt from the TS event stream
+    key_provider=FileKeyProvider("/etc/agentegrity/keys"),
+)
+```
+
+<Warning>
+  The TypeScript packages are reporters — they do not build a local attestation chain. The
+  peer chain in that example is reconstructed on the backend from the emitted event stream.
+  See [TypeScript overview](/docs/typescript/overview).
+</Warning>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Multi-agent topology" icon="sitemap" href="/docs/concepts/multi-agent-topology">
+    The full conceptual model.
+  </Card>
+  <Card title="Client reference" icon="code" href="/docs/typescript/client-reference">
+    Every exported type.
+  </Card>
+</CardGroup>

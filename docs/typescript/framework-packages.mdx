@@ -1,0 +1,136 @@
+---
+title: "Framework packages"
+description: "Wiring for all six TypeScript adapters."
+icon: "cubes"
+---
+
+Every package is 2–3 lines to enable and re-exports the same `report()` / `reset()` /
+`registerExporter()` / `adapter()` surface.
+
+## @agentegrity/claude-sdk
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { hooks, report } from "@agentegrity/claude-sdk";
+
+await query({ prompt: "Summarize the latest safety papers",
+              options: { hooks: hooks() } });
+console.log(report());
+```
+
+Mirrors the Python Claude adapter's hook surface. **Single-agent by framework design** — the
+conformance suite pins that no topology is ever declared.
+
+## @agentegrity/langchain
+
+```ts
+import { ChatAnthropic } from "@langchain/anthropic";
+import { instrument, instrumentGraph, report } from "@agentegrity/langchain";
+
+await new ChatAnthropic({ callbacks: [instrument()] }).invoke("hi");
+
+instrumentGraph(compiledGraph);
+console.log(report());
+```
+
+`instrument()` returns a LangChain JS callback handler. `instrumentGraph(graph)` walks
+`graph.getGraph().nodes`:
+
+| Condition | Topology |
+|---|---|
+| A node named `supervisor`, `supervisor_agent`, or `orchestrator` | `HIERARCHICAL_DAG` |
+| Otherwise | `PEER_TO_PEER` (swarm) |
+
+Plain runnables stay single-agent.
+
+## @agentegrity/openai-agents
+
+```ts
+import { Agent, run } from "@openai/agents";
+import { runHooks, report } from "@agentegrity/openai-agents";
+
+await run(agent, "Research this", { hooks: runHooks() });
+console.log(report());
+```
+
+`onAgentStart` seeds a `PEER_TO_PEER` topology; each `onHandoff` appends the target as a
+`PEER` via `setTopology`, emitting `topology_change`. No extra call needed.
+
+## @agentegrity/crewai
+
+```ts
+import { instrument, report } from "@agentegrity/crewai";
+
+instrument({ crew });                 // walks crew.agents for topology
+// or, event bus only:
+instrument().attach(crew.events);
+
+console.log(report());
+```
+
+| `crew.process` | Topology | Roles |
+|---|---|---|
+| sequential | `HUB_SPOKE` | `MEMBER` throughout |
+| hierarchical | `HIERARCHICAL_DAG` | `SUPERVISOR` + `WORKER` |
+
+## @agentegrity/google-adk
+
+```ts
+import { instrument, report } from "@agentegrity/google-adk";
+
+const close = instrument(workflowAgent);
+// ...
+close();
+console.log(report());
+```
+
+Walks `agent.subAgents` — or `sub_agents`, since ADK JS naming varies. `SequentialAgent`,
+`ParallelAgent`, and `LoopAgent` produce `HIERARCHICAL_DAG`; a plain `Agent` stays
+single-agent.
+
+`instrument()` returns a close function; call it to detach.
+
+## @agentegrity/vercel-ai
+
+```ts
+import { streamText } from "ai";
+import { instrument, report } from "@agentegrity/vercel-ai";
+
+await streamText({
+  model,
+  prompt: "hi",
+  experimental_telemetry: instrument(),
+});
+console.log(report());
+```
+
+TypeScript-native — **no Python equivalent**. Uses the AI SDK's OpenTelemetry tracer surface
+rather than callbacks.
+
+<Warning>
+  Marked **experimental** in STATUS.md. The AI SDK's telemetry surface is itself
+  `experimental_`-prefixed, so this package's API may move with it. Single-agent by framework
+  design; conformance pins the absence of a topology.
+</Warning>
+
+## Choosing between them
+
+| Need | Package |
+|---|---|
+| Anthropic-native agent loop | `claude-sdk` |
+| Chains, graphs, or the LangChain tool ecosystem | `langchain` |
+| OpenAI's agent runtime with handoffs | `openai-agents` |
+| Role-based crews | `crewai` |
+| Google's ADK workflow agents | `google-adk` |
+| Direct model calls with streaming in a Next.js app | `vercel-ai` |
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Multi-agent" icon="diagram-project" href="/docs/typescript/multi-agent">
+    Topology in TypeScript.
+  </Card>
+  <Card title="Client reference" icon="code" href="/docs/typescript/client-reference">
+    The shared core.
+  </Card>
+</CardGroup>
