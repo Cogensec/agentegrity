@@ -1,0 +1,244 @@
+---
+title: "Checkpoints and recovery"
+description: "Snapshot restorable state, roll back to it, and keep the chain verifiable across the round trip."
+icon: "floppy-disk"
+---
+
+Self-recovery needs a place to recover **to**. That is what a checkpoint is.
+
+## Wiring a backend
+
+```python
+from agentegrity.layers import RecoveryLayer, SqliteCheckpoint
+
+recovery = RecoveryLayer(
+    chain=adapter.attestation_chain,
+    checkpoint=SqliteCheckpoint("/var/lib/agentegrity/checkpoints.db"),
+    degradation_window=10,
+    degradation_threshold=0.15,
+)
+```
+
+Attaching a backend does three things: it enables `snapshot()` / `restore_to()`, it surfaces
+`checkpoint_count` and `last_checkpoint_id` in the layer details, and it counts as a
+synthetic `checkpoint` capability in the recovery-capability score.
+
+## Reference backends
+
+| Backend | Durability | Notes |
+|---|---|---|
+| `InMemoryCheckpoint` | none | Tests, ephemeral processes |
+| `FileCheckpoint` | disk | One JSON file per snapshot. **Atomic writes**, restrictive permissions, path-traversal guarded |
+| `SqliteCheckpoint` | disk | Idempotent schema; persistent connection for `:memory:` |
+| `KMSCheckpoint` | disk + KMS | Envelope encryption, AWS KMS wrapped data keys. `pip install "agentegrity[kms]"` |
+
+<Info>
+  `KMSCheckpoint` **verifies the KMS encryption context at load time**. Encryption alone would
+  still let an attacker who can write to the store substitute a validly-encrypted *older*
+  snapshot and roll the agent back to a state of their choosing. Binding the context is what
+  closes that.
+</Info>
+
+## Taking a snapshot
+
+```python
+checkpoint_id = recovery.snapshot(
+    agent_id=profile.agent_id,
+    baseline=cortical_layer._baseline.to_dict(),
+    metadata={"reason": "pre-deploy", "release": "v4.2.0", "operator": "requie"},
+)
+```
+
+A `CheckpointSnapshot` captures:
+
+<ResponseField name="agent_id" type="str" required>
+  Backends may scope on this but are not required to enforce isolation.
+</ResponseField>
+
+<ResponseField name="checkpoint_id" type="str">
+  Defaults to a fresh UUID. A backend's `save()` **may return a different id**, in which case
+  the returned id is canonical — always use the return value, not the field you passed in.
+</ResponseField>
+
+<ResponseField name="created_at" type="str">
+  ISO-8601 UTC.
+</ResponseField>
+
+<ResponseField name="score_history" type="list[float]">
+  Restored verbatim into the layer.
+</ResponseField>
+
+<ResponseField name="chain_records" type="list[dict]">
+  Every record via `to_dict()`. Rebuilt in order, preserving `chain_previous` link hashes.
+</ResponseField>
+
+<ResponseField name="baseline" type="dict | None">
+  Optional behavioural baseline snapshot.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict">
+  Arbitrary tags. Backends persist verbatim and must not mutate.
+</ResponseField>
+
+## Restoring
+
+```python
+snap = recovery.restore_to(checkpoint_id)
+
+assert recovery._chain.verify_chain()      # still True
+```
+
+`restore_to` replaces `score_history` and rebuilds the chain via
+`AttestationChain.from_dict_list`, which is a **restore** rather than a re-append: original
+link hashes are preserved verbatim.
+
+<Info>
+  That property is load-bearing. If restoration re-appended records, every `chain_previous`
+  would be recomputed, every signature would break, and the restored agent would carry an
+  unverifiable chain — making recovery self-defeating. It is pinned by
+  `tests/test_recovery_restore.py` (mitigation **M-14**).
+</Info>
+
+Errors are explicit:
+
+| Situation | Raises |
+|---|---|
+| No checkpoint backend configured | `RuntimeError` |
+| Unknown checkpoint id | `KeyError` |
+
+## A custom backend
+
+```python
+class Checkpoint(Protocol):
+    def save(self, snapshot: CheckpointSnapshot) -> str: ...
+    def load(self, checkpoint_id: str) -> CheckpointSnapshot | None: ...
+    def list_ids(self) -> list[str]: ...
+    def latest(self) -> CheckpointSnapshot | None: ...
+```
+
+```python
+import json, boto3
+from agentegrity.layers import CheckpointSnapshot
+from agentegrity.layers.checkpoint import validate_storage_identifier
+
+class S3Checkpoint:
+    def __init__(self, bucket: str, prefix: str = "agentegrity/") -> None:
+        self._s3, self._bucket, self._prefix = boto3.client("s3"), bucket, prefix
+
+    def _key(self, checkpoint_id: str) -> str:
+        validate_storage_identifier(checkpoint_id, kind="checkpoint_id")
+        return f"{self._prefix}{checkpoint_id}.json"
+
+    def save(self, snapshot: CheckpointSnapshot) -> str:
+        self._s3.put_object(Bucket=self._bucket, Key=self._key(snapshot.checkpoint_id),
+                            Body=json.dumps(snapshot.to_dict()).encode())
+        return snapshot.checkpoint_id
+
+    def load(self, checkpoint_id: str) -> CheckpointSnapshot | None:
+        try:
+            body = self._s3.get_object(Bucket=self._bucket,
+                                       Key=self._key(checkpoint_id))["Body"].read()
+        except self._s3.exceptions.NoSuchKey:
+            return None
+        return CheckpointSnapshot.from_dict(json.loads(body))
+
+    def list_ids(self) -> list[str]:
+        pages = self._s3.get_paginator("list_objects_v2").paginate(
+            Bucket=self._bucket, Prefix=self._prefix)
+        return [o["Key"][len(self._prefix):-5]
+                for p in pages for o in p.get("Contents", [])]
+
+    def latest(self) -> CheckpointSnapshot | None:
+        ids = self.list_ids()
+        return self.load(ids[-1]) if ids else None
+```
+
+<Warning>
+  **Call `validate_storage_identifier`** on any identifier that reaches a path or key. It is
+  the allow-list closing **T-E1** (path traversal): without it, an `agent_id` of
+  `../../etc/passwd` reaches your filesystem or bucket layout.
+
+  It is exported precisely so custom backends get the same guard as the built-ins.
+</Warning>
+
+## Declaring recovery capabilities
+
+```python
+AgentProfile(
+    agent_id="payments-agent-prod",
+    capabilities=["tool_use", "checkpoint", "rollback", "session_reset"],
+    ...
+)
+```
+
+| Capabilities present | Capability sub-score |
+|---|---:|
+| ≥ 3 | 1.00 |
+| 2 | 0.85 |
+| 1 | 0.70 |
+| 0 | 0.40 |
+
+Recognized: `state_restore`, `checkpoint`, `rollback`, `session_reset`, `peer_quarantine`.
+
+<Warning>
+  This scores a **declaration**. Listing `state_restore` without implementing it raises the
+  score and provides no recovery. Declare what you have actually built.
+</Warning>
+
+## Degradation tracking
+
+```python
+score = evaluator.evaluate(profile, context)
+recovery.record_score(score.composite)
+```
+
+The layer splits the last `degradation_window` scores in half and compares means. A drop of
+at least `degradation_threshold` is `sustained_degradation`.
+
+<Note>
+  This is what separates a **one-off spike** from **persistent compromise**. A single bad
+  score is noise; a sustained downward trend across a window is signal, and it is exactly the
+  shape a slow-drift attack produces.
+</Note>
+
+Fewer than three samples returns 1.0 and `sustained=False` — not enough history to claim
+anything.
+
+## An operational pattern
+
+<Steps>
+  <Step title="Snapshot on a known-good boundary">
+    After a successful deploy, at the start of a shift, after a reviewed baseline update.
+  </Step>
+  <Step title="Tag the reason in metadata">
+    `{"reason": "pre-deploy", "release": "v4.2.0"}` — you will want this when choosing which
+    snapshot to restore.
+  </Step>
+  <Step title="Watch for the escalate">
+    `chain_intact: false` escalates and scores the chain check **zero**. That is the strongest
+    single signal the layer emits.
+  </Step>
+  <Step title="Restore, then verify">
+    ```python
+    snap = recovery.restore_to(cid)
+    assert recovery._chain.verify_chain()
+    ok, bad = recovery._chain.verify_signatures(trusted_keys=pinned)
+    ```
+    Check signatures too — hash linkage alone would survive a substituted snapshot.
+  </Step>
+  <Step title="Record the restoration">
+    The restored chain has a gap in wall-clock time. Write an attestation after restoring so
+    the audit trail shows when and to what.
+  </Step>
+</Steps>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Recovery layer" icon="rotate-left" href="/docs/layers/recovery">
+    All four recovery checks.
+  </Card>
+  <Card title="Baselines and drift" icon="chart-line" href="/docs/guides/baselines-and-drift">
+    The baseline a checkpoint carries.
+  </Card>
+</CardGroup>

@@ -1,0 +1,234 @@
+---
+title: "LLM and SLM semantic layers"
+description: "Claude-backed and local-model classifiers as the semantic backstop behind the regex taxonomy."
+icon: "microchip"
+---
+
+The regex taxonomy is a floor. Paraphrase, translation, and novel framings evade it by
+construction. The semantic layers are the backstop — and they are opt-in because they cost
+latency and money.
+
+## Three tiers
+
+<CardGroup cols={3}>
+  <Card title="Tier 1 — regex" icon="asterisk">
+    32 patterns, 8 families. Microseconds. Always on.
+  </Card>
+  <Card title="Tier 2 — embedding" icon="vector-square">
+    Cosine similarity against a corpus of known attacks. Zero-dependency n-gram fallback.
+  </Card>
+  <Card title="Tier 3 — LLM / SLM" icon="brain">
+    Semantic classification. Cloud (Claude) or local (Ollama, llama.cpp, vLLM).
+  </Card>
+</CardGroup>
+
+Tiers **compose by union**: an LLM-detected attack adds a `ThreatAssessment`; an LLM agreeing
+with regex deduplicates.
+
+## AdversarialLLMLayer
+
+```bash
+pip install "agentegrity[llm]"
+```
+
+```python
+from agentegrity.layers.adversarial_llm import AdversarialLLMLayer
+from agentegrity import IntegrityEvaluator
+from agentegrity.layers import CorticalLayer, GovernanceLayer, RecoveryLayer
+
+evaluator = IntegrityEvaluator(layers=[
+    AdversarialLLMLayer(model="claude-haiku-4-5-20251001", max_concurrency=8),
+    CorticalLayer(), GovernanceLayer(), RecoveryLayer(),
+])
+```
+
+<ResponseField name="api_key" type="str | None">
+  Falls back to `ANTHROPIC_API_KEY`. Unset means the layer fails open.
+</ResponseField>
+
+<ResponseField name="model" type="str">
+  Default `claude-haiku-4-5-20251001` — chosen for latency and cost on a per-evaluation path.
+</ResponseField>
+
+<ResponseField name="timeout" type="float">
+  Per-request seconds. Default 8.0.
+</ResponseField>
+
+<ResponseField name="max_concurrency" type="int">
+  Calls in flight. Default 8.
+</ResponseField>
+
+<ResponseField name="max_targets_per_evaluation" type="int">
+  Ceiling on classification targets per evaluation. Default 200.
+</ResponseField>
+
+<ResponseField name="verdict_cache_size" type="int">
+  Entries in the content-addressed cache. Default 4096.
+</ResponseField>
+
+<ResponseField name="include_session_context" type="bool">
+  Prefix each target with recent tool-call names. Default `False` — see below.
+</ResponseField>
+
+It also accepts every `AdversarialLayer` argument (`coherence_threshold`, `patterns`,
+`extra_patterns`, `threat_detectors`, `block_on_critical`), because the regex floor still runs.
+
+## AdversarialSLMLayer
+
+Same layer, different transport: the OpenAI-compatible chat-completions protocol over stdlib
+`urllib`. **Zero extra dependencies.**
+
+```python
+from agentegrity.layers.adversarial_slm import AdversarialSLMLayer
+
+layer = AdversarialSLMLayer(model="qwen2.5:3b")     # Ollama default URL
+```
+
+| Setting | Constructor | Environment | Default |
+|---|---|---|---|
+| Base URL | `base_url` | `AGENTEGRITY_SLM_BASE_URL` | `http://localhost:11434/v1` |
+| Model | `model` | `AGENTEGRITY_SLM_MODEL` | **none** |
+| Token | `api_key` | `AGENTEGRITY_SLM_API_KEY` | omitted |
+
+Works with Ollama, llama.cpp, vLLM, and LM Studio, on CPU or GPU.
+
+<Note>
+  With no model resolvable, the layer **fails open with one warning** rather than guessing.
+  There is no sane universal default model name, and silently picking one would produce
+  confident verdicts from whatever happened to be loaded.
+</Note>
+
+<Warning>
+  `AdversarialSLMLayer` has **no published detection numbers**. Detection quality is entirely a
+  property of the model you point it at. Measure yours against the benchmark harness before
+  trusting it:
+
+  ```bash
+  python -m pytest tests/test_benchmarks.py -m benchmark -v
+  ```
+</Warning>
+
+## Cost control
+
+Bounded on three axes:
+
+<Steps>
+  <Step title="Concurrency">
+    At most `max_concurrency` calls in flight (default 8).
+  </Step>
+  <Step title="Targets per evaluation">
+    At most `max_targets_per_evaluation` targets (default 200).
+  </Step>
+  <Step title="Verdict cache">
+    Keyed on `(channel, sha256(text))`, insertion-ordered, evicted oldest-first at
+    `verdict_cache_size`.
+  </Step>
+</Steps>
+
+<Info>
+  The cache matters more than it sounds. **Adapter buffers only grow** — every evaluation
+  re-presents text already classified in an earlier pass. Without the cache you re-bill the
+  same tool output on every subsequent boundary in the session.
+
+  Keying on `(channel, hash)` rather than hash alone is deliberate: the same text arriving on
+  `direct_prompt` versus `tool_responses` is a different question.
+</Info>
+
+## Session context
+
+```python
+AdversarialLLMLayer(include_session_context=True)
+```
+
+Prefixes each classification target with a compact header of recent tool-call names, so the
+classifier can judge **"was this action part of what the session was doing?"** — the signal
+content-only classification structurally lacks.
+
+<Warning>
+  Opt-in because it **churns the verdict cache**: each new tool call changes the prefix, so
+  cached verdicts stop deduplicating across evaluation passes. You are trading cost for the
+  session-context signal.
+</Warning>
+
+This is one of the two v0.10.0 mechanisms addressing the AgentDojo gap. The other,
+`ToolSequenceDetector`, is default-on and free. See
+[Limitations](/docs/concepts/limitations).
+
+## CorticalLLMLayer
+
+```python
+from agentegrity.layers import default_layers
+from agentegrity import IntegrityEvaluator
+
+evaluator = IntegrityEvaluator(layers=default_layers(prefer_llm=True, api_key=key))
+```
+
+Swaps `CorticalLayer` for `CorticalLLMLayer`, adding Claude-driven semantic checks for
+reasoning-chain validation, memory-provenance analysis, and drift classification.
+
+<Info>
+  **Its sync `evaluate()` stays pattern-based.** Only `aevaluate()` calls Claude. Opting in
+  never surprises a synchronous caller with network latency on a hot path.
+</Info>
+
+`default_layers(prefer_llm=True)` probes for `anthropic` at construction, so a missing
+dependency raises immediately with the install command rather than failing confusingly on the
+first evaluation.
+
+## Fail-open everywhere
+
+Every LLM and SLM path fails **open**: API error, timeout, missing key, unparseable
+response — the layer logs and falls back to the regex verdict.
+
+<Warning>
+  Fail-open is the right default for a measurement library, but understand the consequence:
+  **an attacker who can cause API failures degrades you to the regex tier**. If your threat
+  model includes that, monitor for classification failures rather than assuming the semantic
+  tier is always running.
+</Warning>
+
+## Async matters
+
+Semantic layers only classify on the async path.
+
+```python
+from agentegrity.core.evaluator import AsyncIntegrityEvaluator
+
+evaluator = AsyncIntegrityEvaluator(
+    layers=[AdversarialLLMLayer(), CorticalLayer(), GovernanceLayer(), RecoveryLayer()],
+    fail_fast=False,      # run all four concurrently via asyncio.gather
+)
+score = await evaluator.evaluate(profile, context)
+```
+
+`fail_fast=False` is worth considering here: with a network-bound layer in the pipeline,
+running the four concurrently hides most of its latency behind the others.
+
+Sync layers are wrapped in `asyncio.to_thread`, so a mixed pipeline works.
+
+## Choosing a tier
+
+| Situation | Recommendation |
+|---|---|
+| High volume, cost-sensitive, known attack shapes | Regex only |
+| Need semantic coverage, data can leave the process | `AdversarialLLMLayer` |
+| Need semantic coverage, data **cannot** leave | `AdversarialSLMLayer` on a local server |
+| Multi-step attacks matter | Any tier + `ToolSequenceDetector` (default-on) + `include_session_context=True` |
+
+<Warning>
+  The cloud LLM layer sends **channel content** — prompts, tool outputs, retrieved documents —
+  to the Anthropic API for classification. That is a different disclosure than
+  [telemetry](/docs/export/telemetry), which is shape-only. If content cannot leave your
+  process, use the SLM layer against a local server.
+</Warning>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Custom detectors" icon="crosshairs" href="/docs/guides/custom-detectors">
+    Extending tiers 1 and 2.
+  </Card>
+  <Card title="Limitations" icon="scale-balanced" href="/docs/concepts/limitations">
+    Why these layers exist.
+  </Card>
+</CardGroup>

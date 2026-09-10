@@ -1,0 +1,260 @@
+---
+title: "Custom governance policies"
+description: "Writing, testing, and deploying policy rules that actually gate."
+icon: "scroll"
+---
+
+The `enterprise-default` set is four rules. It is a starting point for a policy program, not
+a policy program.
+
+## Anatomy of a rule
+
+```python
+from agentegrity.layers.governance import PolicyRule, PolicyDecision
+
+rule = PolicyRule(
+    rule_id="ORG-001",
+    name="Production deploy freeze",
+    description="Production deploys are frozen Friday through Sunday",
+    condition=_is_weekend_deploy,
+    decision=PolicyDecision.DENY,
+    severity=0.90,
+)
+```
+
+<ResponseField name="rule_id" type="str" required>
+  Appears in every `PolicyEvaluation`, the audit log, and the serialized `layer_states`. Use a
+  stable scheme — this is the identifier an auditor will ask about.
+</ResponseField>
+
+<ResponseField name="condition" type="callable" required>
+  `(profile, action, context) -> bool`. **`True` means triggered**, i.e. a violation was
+  detected.
+</ResponseField>
+
+<ResponseField name="decision" type="PolicyDecision" required>
+  `ALLOW` · `DENY` · `REQUIRE_APPROVAL` · `CONDITIONAL`.
+</ResponseField>
+
+<ResponseField name="severity" type="float">
+  `[0, 1]`. Contributes to the governance score proportionally. Default 0.50.
+</ResponseField>
+
+<Warning>
+  **Read call-derived values from `action["arguments"]`, never the top level.**
+
+  ```python
+  amount = (action.get("arguments") or {}).get("amount", 0)   # correct
+  amount = action.get("amount", 0)                            # shadowable
+  ```
+
+  Agent-supplied arguments are untrusted. Before v0.9, a prompt-injected agent could name an
+  argument `tool` and shadow the trusted top-level field `GOV-001` matches on, skipping the
+  approval gate entirely. Nesting is the fix; reading flat re-opens the hole in your own rule.
+</Warning>
+
+## Decision semantics
+
+| Decision | Layer action | Under `enforce=True` |
+|---|---|---|
+| `DENY` | `block` | **Denied**, never approvable |
+| `REQUIRE_APPROVAL` | `escalate` | **Denied** unless an approval handler approves |
+| `CONDITIONAL` | `alert` | Proceeds; recorded |
+| `ALLOW` | — | Not triggered |
+
+Pick `DENY` for things that must never happen, `REQUIRE_APPROVAL` for things a human should
+decide, and `CONDITIONAL` for things worth knowing about.
+
+## Worked rules
+
+<CodeGroup>
+
+```python Data residency
+def _cross_region_transfer(profile, action, context):
+    if action.get("type") != "tool_call":
+        return False
+    args = action.get("arguments") or {}
+    target = str(args.get("destination_region", ""))
+    return bool(target) and target != context.get("home_region", "eu-west-1")
+
+RULE = PolicyRule(
+    rule_id="ORG-DR-001",
+    name="Data residency",
+    description="Data may not leave the home region without approval",
+    condition=_cross_region_transfer,
+    decision=PolicyDecision.REQUIRE_APPROVAL,
+    severity=0.85,
+)
+```
+
+```python Spend ceiling
+def _over_budget(profile, action, context):
+    args = action.get("arguments") or {}
+    amount = float(args.get("amount", 0) or 0)
+    ceiling = {"low": 100, "medium": 1_000,
+               "high": 10_000, "critical": 50_000}[profile.risk_tier.value]
+    return amount > ceiling
+
+RULE = PolicyRule(
+    rule_id="ORG-FIN-002",
+    name="Risk-tiered spend ceiling",
+    description="Spend above the agent's risk-tier ceiling needs approval",
+    condition=_over_budget,
+    decision=PolicyDecision.REQUIRE_APPROVAL,
+    severity=0.80,
+)
+```
+
+```python Capability boundary
+def _undeclared_capability(profile, action, context):
+    """A tool call requiring a capability the profile never declared."""
+    required = TOOL_CAPABILITY_MAP.get(action.get("tool", ""))
+    return bool(required) and not profile.has_capability(required)
+
+RULE = PolicyRule(
+    rule_id="ORG-CAP-001",
+    name="Capability boundary",
+    description="Tool requires a capability this agent did not declare",
+    condition=_undeclared_capability,
+    decision=PolicyDecision.DENY,
+    severity=0.95,
+)
+```
+
+```python Topology size
+def _oversized_topology(profile, action, context):
+    topology = (context.get("topology_context") or {}).get("topology") or {}
+    return len(topology.get("members") or []) > 8
+
+RULE = PolicyRule(
+    rule_id="ORG-MA-001",
+    name="Topology size ceiling",
+    description="More than 8 coordinating agents requires review",
+    condition=_oversized_topology,
+    decision=PolicyDecision.REQUIRE_APPROVAL,
+    severity=0.60,
+)
+```
+
+</CodeGroup>
+
+## Wiring rules in
+
+```python
+from agentegrity.layers import GovernanceLayer
+from agentegrity import IntegrityEvaluator
+from agentegrity.layers import AdversarialLayer, CorticalLayer, RecoveryLayer
+
+governance = GovernanceLayer(
+    policy_set="enterprise-default",
+    custom_rules=[RULE_DR, RULE_FIN, RULE_CAP],
+    sensitive_tools={"database_write", "mcp__stripe__*", "deploy_*", "admin_api"},
+    escalation_callback=notify_oncall,
+)
+
+evaluator = IntegrityEvaluator(layers=[
+    AdversarialLayer(), CorticalLayer(), governance, RecoveryLayer(),
+])
+```
+
+Or add at runtime:
+
+```python
+governance.add_rule(new_rule)
+```
+
+Start from `"minimal"` when you want *only* your rules:
+
+```python
+GovernanceLayer(policy_set="minimal", custom_rules=[...])
+```
+
+## Failing rules fail safe
+
+If a condition raises, the rule is treated as a **soft trigger** resolving to
+`REQUIRE_APPROVAL`, with reason `"Rule evaluation error: <ExceptionClass>"`.
+
+<Info>
+  Only the exception **class** reaches the audit log and the serialized `layer_states`. The
+  full exception with traceback goes to the local log. A condition can touch databases, HTTP
+  APIs, or secret stores, and those exception messages routinely embed credentials and PII.
+</Info>
+
+The consequence worth planning for: a rule whose condition depends on a flaky external
+service will escalate every action while that service is down. Cache aggressively, or fail
+the lookup to a safe local default inside the condition.
+
+## Scoring impact
+
+```
+score = 1 − (Σ severity of triggered rules) / (Σ severity of all rules)
+```
+
+Adding rules **dilutes** each one's individual impact. With `enterprise-default` (total 2.60),
+`GOV-001` alone gives 0.731. Add five rules of severity 0.80 each and the same trigger gives
+`1 − 0.70/6.60 = 0.894`.
+
+<Warning>
+  If a single high-consequence rule must dominate the score, keep the rule set small, or run
+  it in a separate `GovernanceLayer` instance. The action (`block` / `escalate`) is unaffected
+  by dilution — only the numeric `assurance_score` is.
+</Warning>
+
+## Testing
+
+```python
+import pytest
+from agentegrity import AgentProfile, RiskTier
+
+def _profile(tier):
+    p = AgentProfile.default()
+    p.risk_tier = RiskTier(tier)
+    return p
+
+@pytest.mark.parametrize("tier,amount,expected", [
+    ("low",      50,     False),
+    ("low",      500,    True),
+    ("critical", 10_000, False),
+    ("critical", 60_000, True),
+])
+def test_spend_ceiling(tier, amount, expected):
+    action = {"type": "tool_call", "tool": "transfer_funds",
+              "arguments": {"amount": amount}}
+    assert _over_budget(_profile(tier), action, {}) is expected
+
+
+def test_arguments_cannot_shadow_tool():
+    """A malicious argument named 'tool' must not change matching."""
+    action = {"type": "tool_call", "tool": "harmless_read",
+              "arguments": {"tool": "database_write"}}
+    assert _rule_high_risk_tool_access(_profile("high"), action, {}) is False
+```
+
+That second test is worth having in every policy suite. It pins the boundary that v0.9 fixed.
+
+## Audit log
+
+```python
+for entry in governance.audit_log:
+    print(entry.timestamp, entry.decision, entry.content_hash[:12])
+    for ev in entry.policy_evaluations:
+        if ev.triggered:
+            print("   ", ev.rule_id, ev.decision.value, ev.reason)
+```
+
+<Note>
+  The audit log lives **in memory on the layer instance**. For durable audit, persist it
+  yourself or rely on the attestation chain, which carries the same governance state in
+  `layer_states` and is signed.
+</Note>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Governance layer" icon="gavel" href="/docs/layers/governance">
+    Built-in rules and matching semantics.
+  </Card>
+  <Card title="Enforcement and approvals" icon="hand" href="/docs/guides/enforcement-and-approvals">
+    Making REQUIRE_APPROVAL actually gate.
+  </Card>
+</CardGroup>

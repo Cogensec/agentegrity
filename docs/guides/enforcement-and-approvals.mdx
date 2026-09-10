@@ -1,0 +1,271 @@
+---
+title: "Enforcement and approvals"
+description: "Turning measurement into gating, with human-in-the-loop approval that fails closed."
+icon: "hand"
+---
+
+By default Agentegrity **measures**. Enforcement is a deliberate opt-in, and it changes what
+happens when a verdict is severe.
+
+```python
+hooks(enforce=True)
+instrument_chain(chain, enforce=True)
+runtime = agentegrity.init(enforce=True)
+```
+
+## What enforcement does
+
+| Verdict | `enforce=False` | `enforce=True` |
+|---|---|---|
+| `pass` | proceeds | proceeds |
+| `alert` | proceeds, recorded | proceeds, recorded |
+| `escalate` | proceeds, recorded | **denied** unless an `approval_handler` approves |
+| `block` | proceeds, recorded | **denied**, never approvable |
+
+<Warning>
+  **`escalate` fails closed.** With `enforce=True` and no approval handler, every escalation is
+  denied.
+
+  This is the v0.8.1 fix for a real gap: before it, the built-in `REQUIRE_APPROVAL` policies
+  — `GOV-001` through `GOV-004`, the ones most deployments rely on — were **silently
+  advisory** under enforcement. An operator who turned enforcement on believed sensitive tool
+  calls were being gated, and they were not.
+</Warning>
+
+Escalations come from three places, and all three now gate:
+
+- Governance `REQUIRE_APPROVAL` rules
+- Cortical reasoning-conflict detection
+- Recovery attestation-chain tamper
+
+## The deny payload
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Agentegrity integrity score 0.612 triggered block action"
+  }
+}
+```
+
+Each adapter translates this into its framework's native veto:
+Claude SDK hook return · LangChain callback return · OpenAI `RunHooks` return · CrewAI
+event-bus deny · Agno `StopAgentRun` · Strands `event.cancel_tool`.
+
+## Approval handlers
+
+The simplest handler is a callable returning a bool:
+
+```python
+def approve(profile, score, candidate_action) -> bool:
+    return candidate_action.get("tool_name") in SAFE_TOOLS
+```
+
+<Warning>
+  A handler that **raises** is treated as a denial, logged with the exception class. Approval
+  fails closed in every direction — there is no exception path that accidentally allows.
+</Warning>
+
+## ApprovalWorkflow
+
+For real human-in-the-loop, wrap the handler with a timeout policy:
+
+```python
+from agentegrity import ApprovalWorkflow
+
+workflow = ApprovalWorkflow(
+    handler=page_oncall_and_wait,
+    approver="oncall@example.com",
+    timeout=300,                # seconds; None waits indefinitely
+    timeout_action="deny",      # default — fail closed
+)
+```
+
+<ResponseField name="handler" type="callable" required>
+  Receives `(profile, score, candidate_action)`. Returns a bool or an `ApprovalDecision`.
+</ResponseField>
+
+<ResponseField name="approver" type="str">
+  Identity recorded for bool-returning handlers. A handler returning its own
+  `ApprovalDecision` overrides this.
+</ResponseField>
+
+<ResponseField name="timeout" type="float | None">
+  Seconds to wait. The handler runs on a worker thread; on timeout the thread is **abandoned**
+  and its eventual result discarded.
+</ResponseField>
+
+<ResponseField name="timeout_action" type='"deny" | "allow"'>
+  What a timeout resolves to. Default `"deny"`.
+</ResponseField>
+
+<Info>
+  `timeout_action="allow"` makes fail-open an **explicit, visible choice** rather than a silent
+  default. The decision is recorded on the chain with `timed_out:true`, so an auditor can see
+  every action that proceeded because nobody answered.
+</Info>
+
+The executor is deliberately not used as a context manager: `__exit__` would join the worker
+thread, blocking for as long as the stuck handler runs and defeating the timeout entirely.
+`shutdown(wait=False)` abandons it instead.
+
+## ApprovalDecision
+
+Return one from your handler for full control:
+
+```python
+from agentegrity import ApprovalDecision
+
+def handler(profile, score, candidate_action):
+    ticket = incident_system.request_approval(...)
+    return ApprovalDecision(
+        approved=ticket.approved,
+        approver=ticket.approver_email,
+        reason=f"ticket {ticket.id}",
+    )
+```
+
+<ResponseField name="approved" type="bool" required>
+  The outcome.
+</ResponseField>
+
+<ResponseField name="approver" type="str">
+  Who decided. Defaults to `"approval_handler"`.
+</ResponseField>
+
+<ResponseField name="reason" type="str | None">
+  Free text, recorded on the chain.
+</ResponseField>
+
+<ResponseField name="timed_out" type="bool">
+  Whether the request timed out.
+</ResponseField>
+
+<ResponseField name="requested_at / resolved_at" type="float">
+  Unix timestamps. `ApprovalWorkflow` sets `requested_at` even on a handler-supplied decision.
+</ResponseField>
+
+## Approvals become signed provenance
+
+Every consulted approval is written to the chain as a `DecisionRecord` at the `approval`
+boundary, signed when the adapter has a key:
+
+```text
+outcome:approved
+approver:oncall@example.com
+timed_out:false
+requested_at:1757521830.412
+resolved_at:1757521834.907
+reason:ticket INC-4821
+```
+
+This is what the [audit report's](/docs/guides/compliance-reports) Human Approvals table
+reads, and what maps to **EU AI Act Art. 14 (human oversight)**.
+
+<Note>
+  This capture happens on the **adapter** path. `IntegrityMonitor` consults its
+  `approval_handler` to decide whether to block, but does not itself write an approval
+  decision record.
+</Note>
+
+## Wiring it up
+
+Zero-config entry points do not expose `approval_handler` — construct the adapter class:
+
+```python
+from agentegrity import AgentegrityClient, AgentProfile, ApprovalWorkflow
+from agentegrity.adapters.claude import ClaudeAdapter
+from agentegrity.core.attestation import generate_signing_key
+
+client = AgentegrityClient(policy_set="enterprise-default")
+
+adapter = ClaudeAdapter(
+    profile=AgentProfile.default(name="prod-agent"),
+    evaluator=client.evaluator,
+    enforce=True,
+    approval_handler=ApprovalWorkflow(
+        handler=slack_approval,
+        approver="platform-oncall",
+        timeout=180,
+        timeout_action="deny",
+    ),
+    signing_key=generate_signing_key(),
+)
+
+options = ClaudeAgentOptions(hooks=adapter.create_hooks())
+```
+
+With `IntegrityMonitor`:
+
+```python
+monitor = IntegrityMonitor(
+    profile=profile,
+    evaluator=client.evaluator,
+    threshold=0.70,
+    enable_attestation=True,
+    signing_key=key,
+    approval_handler=workflow,
+)
+```
+
+## Guard semantics
+
+`@monitor.guard` raises `IntegrityViolationError` **before** the function runs when the
+pre-check blocks. It works on sync and async functions alike, and runs a post-execution
+evaluation on success.
+
+```python
+from agentegrity.core.monitor import IntegrityViolationError
+
+try:
+    result = await agent_action(context=ctx)
+except IntegrityViolationError as exc:
+    log.warning("blocked: %s", exc)
+```
+
+## A rollout that does not break production
+
+<Steps>
+  <Step title="Measure only">
+    Ship with `enforce=False`. Collect a week of verdicts.
+  </Step>
+  <Step title="Read the escalations">
+    ```python
+    from collections import Counter
+    Counter(e.evaluation_result.action
+            for e in adapter.events if e.evaluation_result)
+    ```
+    Every `escalate` is an action that would have been denied. If that set contains routine
+    work, fix the policy — not the enforcement setting.
+  </Step>
+  <Step title="Tune the sensitive-tool set">
+    `GOV-001` is usually the noisy one. Enumerate the tools you genuinely consider sensitive
+    rather than accepting the four defaults.
+  </Step>
+  <Step title="Wire the approval path before flipping the switch">
+    With `enforce=True` and no handler, every escalation denies. Have the handler working
+    first.
+  </Step>
+  <Step title="Enforce">
+    `enforce=True`. Watch the `exporters` and alert stream for denials.
+  </Step>
+</Steps>
+
+## Observation-only adapters
+
+Google ADK, AutoGen, and the Bedrock boto3 path **cannot enforce** — they warn at
+construction and record what would have been blocked. See
+[Limitations](/docs/concepts/limitations).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Custom policies" icon="scroll" href="/docs/guides/custom-policies">
+    Control what escalates in the first place.
+  </Card>
+  <Card title="Alerts" icon="bell" href="/docs/export/alerts">
+    Push block/escalate verdicts to Slack or a webhook.
+  </Card>
+</CardGroup>

@@ -1,0 +1,250 @@
+---
+title: "Baselines and drift"
+description: "Establishing what normal looks like, persisting it, and detecting when the agent moves."
+icon: "chart-line"
+---
+
+Drift detection is the cortical layer's highest-value signal and the easiest to get wrong.
+A baseline that never accumulates samples produces a permanently drift-free agent.
+
+## What a baseline holds
+
+```python
+BehavioralBaseline(
+    agent_id="research-agent-prod",
+    sample_count=412,
+    action_distribution={"tool_call": 340, "user_prompt": 72},
+    tool_usage_patterns={"web_search": 210, "read_file": 118, "database_write": 12},
+    created_at=datetime(...),
+)
+```
+
+Two distributions, both maintained automatically by the adapter's context buffer:
+`action_distribution` (by action type) and `tool_usage` (by tool name).
+
+## Establishing one
+
+```python
+from agentegrity.layers import CorticalLayer
+
+layer = CorticalLayer(drift_tolerance=0.15, min_drift_samples=20)
+
+for event in known_clean_traffic:
+    layer.update_baseline({"action": event.action_type, "tool": event.tool_name})
+```
+
+<Warning>
+  **Feed it known-clean traffic only.** A baseline built during a compromise encodes the
+  compromise as normal, and drift detection then flags the *return to healthy behaviour* as
+  the anomaly.
+
+  A practical approach: build the baseline from a staging environment or a reviewed
+  production window, snapshot it, and treat baseline updates as a change requiring the same
+  review as a policy change.
+</Warning>
+
+## Persisting it
+
+A baseline that resets on every deploy is not a baseline.
+
+```python
+from agentegrity.layers import CorticalLayer, SqliteBaselineStore
+
+layer = CorticalLayer(baseline_store=SqliteBaselineStore("/var/lib/agentegrity/baselines.db"))
+```
+
+With a store wired, the layer loads a baseline for `profile.agent_id` on first `evaluate()`
+and writes through on every `update_baseline()`.
+
+| Backend | Use for |
+|---|---|
+| `InMemoryBaselineStore` | Tests |
+| `FileBaselineStore` | One JSON file per key; atomic writes, restrictive permissions, path-traversal guarded |
+| `SqliteBaselineStore` | Multi-agent fleets; idempotent schema |
+
+<Warning>
+  **Write-through failures are deliberately not silenced.** A misconfigured store fails loudly
+  rather than pretending to persist — because the failure mode of silent non-persistence is an
+  agent that never accumulates a baseline and therefore never detects drift. That failure is
+  invisible unless the store shouts.
+</Warning>
+
+<Note>
+  **Pin `agent_id` explicitly** on any profile whose baseline must survive a restart. The
+  default is a fresh UUID4 per process, which means a brand-new baseline every time and drift
+  detection that never engages.
+
+  ```python
+  AgentProfile(agent_id="research-agent-prod", ...)
+  ```
+</Note>
+
+## The minimum-sample guard
+
+`min_drift_samples` (default 20) requires that many total observations in **both** the
+baseline and current distributions before drift is computed.
+
+Below it, the dimension is recorded as `<dimension>__insufficient_samples` with value 0.0 and
+is **not factored into the score**.
+
+```json
+{
+  "drift": {
+    "drift_score": 0.0,
+    "dimensions": {"action_distribution__insufficient_samples": 0.0},
+    "drifted_dimensions": []
+  }
+}
+```
+
+<Warning>
+  This is the single most misread field. `__insufficient_samples` means **"checked and
+  skipped"**, not "passed". A fresh session always looks drift-free.
+
+  If you alert on `drift_score`, also alert on the *absence* of real drift dimensions after a
+  session should have accumulated enough samples.
+</Warning>
+
+## Choosing a metric
+
+<Tabs>
+  <Tab title="Jensen-Shannon (default)">
+    ```python
+    CorticalLayer(metric="js")
+    ```
+
+    Symmetric, bounded in `[0, 1]`, well-defined under Laplace smoothing. **Correct for
+    unordered support** — which is what `action_distribution` and `tool_usage` are, since
+    "web_search" is not greater or less than "read_file".
+
+    Always available; no extra dependency.
+  </Tab>
+  <Tab title="Wasserstein">
+    ```python
+    CorticalLayer(metric="wasserstein")     # pip install "agentegrity[stats]"
+    ```
+
+    1D Earth Mover's Distance with each support point at its sorted-key index. Use it **only
+    when the support has genuine ordinal meaning** — latency buckets, risk tiers, severity
+    bands.
+
+    Applied to tool names, the sorted-key indexing invents an ordering that does not exist,
+    and the resulting distance is not meaningful.
+
+    Missing scipy logs **one** warning at construction and falls back to JS.
+  </Tab>
+</Tabs>
+
+<Info>
+  JS replaced an asymmetric KL approximation in v0.6.0 that had three real bugs:
+  baseline-vs-current and current-vs-baseline gave different scores; the additive epsilon
+  broke the probability simplex; and there was no minimum-sample guard, so a 1-vs-1
+  comparison could confidently report drift.
+</Info>
+
+## Tuning the tolerance
+
+`drift_tolerance` (default 0.15) sets two thresholds at once:
+
+| Drift score | Action |
+|---|---|
+| ≤ tolerance | `pass` |
+| &gt; tolerance | `alert` |
+| &gt; tolerance × 2 | **`block`** |
+
+<Warning>
+  With `enforce=True`, a drift score above `2 × tolerance` **blocks the action**. At the
+  default that is 0.30 — reachable during a legitimate workload shift, like a seasonal change
+  in which tools the agent reaches for.
+
+  Widen the tolerance, or run drift in measure-only mode, before enforcing on it.
+</Warning>
+
+A pragmatic starting point:
+
+| Agent kind | Tolerance | Rationale |
+|---|---:|---|
+| Narrow, repetitive task | 0.10 | Behaviour genuinely should not vary |
+| General assistant | 0.20–0.25 | Legitimate variety is high |
+| Exploratory / research | 0.30 | Novelty is the job |
+
+## Per-role baselines
+
+In a declared [topology](/docs/concepts/multi-agent-topology), baselines are keyed
+`(agent_id, role)`.
+
+This is the **T-ROLE-DRIFT** mitigation: a compromised member that starts behaving like a
+leader drifts against its *role's* baseline even when its absolute behaviour looks
+unremarkable for the system.
+
+```python
+store = SqliteBaselineStore("baselines.db")
+print(store.list_keys())
+# [("agent-1", "member"), ("agent-1", "leader"), ("agent-2", "worker")]
+```
+
+Lookup falls back to pre-v0.8 single-agent baselines transparently, so upgrading resets
+nothing.
+
+## Reading the drift assessment
+
+```json
+{
+  "drift_score": 0.18,
+  "dimensions": {"action_distribution": 0.06, "tool_usage": 0.30},
+  "drifted_dimensions": ["tool_usage"],
+  "baseline_age_hours": 36.5
+}
+```
+
+`drift_score` is the **mean** across computed dimensions, so a severe shift in one dimension
+is diluted by a stable one. `drifted_dimensions` names which ones actually crossed the
+tolerance — read that, not just the aggregate.
+
+`baseline_age_hours` matters downstream: the recovery layer scores a baseline older than a
+week at 0.5.
+
+## Operating baselines
+
+<Steps>
+  <Step title="Build from reviewed traffic">
+    Staging, or a production window someone actually looked at.
+  </Step>
+  <Step title="Persist with a pinned agent_id">
+    `SqliteBaselineStore` plus an explicit `agent_id`.
+  </Step>
+  <Step title="Snapshot before you change it">
+    Include the baseline in a `RecoveryLayer.snapshot()` so you can roll back a bad update.
+  </Step>
+  <Step title="Watch baseline_age_hours">
+    A stale baseline measures drift against a world that no longer exists.
+  </Step>
+  <Step title="Alert on drifted_dimensions, not just drift_score">
+    The mean hides single-dimension excursions.
+  </Step>
+</Steps>
+
+## Semantic drift
+
+`CorticalLLMLayer` adds Claude-driven drift **classification** on top of the statistical
+signal — distinguishing "the agent is doing a different kind of work" from "the agent has
+been redirected".
+
+```python
+from agentegrity.layers import default_layers
+evaluator = IntegrityEvaluator(layers=default_layers(prefer_llm=True))
+```
+
+Only `aevaluate()` calls Claude; sync callers keep the pattern-based path. See
+[Semantic layers](/docs/guides/semantic-layers).
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Cortical layer" icon="brain" href="/docs/layers/cortical">
+    All three cognitive dimensions.
+  </Card>
+  <Card title="Checkpoints and recovery" icon="floppy-disk" href="/docs/guides/checkpoints-and-recovery">
+    Snapshotting a baseline alongside the chain.
+  </Card>
+</CardGroup>

@@ -1,0 +1,204 @@
+---
+title: "Verifying chains"
+description: "Four verification methods, what each one proves, and how to wire them into CI."
+icon: "circle-check"
+---
+
+A chain is only useful if someone checks it. This page covers every check, in the order you
+should run them.
+
+## The four methods
+
+| Method | Proves | Does not prove |
+|---|---|---|
+| `verify_chain()` | Records reference their predecessors correctly | Authenticity — hashes are recomputable |
+| `verify_signatures(trusted_keys=…)` | Records were signed by a pinned key | Completeness — a truncated chain still verifies |
+| `verify_decision_links()` | Rationales were bound at decision time | That the rationale is truthful |
+| `verify_cross_agent_links(peers, key_provider=…)` | Cross-agent references resolve to real, pinned peer records | Anything about peers not referenced |
+
+## From the CLI
+
+```bash
+agentegrity verify-decisions --trusted-key agent.pub chain.json
+```
+
+```text
+agentegrity 0.10.0 — verify-decisions chain.json
+  records:        4
+  chain linkage:  yes (hash-linked)
+  decision links: yes
+  signatures:     yes [pinned]
+
+  idx  kind          boundary/score          tier      signed  verified
+    0  attestation   attestation             -         yes     yes
+    1  attestation   attestation             -         yes     yes
+    2  attestation   attestation             -         yes     yes
+    3  attestation   attestation             -         yes     yes
+```
+
+Pass `--trusted-key` more than once to pin several keys:
+
+```bash
+agentegrity verify-decisions \
+  --trusted-key supervisor.pub \
+  --trusted-key worker-1.pub \
+  chain.json
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Linkage, decision links, and signatures all verified |
+| `1` | A verification failed |
+| `2` | Unreadable file, unparseable JSON, or unreadable key |
+
+### Failure output
+
+```text
+  chain linkage:  NO (broken at index 7, kind=decision)
+  decision links: NO
+  signatures:     NO (record 7) [pinned]
+```
+
+`verify_chain_detailed()` reports the **first** broken index and its record kind, so you know
+where the chain diverged rather than only that it did.
+
+## Programmatic
+
+```python
+from agentegrity import AttestationChain
+
+chain = AttestationChain.from_json(open("chain.json").read())
+
+pinned = {bytes.fromhex(open("agent.pub").read().strip())}
+
+linkage_ok, broken_idx, broken_kind = chain.verify_chain_detailed()
+sigs_ok, bad_idx = chain.verify_signatures(trusted_keys=pinned)
+links_ok = chain.verify_decision_links()
+
+if not (linkage_ok and sigs_ok and links_ok):
+    raise SystemExit("chain verification failed")
+```
+
+## What each check actually catches
+
+<AccordionGroup>
+  <Accordion title="Edited record content" icon="pen-to-square">
+    Editing any field breaks **both** the successor's link and the record's own signature,
+    because the canonical payload covers everything including `chain_previous`.
+
+    ```python
+    chain.records[1].integrity_score["composite"] = 0.99
+    chain.verify_chain()          # False
+    chain.verify_signatures()     # (False, 1)
+    ```
+
+    An attacker who recomputes every downstream hash defeats `verify_chain()` alone — which is
+    exactly why signatures are not optional.
+  </Accordion>
+
+  <Accordion title="Wholesale forgery" icon="user-secret">
+    A chain built from scratch and signed with an attacker-generated key passes
+    `verify_chain()` **and** unanchored `verify_signatures()`.
+
+    Only `trusted_keys` catches it, by rejecting the unknown embedded public key.
+  </Accordion>
+
+  <Accordion title="Retrofitted rationale" icon="clock-rotate-left">
+    `verify_decision_links()` requires each `decision` Evidence to resolve to a `DecisionRecord`
+    that exists, sits **strictly before** the attestation, and still hashes to the committed
+    value.
+
+    A decision edited after the attestation committed to it fails the hash comparison even if
+    the chain links were repaired.
+  </Accordion>
+
+  <Accordion title="Fabricated peer references" icon="users">
+    `verify_cross_agent_links` resolves each `peer_message` / `handoff` Evidence into the named
+    peer's chain and compares content hashes. With a `key_provider`, the peer record must also
+    be signed with that agent's pinned key.
+
+    Without peer chains, a chain carrying cross-agent evidence returns `False` — strict since
+    v0.10.0.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **No method detects truncation.** A chain with records 5 through 9 removed from the end
+  verifies perfectly — every remaining record links correctly and signs correctly.
+
+  Defend against this at the storage layer: append-only logs, external timestamping, or
+  streaming to an [exporter](/docs/export/session-exporters) that records what it received.
+</Warning>
+
+## In CI
+
+```yaml
+- name: Verify agent attestation chain
+  run: |
+    agentegrity verify-decisions \
+      --trusted-key .agentegrity/agent.pub \
+      artifacts/chain.json
+```
+
+```yaml
+- name: Generate audit report
+  run: |
+    agentegrity report \
+      --trusted-key .agentegrity/agent.pub \
+      --format markdown \
+      -o artifacts/audit-report.md \
+      artifacts/chain.json
+```
+
+<Warning>
+  **Always pass `--trusted-key` in CI.** Without an anchor, `report` exits `0` on an unsigned
+  chain — correct for the tool, silent failure for your pipeline.
+</Warning>
+
+## As a gate in an evaluation harness
+
+```python
+def assert_session_verifiable(chain_path: str, key_path: str) -> None:
+    chain = AttestationChain.from_json(Path(chain_path).read_text())
+    pinned = {bytes.fromhex(Path(key_path).read_text().strip())}
+
+    ok, idx, kind = chain.verify_chain_detailed()
+    assert ok, f"hash linkage broken at {idx} ({kind})"
+
+    sigs_ok, bad = chain.verify_signatures(trusted_keys=pinned)
+    assert sigs_ok, f"signature failed at record {bad}"
+
+    assert chain.verify_decision_links(), "decision link broken"
+
+    attestations = sum(1 for r in chain.records if r.record_kind == "attestation")
+    assert attestations > 0, "chain contains no attestations"
+```
+
+That last assertion is the truncation guard you have to write yourself.
+
+## Rebuilding a chain
+
+```python
+chain = AttestationChain.from_json(text)                 # from to_json()
+chain = AttestationChain.from_dict_list(list_of_dicts)   # from to_records_dict()
+chain = AttestationChain.from_records(record_objects)    # from objects
+```
+
+All three **preserve** existing `chain_previous` values verbatim — they are restores, not
+re-appends. That is what keeps signatures valid across a round trip.
+
+`from_dict_list` dispatches on `record_kind`, defaulting to `"attestation"` for chains
+serialized before the discriminator existed. An unknown kind raises `ValueError`.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Compliance reports" icon="file-lines" href="/docs/guides/compliance-reports">
+    Turn a verified chain into an audit artifact.
+  </Card>
+  <Card title="Signing and keys" icon="key" href="/docs/guides/signing-and-keys">
+    Trust anchors and KeyProvider.
+  </Card>
+</CardGroup>

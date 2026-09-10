@@ -1,0 +1,248 @@
+---
+title: "Signing and keys"
+description: "Ed25519 signing, trust anchors, KeyProvider, and why an unpinned chain proves nothing about authorship."
+icon: "key"
+---
+
+```bash
+pip install "agentegrity[crypto]"
+```
+
+Without this extra, records are built and hash-linked but never signed, and `sign()` raises
+`ImportError` naming the install command.
+
+## The central point
+
+<Warning>
+  **Every record embeds its own public key.** A chain forged wholesale and signed with an
+  attacker-generated key therefore **verifies against itself perfectly**.
+
+  Hash linkage proves internal consistency. Signatures without a trust anchor prove internal
+  consistency plus "someone had *a* key". Only a **pinned** key proves authorship.
+
+  This is threat **T-S1**, and pinning is the mitigation.
+</Warning>
+
+## Generating and signing
+
+```python
+from agentegrity.core.attestation import generate_signing_key
+
+key = generate_signing_key()          # Ed25519PrivateKey
+
+record.sign(key)
+record.verify()                       # uses the embedded public key
+record.verify(explicit_public_key)    # or one you supply
+```
+
+Wire it in once and every record signs automatically:
+
+```python
+IntegrityMonitor(profile=..., evaluator=..., signing_key=key)
+```
+
+```python
+from agentegrity.adapters.claude import ClaudeAdapter
+
+adapter = ClaudeAdapter(profile=profile, evaluator=evaluator, signing_key=key)
+```
+
+<Note>
+  The zero-config module entry points (`hooks()`, `instrument_chain()`, …) do **not** expose
+  `signing_key`. Construct the adapter class directly when you need signing on an adapter path.
+</Note>
+
+## What the signature covers
+
+The canonical payload, which includes **`chain_previous`**:
+
+```python
+{
+  "record_kind": ..., "record_id": ..., "agent_id": ...,
+  "timestamp": ..., "integrity_score": ..., "layer_states": ...,
+  "evidence": [...], "chain_previous": "e14884f6..."
+}
+```
+
+serialized with `sort_keys=True, separators=(",", ":")`.
+
+Two consequences worth internalizing:
+
+<CardGroup cols={2}>
+  <Card title="Records cannot be moved" icon="lock">
+    A signature covers the record's **position** in the chain. You cannot lift a validly-signed
+    record out of one chain and splice it into another.
+  </Card>
+  <Card title="Order of operations matters" icon="list-ol">
+    `build_attestation_record(..., previous_record_hash=prev, signing_key=key)` bakes the link
+    in **before** signing. Signing first and linking after would leave the link unsigned.
+  </Card>
+</CardGroup>
+
+## Exporting a public key
+
+```python
+public_key_hex = chain.records[0].public_key.hex()
+open("agent.pub", "w").write(public_key_hex)
+```
+
+That format — raw Ed25519 public key, hex-encoded, one per file — is what `--trusted-key` and
+`FileKeyProvider` both read.
+
+## Verifying with an anchor
+
+```python
+pinned = {bytes.fromhex(open("agent.pub").read().strip())}
+
+ok, bad_index = chain.verify_signatures(trusted_keys=pinned)
+```
+
+A record whose embedded `public_key` is not in the set is rejected **even if its own
+signature verifies**. That rejection is the entire value of the anchor.
+
+From the CLI:
+
+```bash
+agentegrity verify-decisions --trusted-key agent.pub chain.json
+```
+
+```text
+  signatures:     yes [pinned]
+```
+
+Without the flag:
+
+```text
+  signatures:     yes [UNPINNED (self-vouched)]
+```
+
+<Info>
+  The CLI is deliberately loud about this. Before v0.8.1 it reported unsigned chains as simply
+  "verified", which meant an operator could read a green result off a chain carrying no
+  cryptographic claim at all.
+</Info>
+
+## KeyProvider
+
+For cross-agent verification you need a mapping from `agent_id` to that agent's pinned key.
+
+```python
+class KeyProvider(Protocol):
+    def get_public_key(self, agent_id: str) -> bytes | None: ...
+```
+
+<CodeGroup>
+
+```python StaticKeyProvider
+from agentegrity import StaticKeyProvider
+
+provider = StaticKeyProvider({
+    "supervisor-1": bytes.fromhex(SUPERVISOR_PUB),
+    "worker-1":     bytes.fromhex(WORKER_1_PUB),
+})
+```
+
+```python FileKeyProvider
+from agentegrity import FileKeyProvider
+
+provider = FileKeyProvider("/etc/agentegrity/keys")
+# reads /etc/agentegrity/keys/<agent_id>.pub — hex-encoded raw key
+```
+
+```python Custom
+class VaultKeyProvider:
+    def __init__(self, client): self._client = client
+
+    def get_public_key(self, agent_id: str) -> bytes | None:
+        secret = self._client.read(f"agentegrity/keys/{agent_id}")
+        return bytes.fromhex(secret["data"]["public_key"]) if secret else None
+```
+
+</CodeGroup>
+
+`FileKeyProvider` resolves a malformed file to `None` (logged) rather than raising, so one
+bad key file cannot take down verification for every other agent. It also runs
+`validate_storage_identifier` on `agent_id`, so a traversal-shaped id never reaches the
+filesystem.
+
+## Cross-agent verification
+
+```python
+ok = adapter.attestation_chain.verify_cross_agent_links(
+    {"worker-1": worker1.attestation_chain,
+     "worker-2": worker2.attestation_chain},
+    key_provider=FileKeyProvider("/etc/agentegrity/keys"),
+)
+```
+
+With a provider, each referenced peer record must be signed with **exactly** the pinned key
+for that `agent_id`, and its signature must verify.
+
+<Warning>
+  **Strict since v0.10.0**: a chain that *carries* cross-agent evidence but is handed no peer
+  chains returns `False`. Unverifiable is not verified.
+
+  The v0.8 stub returned `True` in that case, which meant a multi-agent chain could report
+  clean cross-agent verification having checked nothing.
+</Warning>
+
+Cross-agent Evidence uses `source="<peer_agent_id>:<record_id>"` so the verifier knows which
+chain to walk.
+
+## Key management in practice
+
+<Steps>
+  <Step title="One key per agent identity">
+    Not per process, not per deployment. The `agent_id` is the identity a verifier resolves —
+    so pin `agent_id` explicitly too.
+  </Step>
+  <Step title="Private keys never touch the chain">
+    Only the 32-byte public key is embedded. Signing key disclosure via debug logging is
+    threat **T-I2** — never log the private key object.
+  </Step>
+  <Step title="Distribute public keys out of band">
+    A key that travels with the chain it authenticates is not an anchor. Ship `.pub` files
+    through config management, a secret store, or your artifact pipeline.
+  </Step>
+  <Step title="Pin at every trust boundary">
+    CI verification, the exporter backend, the audit reviewer's workstation. Anywhere a chain
+    arrives from somewhere else.
+  </Step>
+  <Step title="Plan rotation">
+    A chain signed with the old key stays valid under the old key. Keep retired keys in the
+    trusted set for as long as you retain the chains they signed — the spec's minimum retention
+    is 90 days.
+  </Step>
+</Steps>
+
+## Exit codes for CI
+
+```bash
+agentegrity report --trusted-key agent.pub chain.json -o audit.md
+```
+
+- Structural tamper (broken hash linkage or a dangling decision link) **always** exits `1`.
+- Signature failures gate the exit code **only when `--trusted-key` is passed**. Without an
+  anchor no cryptographic claim was requested, so an unsigned chain is disclosed in the report
+  rather than treated as tampered.
+
+<Warning>
+  In CI, **always pass `--trusted-key`**. Without it, a chain that was never signed exits `0`.
+  That is correct behaviour for the tool and a silent failure for your pipeline.
+</Warning>
+
+## Interop
+
+Raw Ed25519 is the current serialization. JWS / COSE envelopes are on the roadmap so generic
+verifiers can validate a record without depending on this framework.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Verifying chains" icon="circle-check" href="/docs/guides/verifying-chains">
+    Every verification method, and what each proves.
+  </Card>
+  <Card title="Threat model" icon="skull" href="/docs/concepts/threat-model">
+    T-S1 and the rest.
+  </Card>
+</CardGroup>
