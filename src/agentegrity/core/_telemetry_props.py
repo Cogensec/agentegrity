@@ -2,7 +2,7 @@
 
 Payloads may carry counts, booleans, enum values, durations, score floats, and
 version strings. Never prompts, model I/O, tool arguments, file paths, agent
-names, policy text, or exception messages. Documented in ``docs/telemetry.md``.
+names, policy text, or exception messages. Documented in ``docs/export/telemetry.mdx``.
 """
 
 from __future__ import annotations

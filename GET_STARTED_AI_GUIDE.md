@@ -89,7 +89,7 @@ Tell the user: agentegrity sends anonymous, shape-only usage analytics
 (adapter names, counts, rounded scores — never prompts, arguments, or
 content). Opting out is one environment variable: `DO_NOT_TRACK=1` or
 `AGENTEGRITY_TELEMETRY_DISABLED=1`, or `agentegrity.disable_telemetry()`
-in code. Documented in `docs/telemetry.md`.
+in code. Documented in `docs/export/telemetry.mdx`.
 
 ## Rules for the installing agent
 

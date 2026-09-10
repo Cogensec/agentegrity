@@ -1,7 +1,7 @@
 """Anonymous, shape-only usage telemetry with a stdlib-only PostHog sender.
 
 Every event property is built in ``_telemetry_props.py`` (plus the environment
-tags below) and documented in ``docs/telemetry.md``. Opt out with
+tags below) and documented in ``docs/export/telemetry.mdx``. Opt out with
 ``DO_NOT_TRACK=1`` or ``AGENTEGRITY_TELEMETRY_DISABLED=1``, or call
 :func:`disable_telemetry` at runtime. Telemetry failures are never allowed to
 reach the host process.
