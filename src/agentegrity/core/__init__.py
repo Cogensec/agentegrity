@@ -9,12 +9,15 @@ from agentegrity.core.telemetry import (
     telemetry_run_context,
     telemetry_tag,
 )
+from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_call
 
 __all__ = [
     "AgentProfile",
     "AgentType",
     "DeploymentContext",
     "RiskTier",
+    "ToolCallCategory",
+    "classify_tool_call",
     "IntegrityEvaluator",
     "IntegrityScore",
     "AttestationRecord",

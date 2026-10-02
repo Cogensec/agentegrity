@@ -92,6 +92,7 @@ class GovernanceLayer(Protocol):
 | GOV-002 | Code Execution Boundary | Code execution outside sandbox | Require approval |
 | GOV-003 | Financial Threshold | Financial transactions above configurable threshold | Require approval |
 | GOV-004 | Multi-Agent Escalation | Multi-agent coordination with >3 agents | Require approval |
+| GOV-005 | Sensitive Data Egress | Call tagged `sends_external` after any call in the session (including itself) tagged `reads_sensitive` | Require approval |
 
 ### `minimal`
 

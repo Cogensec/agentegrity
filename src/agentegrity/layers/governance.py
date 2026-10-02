@@ -20,6 +20,7 @@ from typing import Any, Callable, Collection
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile, RiskTier
+from agentegrity.core.tool_classifier import ToolCallCategory
 
 logger = logging.getLogger("agentegrity.governance")
 
@@ -245,6 +246,23 @@ def _rule_multi_agent_escalation(
     return len(members) > 3
 
 
+def _rule_sensitive_data_egress(
+    profile: AgentProfile, action: dict[str, Any], context: dict[str, Any]
+) -> bool:
+    """Require approval to send data externally once secrets were read in-session.
+
+    Reads the adapter-derived ``categories`` on the current action and
+    the session's ``tool_call_categories`` (which include the current
+    call, so read-and-send in one shell pipeline counts too).
+    """
+    if ToolCallCategory.SENDS_EXTERNAL.value not in (action.get("categories") or []):
+        return False
+    return any(
+        ToolCallCategory.READS_SENSITIVE.value in (tags or [])
+        for tags in context.get("tool_call_categories") or []
+    )
+
+
 # Default policy sets
 DEFAULT_POLICIES: dict[str, list[PolicyRule]] = {
     "enterprise-default": [
@@ -279,6 +297,14 @@ DEFAULT_POLICIES: dict[str, list[PolicyRule]] = {
             condition=_rule_multi_agent_escalation,
             decision=PolicyDecision.REQUIRE_APPROVAL,
             severity=0.50,
+        ),
+        PolicyRule(
+            rule_id="GOV-005",
+            name="Sensitive Data Egress",
+            description="External send after a sensitive read in-session requires approval",
+            condition=_rule_sensitive_data_egress,
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            severity=0.80,
         ),
     ],
     "minimal": [],

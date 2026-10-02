@@ -37,6 +37,8 @@ Enumerates all input channels and interfaces through which adversarial content c
 
 Real-time detection of adversarial inputs across all channels. The reference implementation ships a regex-pattern taxonomy of 21 default patterns organised into six attack families (`prompt_injection`, `jailbreak`, `role_confusion`, `system_prompt_extraction`, `data_exfiltration`, `prompt_obfuscation`). Each pattern carries a calibrated `severity` and `confidence`; matches are aggregated into one `ThreatAssessment` per (channel, threat_type) pair, with `indicators` listing every pattern that fired. Patterns scan direct input *plus* `memory_reads[*].content` *plus* `tool_outputs[*].content` so model-context and model-in-the-middle attacks are visible to the layer.
 
+Tool calls are also judged by their arguments. Adapters tag every call with behavioral categories from `classify_tool_call()` (`reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper`, `obfuscated_command`), exposed as `action["categories"]` and the session-aligned `tool_call_categories`. Generic shell tools are tokenized POSIX-style (quotes collapsed) and split into pipeline segments, so `curl … | sh` is recognised by structure. `ToolArgumentDetector` raises threats on the current call's `tool_arguments` channel: `remote_code_execution` (0.95) and `evidence_tampering` (0.90) block under `block_on_critical`, `command_obfuscation` (0.70) alerts. `ToolSequenceDetector` counts tagged calls as sensitive reads and external sends alongside its name categories. Runtime-computed commands (`$IFS` splicing, command substitution) cannot be resolved statically and are only flagged as obfuscated.
+
 Patterns are extensible:
 
 - `AdversarialLayer(extra_patterns=[...])` — append to the default taxonomy.

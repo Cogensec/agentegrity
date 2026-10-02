@@ -12,6 +12,12 @@ Every tool call passes through a `PreToolUse` hook before it executes:
 - The **adversarial layer** scans the tool arguments for injection and
   exfiltration shapes (32-pattern taxonomy, minus the structure-cue
   patterns that would false-positive on ordinary code).
+- Shell commands are **classified by structure** (`classify_tool_call`):
+  a downloaded or base64-decoded payload piped into an interpreter, or
+  deleting/truncating logs and shell history, is denied; `$IFS` splicing
+  and computed executables ask. Hooks are stateless per call, so a
+  secret read in one call and sent in a later one needs the stateful
+  adapter (GOV-005); read-and-send in one command is caught here.
 - The **governance layer** gates sensitive tool names, MCP-aware:
   `file_delete` in the sensitive set also gates
   `mcp__filesystem__file_delete`, and glob entries like `mcp__db__*`
