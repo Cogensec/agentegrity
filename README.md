@@ -320,7 +320,7 @@ Claude Agent SDK is single-agent at the framework level — no topology is decla
 
 ### Stream to a dashboard in one command
 
-Point an already-instrumented agent at an [**`agentegrity-pro`**](https://github.com/cogensec/agentegrity-pro) dashboard with no code changes:
+Point an already-instrumented agent at an [**`agentegrity-pro`**](https://app.cogensec.com) dashboard with no code changes:
 
 ```bash
 # verify the connection
@@ -353,7 +353,7 @@ register_exporter(PrintExporter())
 graph = instrument_graph(my_graph)
 ```
 
-This is the integration point the commercial [**`agentegrity-pro`**](https://github.com/cogensec/agentegrity-pro) dashboard listens on. Deploy the pro backend with `docker compose up`, set `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` on the agent, and the default adapter streams every session over the published exporter HTTP API — no extra package required.
+This is the integration point the commercial [**`agentegrity-pro`**](https://app.cogensec.com) dashboard listens on. Deploy the pro backend with `docker compose up`, set `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` on the agent, and the default adapter streams every session over the published exporter HTTP API — no extra package required.
 
 ### Non-Python agents (TypeScript / Bun / Node)
 
