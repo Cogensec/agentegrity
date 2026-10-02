@@ -49,6 +49,7 @@ from agentegrity.core.decision import (
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
+from agentegrity.core.tool_classifier import classify_tool_call
 
 logger = logging.getLogger("agentegrity.adapters")
 
@@ -186,6 +187,10 @@ class _ContextBuffer:
             # _append_capped on tool_calls.
             "tool_call_history": [
                 c.get("tool", "") for c in self.tool_calls
+            ],
+            # Argument-level categories, aligned with tool_call_history.
+            "tool_call_categories": [
+                c.get("categories", []) for c in self.tool_calls
             ],
             "peer_messages": self.peer_messages,
         }
@@ -806,7 +811,15 @@ class _BaseAdapter:
             # "tool"/"type" would shadow the fields governance rules
             # (GOV-001's sensitive-tool gate) match on. Mirrors the
             # nesting the decision-record path already uses.
-            {"tool": tool_name, "type": "tool_call", "arguments": tool_input},
+            {
+                "tool": tool_name,
+                "type": "tool_call",
+                "arguments": tool_input,
+                # Derived by the adapter (trusted), top-level like "tool".
+                "categories": sorted(
+                    c.value for c in classify_tool_call(tool_name, tool_input)
+                ),
+            },
             "tool_calls",
         )
         self._buffer.tool_usage[tool_name] += 1

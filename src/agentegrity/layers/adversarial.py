@@ -15,6 +15,7 @@ from typing import Any, Pattern
 
 from agentegrity.core.evaluator import LayerResult
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.core.tool_classifier import ToolCallCategory
 from agentegrity.layers.governance import tool_name_matches
 
 logger = logging.getLogger("agentegrity.adversarial")
@@ -562,10 +563,12 @@ DEFAULT_TOOL_CATEGORIES = ToolCategories(
 class ToolSequenceDetector:
     """Flag a sensitive-read followed by an external-send in-session.
 
-    Operates on the ordered ``tool_call_history`` (tool names) that
-    every adapter's context buffer exposes — behavioral evidence, not
-    content patterns, so paraphrasing cannot evade it and benign text
-    cannot trip it. Fires one aggregated :class:`ThreatAssessment` per
+    Operates on the ordered ``tool_call_history`` (tool names) and the
+    aligned ``tool_call_categories`` (argument-level tags from
+    :func:`~agentegrity.core.tool_classifier.classify_tool_call`), so a
+    generic shell tool reading ``~/.aws/credentials`` and later POSTing
+    counts the same as dedicated ``read_credentials``/``http_post``
+    tools. Fires one aggregated :class:`ThreatAssessment` per
     evaluation listing every read→send pair observed.
     """
 
@@ -576,15 +579,21 @@ class ToolSequenceDetector:
         self, profile: AgentProfile, context: dict[str, Any]
     ) -> list[ThreatAssessment]:
         history = context.get("tool_call_history") or []
+        tags_by_call = context.get("tool_call_categories") or []
         reads: list[str] = []
         pairs: list[str] = []
-        for tool in history:
+        for index, tool in enumerate(history):
             if not isinstance(tool, str) or not tool:
                 continue
-            if tool_name_matches(tool, self._categories.reads_sensitive):
+            tags = tags_by_call[index] if index < len(tags_by_call) else []
+            if (
+                tool_name_matches(tool, self._categories.reads_sensitive)
+                or ToolCallCategory.READS_SENSITIVE.value in tags
+            ):
                 reads.append(tool)
-            if reads and tool_name_matches(
-                tool, self._categories.sends_external
+            if reads and (
+                tool_name_matches(tool, self._categories.sends_external)
+                or ToolCallCategory.SENDS_EXTERNAL.value in tags
             ):
                 pairs.extend(f"{read}->{tool}" for read in reads)
         if not pairs:
@@ -601,6 +610,50 @@ class ToolSequenceDetector:
                 ),
                 indicators=pairs,
             )
+        ]
+
+
+# Categories dangerous on a single call, with the threat each raises.
+# Severities >= 0.90 block under block_on_critical.
+_ARGUMENT_THREATS: dict[ToolCallCategory, tuple[str, float, float, str]] = {
+    ToolCallCategory.REMOTE_CODE_EXEC: (
+        "remote_code_execution", 0.95, 0.85,
+        "Tool call pipes downloaded or decoded code into an interpreter",
+    ),
+    ToolCallCategory.LOG_TAMPER: (
+        "evidence_tampering", 0.90, 0.80,
+        "Tool call destroys, truncates or disables logs or shell history",
+    ),
+    ToolCallCategory.OBFUSCATED_COMMAND: (
+        "command_obfuscation", 0.70, 0.60,
+        "Tool call computes its command at runtime ($IFS, command substitution)",
+    ),
+}
+
+
+class ToolArgumentDetector:
+    """Flag the current tool call when its arguments are dangerous on their own."""
+
+    def __call__(self,
+        profile: AgentProfile,
+        context: dict[str, Any],
+    ) -> list[ThreatAssessment]:
+        """Raise one threat per dangerous category on ``context["action"]``."""
+        action = context.get("action") or {}
+        tags = action.get("categories") or []
+        tool = action.get("tool", "")
+        return [
+            ThreatAssessment(
+                channel="tool_arguments",
+                threat_type=threat_type,
+                severity=severity,
+                confidence=confidence,
+                description=description,
+                indicators=[f"{tool}: {category.value}"],
+            )
+            for category, (threat_type, severity, confidence, description)
+            in _ARGUMENT_THREATS.items()
+            if category.value in tags
         ]
 
 
@@ -661,6 +714,7 @@ class AdversarialLayer:
         extra_patterns: list[DetectorPattern] | None = None,
         detect_tool_sequences: bool = True,
         tool_categories: ToolCategories | None = None,
+        detect_tool_arguments: bool = True,
     ):
         self.coherence_threshold = coherence_threshold
         self._custom_detectors = threat_detectors or []
@@ -675,6 +729,9 @@ class AdversarialLayer:
             ToolSequenceDetector(tool_categories)
             if detect_tool_sequences
             else None
+        )
+        self._argument_detector = (
+            ToolArgumentDetector() if detect_tool_arguments else None
         )
 
     @property
@@ -704,6 +761,8 @@ class AdversarialLayer:
         threats.extend(self._detect_channel_threats(profile, ctx))
         if self._sequence_detector is not None:
             threats.extend(self._sequence_detector(profile, ctx))
+        if self._argument_detector is not None:
+            threats.extend(self._argument_detector(profile, ctx))
 
         # Step 3: Run custom detectors
         for detector in self._custom_detectors:

@@ -8,6 +8,22 @@ Pre-1.0 minor versions may contain breaking changes; the project remains
 in beta until the v1.0 stability criteria documented in
 [README → Roadmap](README.md#roadmap) are met.
 
+## [Unreleased]
+
+### Added
+
+- **Argument-level tool-call classification.** `classify_tool_call()` tags each call with `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper` or `obfuscated_command`. Shell commands are tokenized POSIX-style and split into pipeline segments. Adapters store the tags on `action["categories"]` and expose the session's `tool_call_categories`. Generic shell tools (a coding agent's `Bash`, LangChain shell tools) previously looked identical to name-based rules whatever they ran.
+- **`ToolArgumentDetector`** (default-on, `AdversarialLayer(detect_tool_arguments=False)` to disable). `remote_code_exec` (0.95) and `log_tamper` (0.90) block under `block_on_critical`; `obfuscated_command` (0.70) alerts.
+- **GOV-005 Sensitive Data Egress** in `enterprise-default`. An external send after any sensitive read in the session, or in the same call, requires approval, so it escalates (fails closed) under `enforce=True`.
+
+### Changed
+
+- `ToolSequenceDetector` counts calls tagged `reads_sensitive` / `sends_external` in addition to its tool-name categories.
+
+### Fixed
+
+- Tool outputs are stored under `tool_outputs[*].content`, the key every scanning layer reads, so injection in tool results is scanned; structured responses are JSON-serialized. Tool failures reach the adversarial layer's tool-error check via `tool_outputs[*].error` (#48).
+
 ## [0.10.0] - 2026-08-03
 
 Session export and detection hardening, shipped together as one release.

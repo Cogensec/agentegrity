@@ -36,6 +36,7 @@ from agentegrity.core.keys import FileKeyProvider, KeyProvider, StaticKeyProvide
 from agentegrity.core.monitor import IntegrityMonitor
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.core.telemetry import disable_telemetry
+from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_call
 from agentegrity.core.topology import (
     AgentMember,
     AgentRole,
@@ -66,6 +67,7 @@ from agentegrity.layers import (
     RecoveryLayer,
     SqliteBaselineStore,
     SqliteCheckpoint,
+    ToolArgumentDetector,
     ToolCategories,
     ToolSequenceDetector,
     default_layers,
@@ -86,6 +88,8 @@ __all__ = [
     "init",
     "shutdown",
     "AgentProfile",
+    "ToolCallCategory",
+    "classify_tool_call",
     "AgentType",
     "DeploymentContext",
     "RiskTier",
@@ -119,6 +123,7 @@ __all__ = [
     "StaticKeyProvider",
     "FileKeyProvider",
     "AdversarialLayer",
+    "ToolArgumentDetector",
     "ToolCategories",
     "ToolSequenceDetector",
     "CorticalLayer",

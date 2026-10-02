@@ -123,6 +123,7 @@ def evaluate_tool_call(
 
         try:
             from agentegrity.core.profile import AgentProfile, RiskTier
+            from agentegrity.core.tool_classifier import classify_tool_call
             from agentegrity.layers.adversarial import (
                 AdversarialLayer,
                 default_detector_patterns,
@@ -152,17 +153,20 @@ def evaluate_tool_call(
         )
         governance = GovernanceLayer(policy_set="enterprise-default")
 
+        categories = sorted(c.value for c in classify_tool_call(tool_name, tool_input))
+        action = {
+            "tool": tool_name,
+            "type": "tool_call",
+            "arguments": tool_input,
+            "categories": categories,
+        }
+        # Each hook runs in a fresh process with no session state, so the
+        # session history is this call alone: cross-call egress (GOV-005)
+        # needs the stateful adapter; read-and-send in one call is caught.
         scan_text = "\n".join(_extract_text(tool_input))
-        adv_result = adversarial.evaluate(profile, {"input": scan_text})
+        adv_result = adversarial.evaluate(profile, {"input": scan_text, "action": action})
         gov_result = governance.evaluate(
-            profile,
-            {
-                "action": {
-                    "tool": tool_name,
-                    "type": "tool_call",
-                    "arguments": tool_input,
-                }
-            },
+            profile, {"action": action, "tool_call_categories": [categories]}
         )
 
         threats = adv_result.details.get("threats", [])
