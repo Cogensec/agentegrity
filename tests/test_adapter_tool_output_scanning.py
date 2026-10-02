@@ -62,7 +62,9 @@ async def test_tool_failure_reaches_adversarial_layer(adapter: ClaudeAdapter) ->
         "post_tool_use_failure", {"tool_name": "Bash", "error": "exit 7: Failed to connect"}
     )
     ctx = adapter.get_collected_context()
-    assert ctx["tool_outputs"] == [{"tool": "Bash", "error": "exit 7: Failed to connect"}]
+    assert ctx["tool_outputs"] == [
+        {"tool": "Bash", "error": "exit 7: Failed to connect", "call_index": 0}
+    ]
 
     await adapter.on_event("pre_tool_use", {"tool_name": "Bash", "tool_input": {"command": "ls"}})
     threats = _adversarial_threats(adapter)

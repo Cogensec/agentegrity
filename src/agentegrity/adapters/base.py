@@ -51,6 +51,10 @@ from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.tool_classifier import classify_tool_call
 
+# Tool calls a tool error keeps counting against the score. A burst of
+# failures still alerts; an isolated old failure stops mattering.
+TOOL_ERROR_WINDOW = 10
+
 logger = logging.getLogger("agentegrity.adapters")
 
 
@@ -170,9 +174,16 @@ class _ContextBuffer:
     tasks: list[dict[str, Any]] = field(default_factory=list)
 
     def to_evaluation_context(self) -> dict[str, Any]:
+        # Tool errors are operational noise: only those from the last
+        # TOOL_ERROR_WINDOW tool calls count. Content entries stay until
+        # compaction removes them from the agent's context.
+        recent_from = len(self.tool_calls) - TOOL_ERROR_WINDOW
         base: dict[str, Any] = {
             "input": self.inputs[-1] if self.inputs else "",
-            "tool_outputs": self.tool_outputs,
+            "tool_outputs": [
+                o for o in self.tool_outputs
+                if "error" not in o or o["call_index"] > recent_from
+            ],
             "reasoning_chain": self.reasoning_chain,
             "goals": [],
             "instructions": [],
@@ -869,7 +880,11 @@ class _BaseAdapter:
         # tool-error check (tool_outputs[*].error) sees them.
         self._append_capped(
             self._buffer.tool_outputs,
-            {"tool": data.get("tool_name", ""), "error": str(data.get("error", ""))},
+            {
+                "tool": data.get("tool_name", ""),
+                "error": str(data.get("error", "")),
+                "call_index": len(self._buffer.tool_calls),
+            },
             "tool_outputs",
         )
         self._emit_event("post_tool_use_failure", data)
@@ -972,13 +987,21 @@ class _BaseAdapter:
         return {}
 
     def _handle_pre_compact(self, data: dict[str, Any]) -> dict[str, Any]:
+        # Compaction drops tool results and reasoning from the agent's
+        # context, so content threats in them stop counting. The event
+        # archives them, and the attestation chain keeps every score.
+        # Tool-call history stays: behavioral sequences are session facts.
         self._emit_event(
             "pre_compact",
             {
                 "reasoning_chain_length": len(self._buffer.reasoning_chain),
                 "archived_chain": list(self._buffer.reasoning_chain),
+                "archived_tool_outputs": list(self._buffer.tool_outputs),
             },
         )
+        self._buffer.reasoning_chain.clear()
+        self._buffer.tool_outputs.clear()
+        self._buffer_overflow_signaled -= {"reasoning_chain", "tool_outputs"}
         return {}
 
     # --- Multi-agent handlers (v0.8) ---
