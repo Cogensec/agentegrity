@@ -115,10 +115,9 @@ def test_subscribe_routes_bus_events(stub_crewai_events: _FakeBus) -> None:
     ctx = ad.get_collected_context()
     assert ctx["input"] == "investigate X"
     assert ctx["tool_usage"]["search"] == 1
-    failures = ad._buffer.tool_failures
     assert any(
         f.get("tool") == "search" and "boom" in f.get("error", "")
-        for f in failures
+        for f in ctx["tool_outputs"]
     )
 
 
