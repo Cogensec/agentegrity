@@ -66,7 +66,7 @@ async def test_post_tool_use_records_output(adapter: ClaudeAdapter) -> None:
     )
     ctx = adapter.get_collected_context()
     assert len(ctx["tool_outputs"]) == 1
-    assert ctx["tool_outputs"][0]["output"] == "file.txt"
+    assert ctx["tool_outputs"][0]["content"] == "file.txt"
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -150,7 +151,6 @@ class _ContextBuffer:
     inputs: list[str] = field(default_factory=list)
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     tool_outputs: list[dict[str, Any]] = field(default_factory=list)
-    tool_failures: list[dict[str, Any]] = field(default_factory=list)
     tool_usage: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     action_distribution: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     reasoning_chain: list[str] = field(default_factory=list)
@@ -628,7 +628,7 @@ class _BaseAdapter:
             ))
         if self._buffer.tool_outputs:
             latest_out = self._buffer.tool_outputs[-1]
-            output_str = str(latest_out.get("output", ""))
+            output_str = latest_out.get("content") or latest_out.get("error", "")
             inputs.append(DecisionInput(
                 channel="tool_output",
                 content_hash=hashlib.sha256(output_str.encode()).hexdigest(),
@@ -835,9 +835,14 @@ class _BaseAdapter:
 
     def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_response = data.get("tool_response", "")
+        if not isinstance(tool_response, str):
+            # Structured responses (e.g. a shell tool returning stdout/stderr)
+            # are serialized so the text-scanning layers see every field.
+            tool_response = json.dumps(tool_response, default=str)
+        # "content" is the key every scanning layer reads (spec: tool_outputs[*].content).
         self._append_capped(
             self._buffer.tool_outputs,
-            {"tool": data.get("tool_name", ""), "output": tool_response},
+            {"tool": data.get("tool_name", ""), "content": tool_response},
             "tool_outputs",
         )
         score = self._run_evaluation()
@@ -847,10 +852,12 @@ class _BaseAdapter:
     def _handle_post_tool_use_failure(
         self, data: dict[str, Any]
     ) -> dict[str, Any]:
+        # Failures share the tool_outputs channel so the adversarial layer's
+        # tool-error check (tool_outputs[*].error) sees them.
         self._append_capped(
-            self._buffer.tool_failures,
-            {"tool": data.get("tool_name", ""), "error": data.get("error", "")},
-            "tool_failures",
+            self._buffer.tool_outputs,
+            {"tool": data.get("tool_name", ""), "error": str(data.get("error", ""))},
+            "tool_outputs",
         )
         self._emit_event("post_tool_use_failure", data)
         return {}
