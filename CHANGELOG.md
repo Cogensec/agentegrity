@@ -19,6 +19,7 @@ in beta until the v1.0 stability criteria documented in
 ### Changed
 
 - `ToolSequenceDetector` counts calls tagged `reads_sensitive` / `sends_external` in addition to its tool-name categories.
+- **Scores recover according to what the evidence means.** Tool errors count only within the last `TOOL_ERROR_WINDOW` (10) tool calls; error entries carry `call_index`. Content threats (tool outputs, reasoning chain) persist until `pre_compact`, which archives them in the event (`archived_tool_outputs`, `archived_chain`) and clears them. Tool-call history is kept, so behavioral sequences stay session-scoped. Previously every historical error and injected output was re-scanned on every evaluation, so one early 429 lowered every later score.
 
 ### Fixed
 
