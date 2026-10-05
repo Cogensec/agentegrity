@@ -31,7 +31,7 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 from uuid import uuid4
@@ -41,6 +41,7 @@ from agentegrity.core.attestation import (
     AttestationChain,
     build_attestation_record,
 )
+from agentegrity.core.credentials import CredentialRef, CredentialRegistry
 from agentegrity.core.decision import (
     DecisionInput,
     DecisionRecord,
@@ -283,6 +284,9 @@ class _BaseAdapter:
         self._evaluation_count = 0
         self._session_id = uuid4().hex
         self._exporters: list[SessionExporter] = []
+        self._credentials = CredentialRegistry()
+        # credential_declared events emitted while no exporter existed, replayed at session start.
+        self._undelivered_credentials: list[FrameworkEvent] = []
         if stream_from_env:
             self._attach_env_exporter()
         self._session_started = False
@@ -332,6 +336,40 @@ class _BaseAdapter:
         """
         if exporter not in self._exporters:
             self._exporters.append(exporter)
+
+    @property
+    def credentials(self) -> tuple[CredentialRef, ...]:
+        """Credentials declared on this adapter, as fingerprints and never values."""
+        return self._credentials.refs
+
+    def declare_credential(self,
+        provider: str,
+        secret: str,
+        *,
+        label: str | None = None,
+    ) -> CredentialRef | None:
+        """Record that this agent uses a credential, as a fingerprint and never the value."""
+        known = set(self._credentials.refs)
+        ref = self._credentials.declare(provider, secret, label=label)
+        self._publish_new_credentials(known)
+        return ref
+
+    def declare_from_env(self,
+        prefixes: list[str] | tuple[str, ...],
+    ) -> tuple[CredentialRef, ...]:
+        """Declare env vars whose names match the prefixes; opt-in, never a whole-env sweep."""
+        known = set(self._credentials.refs)
+        declared = self._credentials.declare_from_env(prefixes)
+        self._publish_new_credentials(known)
+        return declared
+
+    def _publish_new_credentials(self, known: set[CredentialRef]) -> None:
+        """Emit credential_declared for each credential not in ``known``, so Pro can join on it."""
+        # The exporter wire format carries no chain records, so a fingerprint that only lives
+        # in the chain would never reach a subscriber.
+        for ref in self._credentials.refs:
+            if ref not in known:
+                self._dispatch("credential_declared", {"credential": asdict(ref)})
 
     def _attach_env_exporter(self) -> None:
         """Self-attach an HTTP exporter when the environment configures one.
@@ -450,6 +488,14 @@ class _BaseAdapter:
             self.name,
             self._profile.to_dict(),
         )
+        self._replay_undelivered_credentials()
+
+    def _replay_undelivered_credentials(self) -> None:
+        """Deliver credentials declared before any exporter existed, in declaration order."""
+        # The event being emitted right now is never in this list, so it cannot be sent twice.
+        pending, self._undelivered_credentials = self._undelivered_credentials, []
+        for event in pending:
+            self._notify_exporters("on_event", self._session_id, event.to_dict())
 
     def close(self) -> None:
         """Fire ``on_session_end`` on all registered exporters.
@@ -517,6 +563,8 @@ class _BaseAdapter:
             recent_decisions=self._decisions_since_last_attestation(),
             topology=self._buffer.topology,
             topology_change=pending_change,
+            # Sticky, like topology: a leak found later still joins to every session.
+            credentials=self._credentials.refs,
         )
         self._chain.append(record)
         return score
@@ -695,6 +743,7 @@ class _BaseAdapter:
             "shared_memory_write": self._handle_shared_memory_write,
             "broadcast": self._handle_broadcast,
             "task_started": self._handle_task_started,
+            "credential_declared": self._handle_credential_declared,
         }
         handler = handlers.get(event_type)
         if handler:
@@ -1102,6 +1151,15 @@ class _BaseAdapter:
         self._emit_event("broadcast", data)
         return {}
 
+    def _handle_credential_declared(self,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Publish a declared credential; no evaluation, since its Evidence is sticky anyway."""
+        event = self._emit_event("credential_declared", data)
+        if not self._exporters:
+            self._undelivered_credentials.append(event)
+        return {}
+
     def _handle_task_started(self, data: dict[str, Any]) -> dict[str, Any]:
         """A task started — distinct from a subagent (e.g. CrewAI task
         vs CrewAI agent).
@@ -1142,4 +1200,6 @@ class _BaseAdapter:
             # Which network sinks (if any) this session streamed to. Empty is
             # the proof a run stayed local.
             "exporters": self._describe_exporters(),
+            # Fingerprints, not values: lets a consumer recover the set if an event was lost.
+            "credentials": [asdict(ref) for ref in self._credentials.refs],
         }

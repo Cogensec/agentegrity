@@ -25,6 +25,7 @@ from agentegrity.core.attestation import (
     ChainedRecord,
     Evidence,
 )
+from agentegrity.core.credentials import CredentialRef, fingerprint
 from agentegrity.core.decision import (
     CaptureTier,
     DecisionInput,
@@ -114,6 +115,10 @@ __all__ = [
     "disable_telemetry",
     "FrameworkEvent",
     "SessionExporter",
+    # Public so a consumer joining a leak to an agent computes the identical value. A
+    # drifted reimplementation returns zero matches, which looks like "no leaks found".
+    "fingerprint",
+    "CredentialRef",
     "HTTPExporter",
     "WebhookAlertExporter",
     "SlackAlertExporter",

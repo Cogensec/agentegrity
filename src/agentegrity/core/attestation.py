@@ -22,6 +22,7 @@ from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture, tele
 logger = logging.getLogger("agentegrity.attestation")
 
 if TYPE_CHECKING:
+    from agentegrity.core.credentials import CredentialRef
     from agentegrity.core.decision import DecisionRecord
     from agentegrity.core.topology import AgentTopology, TopologyChange
 
@@ -592,6 +593,7 @@ def build_attestation_record(
     recent_decisions: list["DecisionRecord"] | None = None,
     topology: "AgentTopology | None" = None,
     topology_change: "TopologyChange | None" = None,
+    credentials: "tuple[CredentialRef, ...] | None" = None,
 ) -> AttestationRecord:
     """Construct an :class:`AttestationRecord` from a profile + score.
 
@@ -653,6 +655,15 @@ def build_attestation_record(
                 f"+{len(topology_change.added_members)} "
                 f"-{len(topology_change.removed_member_ids)} members"
             ),
+        ))
+    for credential in credentials or ():
+        # The fingerprint is the join key: it matches an external scanner finding
+        # against this record. The credential itself is never present.
+        evidence.append(Evidence(
+            evidence_type="credential_use",
+            source=credential.provider,
+            content_hash=credential.fingerprint,
+            summary=credential.label,
         ))
     record = AttestationRecord(
         agent_id=profile.agent_id,

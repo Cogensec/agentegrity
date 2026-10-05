@@ -8,6 +8,8 @@
 
 export { AgentegrityReporter } from "./reporter.js";
 export type { ReporterOptions } from "./reporter.js";
+export { credentialFingerprint } from "./credentials.js";
+export type { CredentialRef } from "./credentials.js";
 export {
   createDefaultAdapter,
 } from "./default.js";

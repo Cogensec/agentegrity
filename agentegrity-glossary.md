@@ -25,6 +25,12 @@ A structured evaluation of an AI agent's structural integrity using the Agentegr
 **Agentegrity Posture** †
 The aggregate agentegrity state of an organization's deployed AI agent population at a given point in time. Encompasses individual agent scores, environmental coverage, policy compliance, and degradation trends. Analogous to "security posture" in traditional cybersecurity, but specific to autonomous agent systems.
 
+**Credential Provenance** †
+The property of an agent's attestation chain recording which credentials the agent used, identified by non-reversible fingerprint and never by value. It turns an external secret-scanning finding into a provable blast radius: a credential found leaking in code, CI, SaaS or cloud can be matched against signed evidence naming the agent that used it, the sessions it appeared in, and the decisions taken while it was live. Distinguished from secret scanning, which establishes only that a secret exists somewhere.
+
+**Credential Fingerprint** †
+A keyed, non-reversible identifier for a credential, computed as HMAC-SHA256 over the normalized secret under an organization-scoped key. It lets two parties establish that they hold the same credential without either disclosing it. Keying is essential: an unkeyed digest is globally joinable and, given the structured format of most real credentials, brute-forceable offline. Without a configured key, a conforming implementation records no fingerprint at all rather than an unkeyed one.
+
 **Exogenous Security**
 Security measures applied to an AI agent from outside its decision architecture. Includes guardrails, input-output filters, policy wrappers, and inference-time safety layers. Exogenous security does not alter the agent's internal reasoning and does not persist when external controls are removed or bypassed. Contrast with *intrinsic security*.
 
