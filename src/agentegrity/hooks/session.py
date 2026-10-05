@@ -52,6 +52,8 @@ class HookSession:
         mode: str = "enforce",
         risk_tier: RiskTier = RiskTier.HIGH,
         stream: bool = True,
+        agent_id: str | None = None,
+        agent_name: str | None = None,
     ) -> None:
         """Build the session, resuming the chain persisted at ``chain_path``."""
         self.host = host
@@ -59,8 +61,10 @@ class HookSession:
         self.chain_path = chain_path
         self.mode = mode
         self.ended = False
-        profile = AgentProfile.default(name=host)
-        profile.agent_id = os.environ.get("AGENTEGRITY_AGENT_ID") or host
+        # The console groups sessions by agent_id and labels them by name;
+        # both default to the host so an unconfigured install still groups.
+        profile = AgentProfile.default(name=agent_name or host)
+        profile.agent_id = agent_id or host
         profile.risk_tier = risk_tier
         profile.metadata = {"host": host, "session_id": session_id}
         self._adapter = ADAPTERS_BY_HOST[host](

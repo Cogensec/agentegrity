@@ -41,7 +41,7 @@ Coding agents are instrumented through their own hook systems, not a library cal
 | Claude Code | `integrations/claude-code` | `ClaudeCodeAdapter` (`claude_code`) | `ask` (approval prompt) | `PostToolUseFailure` |
 | Codex | `integrations/codex` | `CodexAdapter` (`codex`) | `deny` (Codex enforces only deny) | non-zero `tool_response.exit_code` |
 
-Block verdicts deny on both hosts. Configuration is shared: `AGENTEGRITY_HOOK_MODE` (`enforce` default, or `alert`), `AGENTEGRITY_HOOK_DISABLED`, `AGENTEGRITY_RISK_TIER`, `AGENTEGRITY_HOOK_DIR`, `AGENTEGRITY_HOOK_IDLE_SECONDS`. Decision chains are written to `<hook dir>/<host>/<session>.chain.json`. Without Unix sockets (Windows) each call is evaluated in-process from the persisted chain: single-call rules enforce, cross-call rules and streaming do not.
+Block verdicts deny on both hosts. Configuration is shared: `AGENTEGRITY_HOOK_MODE` (`enforce` default, or `alert`), `AGENTEGRITY_HOOK_DISABLED`, `AGENTEGRITY_RISK_TIER`, `AGENTEGRITY_HOOK_DIR`, `AGENTEGRITY_HOOK_IDLE_SECONDS`, `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` (console grouping and display name, both defaulting to the host). Decision chains are written to `<hook dir>/<host>/<session>.chain.json`. Without Unix sockets (Windows) each call is evaluated in-process from the persisted chain: single-call rules enforce, cross-call rules and streaming do not.
 
 ## Shared guarantees
 

@@ -181,3 +181,14 @@ class TestModesAndChain:
         session.handle({"session_id": "s-1", "hook_event_name": "SessionEnd", "reason": "other"})
         assert session.ended
         assert session.handle(_pre("Bash", {"command": "rm -rf ~/.bash_history"})) is None
+
+
+class TestAgentIdentity:
+    def test_defaults_to_the_host(self, tmp_path):
+        profile = _session(tmp_path, "codex")._adapter.profile
+        assert (profile.agent_id, profile.name) == ("codex", "codex")
+
+    def test_agent_id_and_display_name_are_configurable(self, tmp_path):
+        session = _session(tmp_path, agent_id="clauddy", agent_name="Clauddy")
+        profile = session._adapter.profile.to_dict()
+        assert (profile["agent_id"], profile["name"]) == ("clauddy", "Clauddy")

@@ -10,6 +10,14 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+### Added
+
+- **Display name for coding-agent sessions.** The hook runtime reads `AGENTEGRITY_AGENT_NAME`, so a Claude Code or Codex agent can carry a readable name in the console instead of the host name. `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` both default to the host.
+
+### Fixed
+
+- `AGENTEGRITY_AGENT_ID` was read from the daemon's process environment instead of the hook environment the runtime passes in, unlike every other hook setting, and was not documented. It now follows the same path as the rest of the configuration.
+
 ## [0.11.0] - 2026-10-05
 
 Coding agents, argument-level detection and credential provenance. Tool calls are classified

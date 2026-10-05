@@ -55,7 +55,10 @@ unchecked instead of being blocked.
 Same environment variables as the Claude Code plugin:
 `AGENTEGRITY_HOOK_MODE` (`enforce` or `alert`),
 `AGENTEGRITY_HOOK_DISABLED`, `AGENTEGRITY_RISK_TIER`,
-`AGENTEGRITY_HOOK_DIR`, `AGENTEGRITY_HOOK_IDLE_SECONDS`, and
+`AGENTEGRITY_HOOK_DIR`, `AGENTEGRITY_HOOK_IDLE_SECONDS`,
+`AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` (the agent the
+console groups sessions under and its display name; both default to
+`codex`), and
 `AGENTEGRITY_TOKEN` with `AGENTEGRITY_EXPORTER_URL` to stream sessions
 to a console.
 
