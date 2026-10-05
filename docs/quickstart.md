@@ -89,6 +89,25 @@ npm i @agentegrity/vercel-ai       # Vercel AI SDK — experimental_telemetry: i
 
 Each re-exports `registerExporter()`, `report()`, and `reset()` for the same fan-out contract as the Python adapters. The low-level `@agentegrity/client` reporter is still available for custom frameworks. The wire format is published as JSON Schema in `schemas/exporter/` and OpenAPI 3.1 in `schemas/openapi.yaml`, so any language can produce or consume events.
 
+## 1d. Instrument a coding agent (Claude Code, Codex)
+
+Coding agents run commands through one generic shell tool, so they are instrumented through their hook systems instead of a library call. Install the library for the `python3` on your PATH, then the plugin for your host:
+
+```bash
+pip install agentegrity
+codex plugin marketplace add cogensec/agentegrity      # Codex: then trust the hooks once with /hooks
+# Claude Code: /plugin marketplace add cogensec/agentegrity
+#              /plugin install agentegrity@agentegrity
+```
+
+Each hook runs `python3 -m agentegrity hook --host <host>`, and one daemon per session keeps the full conversation in view. Piping a download into a shell or wiping logs is denied; sending data out after a secret was read asks on Claude Code and is denied on Codex. Set `AGENTEGRITY_HOOK_MODE=alert` to record verdicts without enforcing them, and verify a session afterwards:
+
+```bash
+agentegrity verify-decisions ~/.agentegrity/codex/<session>.chain.json
+```
+
+See [integrations/claude-code](../integrations/claude-code/README.md) and [integrations/codex](../integrations/codex/README.md) for configuration and limits.
+
 ## 2. Score an arbitrary agent profile
 
 ```bash
