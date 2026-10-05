@@ -37,7 +37,7 @@ shown.
 ## Install
 
 ```bash
-pip install agentegrity          # must be importable by python3 on PATH
+pip install "agentegrity>=0.11.0"   # must be importable by python3 on PATH
 codex plugin marketplace add cogensec/agentegrity
 ```
 
@@ -45,6 +45,10 @@ Install `agentegrity` from the marketplace, then run `/hooks` once to
 review and trust the plugin's hooks: Codex does not run non-managed
 hooks until you do. Organizations can ship them as managed hooks
 through `requirements.toml` instead.
+
+The plugin version matches the library version it needs. If the hook cannot run (library
+missing, or older than 0.11.0), the plugin shows a warning and the action goes through
+unchecked instead of being blocked.
 
 ## Configuration
 

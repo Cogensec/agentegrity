@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 20
           }
         ]
@@ -96,7 +96,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m agentegrity hook --host claude-code",
+            "command": "python3 -m agentegrity hook --host claude-code || echo '{\"systemMessage\": \"agentegrity: hook did not run (library missing or older than 0.11.0), so this action was NOT checked. Run: pip install -U agentegrity\"}'",
             "timeout": 5
           }
         ]

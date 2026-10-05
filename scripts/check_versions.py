@@ -8,6 +8,7 @@ Checks:
   - src/agentegrity/__init__.py              __version__
   - README.md                                "library-vX.Y.Z" shields badge
   - README.md "vX.Y.Z ships" / "vX.Y.Z — ..." current-release prose
+  - integrations/*/plugin.json               coding-agent plugin manifests
 
 Mirrors clients/typescript/scripts/check-versions.ts which covers the
 @agentegrity/* npm packages.
@@ -17,11 +18,16 @@ Exit code 0 on parity, 1 on drift, 2 on missing canonical version.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_MANIFESTS = (
+    ROOT / "integrations" / "claude-code" / ".claude-plugin" / "plugin.json",
+    ROOT / "integrations" / "codex" / "plugin.json",
+)
 
 
 def read(path: Path) -> str:
@@ -76,8 +82,9 @@ def check_readme_badge(version: str) -> bool:
 def check_readme_prose(version: str) -> bool:
     """Flag 'vX.Y.Z (current)' and 'vX.Y.Z ships' tokens in README that
     disagree with the canonical version. Roadmap bullets formatted as
-    `**vA.B.C — description**` are tolerated since they are historical /
-    forward-looking entries, not present-tense claims about the shipped lib.
+    `**vA.B.C — description**` or `**vA.B.C: description**` are tolerated since
+    they are historical / forward-looking entries, not present-tense claims about
+    the shipped lib.
     The shields badge is checked separately by check_readme_badge."""
     path = ROOT / "README.md"
     text = read(path)
@@ -88,7 +95,7 @@ def check_readme_prose(version: str) -> bool:
             bad.append(f"  '{m.group(0)}' should be 'v{version} ships'")
     # Pattern 2: "(current)" tag on a roadmap bullet.
     for m in re.finditer(
-        r"\*\*v(\d+\.\d+\.\d+)\s+—\s+[^*]*\(current\)", text
+        r"\*\*v(\d+\.\d+\.\d+)(?:\s+—|:)\s+[^*]*\(current\)", text
     ):
         if m.group(1) != version:
             bad.append(f"  roadmap '(current)' tag is on v{m.group(1)}, not v{version}")
@@ -105,6 +112,19 @@ def check_readme_prose(version: str) -> bool:
     return True
 
 
+def check_plugin_manifests(version: str) -> bool:
+    """The plugins only wrap `agentegrity hook`, so each ships with the library version it needs."""
+    good = True
+    for path in PLUGIN_MANIFESTS:
+        found = json.loads(read(path)).get("version")
+        if found != version:
+            fail(f"{path.relative_to(ROOT)} version={found} != pyproject {version}")
+            good = False
+        else:
+            ok(f"{path.relative_to(ROOT)} version={version}")
+    return good
+
+
 def main() -> int:
     version = canonical_version()
     print(f"canonical version: {version}\n")
@@ -112,6 +132,7 @@ def main() -> int:
         check_init(version),
         check_readme_badge(version),
         check_readme_prose(version),
+        check_plugin_manifests(version),
     ]
     if not all(checks):
         print("\nVersion drift detected. Bump every site together.", file=sys.stderr)
