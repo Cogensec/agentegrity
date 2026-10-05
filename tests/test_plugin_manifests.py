@@ -61,7 +61,10 @@ def env(tmp_path):
     runtime = tempfile.mkdtemp(prefix="ag-", dir="/tmp")
     base = {k: v for k, v in os.environ.items()
             if k not in ("AGENTEGRITY_TOKEN", "AGENTEGRITY_EXPORTER_URL", "AGENTEGRITY_URL")}
-    yield {**base, "XDG_RUNTIME_DIR": runtime, "AGENTEGRITY_HOOK_DIR": str(tmp_path / "chains")}
+    # A short idle timeout so daemons started here exit soon after the
+    # test; otherwise each one outlives its deleted socket for 30 minutes.
+    yield {**base, "XDG_RUNTIME_DIR": runtime, "AGENTEGRITY_HOOK_DIR": str(tmp_path / "chains"),
+           "AGENTEGRITY_HOOK_IDLE_SECONDS": "2"}
     shutil.rmtree(runtime, ignore_errors=True)
 
 

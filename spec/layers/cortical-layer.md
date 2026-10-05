@@ -117,10 +117,14 @@ cortical_score = (reasoning.consistency × 0.35) + (memory.integrity × 0.35) + 
 | Memory integrity below threshold | `alert` |
 | Reasoning consistency below threshold | `alert` |
 | Cognitive conflict detected | `escalate` |
-| Drift exceeds 2× tolerance | `block` |
+| Drift exceeds 2× tolerance | `alert` (`block` only with `block_on_drift=True`) |
 
 ## Drift Detection
 
-Behavioral drift is measured using approximate KL divergence between the baseline distribution and current observations, normalized to [0, 1]. The default tolerance is 0.15, meaning drift scores above 0.15 trigger alerts.
+Behavioral drift is the Jensen-Shannon distance (default) or 1D Wasserstein distance (`metric="wasserstein"`, `[stats]` extra) between the baseline distribution and the current session's observations, bounded in [0, 1] and computed only once both sides have `min_drift_samples` (default 20) observations. The default tolerance is 0.15: drift above it alerts. Drift above twice the tolerance also alerts by default, because a behavior change is a reason for review, not proof of compromise; pass `block_on_drift=True` to block instead.
+
+### Baseline learning
+
+Adapters teach the baseline when a session closes, from that session's action and tool-usage counts (`CorticalLayer.learn_session`), so each session is compared against earlier ones rather than against itself. Sessions with any `block` or `escalate` verdict are not learned, so an attack cannot become the new normal; sessions that only drifted are learned, so legitimately new work becomes normal over time. Pass a `BaselineStore` (`default_layers(baseline_store=...)`) to persist the baseline across processes; the coding-agent hook runtime persists one per agent under `<hook dir>/<host>/baselines/`. Without a store the baseline lives for the process.
 
 Drift detection is dimension-specific — the monitor reports *which* behavioral dimensions have drifted, not just that drift occurred. This enables targeted investigation rather than blanket alerts.

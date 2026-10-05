@@ -46,6 +46,7 @@ from agentegrity.adapters.bedrock_agents import BedrockAgentsAdapter
 from agentegrity.adapters.claude import ClaudeAdapter
 from agentegrity.adapters.crewai import CrewAIAdapter
 from agentegrity.adapters.google_adk import GoogleADKAdapter
+from agentegrity.adapters.hook_hosts import ClaudeCodeAdapter, CodexAdapter
 from agentegrity.adapters.langchain import LangChainAdapter
 from agentegrity.adapters.openai_agents import OpenAIAgentsAdapter
 from agentegrity.core.profile import (
@@ -66,6 +67,9 @@ ADAPTER_CLASSES: list[tuple[str, type[_BaseAdapter]]] = [
     ("autogen", AutoGenAdapter),
     ("agno", AgnoAdapter),
     ("bedrock_agents", BedrockAgentsAdapter),
+    # Coding-agent hosts, driven by the hook runtime (agentegrity.hooks).
+    ("claude_code", ClaudeCodeAdapter),
+    ("codex", CodexAdapter),
 ]
 
 
@@ -351,6 +355,8 @@ _EXPECTED_ADAPTERS = {
     "autogen",
     "agno",
     "bedrock_agents",
+    "claude_code",
+    "codex",
 }
 
 
@@ -377,6 +383,9 @@ class TestAdapterRegistryStable:
 _TEAM_AWARE_ADAPTERS: list[tuple[str, type[_BaseAdapter]]] = [
     ("agno", AgnoAdapter),
     ("bedrock_agents", BedrockAgentsAdapter),
+    # Both hosts fire SubagentStart hooks.
+    ("claude_code", ClaudeCodeAdapter),
+    ("codex", CodexAdapter),
 ]
 
 

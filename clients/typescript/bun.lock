@@ -19,7 +19,7 @@
     },
     "packages/claude-sdk": {
       "name": "@agentegrity/claude-sdk",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "dependencies": {
         "@agentegrity/client": "0.6.0",
       },
@@ -37,7 +37,7 @@
     },
     "packages/client": {
       "name": "@agentegrity/client",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "devDependencies": {
         "@types/node": "^20.0.0",
         "tsx": "^4.7.0",
@@ -46,7 +46,7 @@
     },
     "packages/crewai": {
       "name": "@agentegrity/crewai",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "dependencies": {
         "@agentegrity/client": "0.6.0",
       },
@@ -58,7 +58,7 @@
     },
     "packages/google-adk": {
       "name": "@agentegrity/google-adk",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "dependencies": {
         "@agentegrity/client": "0.6.0",
       },
@@ -70,7 +70,7 @@
     },
     "packages/langchain": {
       "name": "@agentegrity/langchain",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "dependencies": {
         "@agentegrity/client": "0.6.0",
       },
@@ -88,7 +88,7 @@
     },
     "packages/openai-agents": {
       "name": "@agentegrity/openai-agents",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "dependencies": {
         "@agentegrity/client": "0.6.0",
       },
@@ -106,7 +106,7 @@
     },
     "packages/vercel-ai": {
       "name": "@agentegrity/vercel-ai",
-      "version": "0.6.0",
+      "version": "0.11.0",
       "dependencies": {
         "@agentegrity/client": "0.6.0",
       },

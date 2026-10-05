@@ -11,7 +11,9 @@ and split into pipeline segments, so a downloader piped into an
 interpreter is recognised by structure rather than by raw substring.
 Command substitution and ``$IFS`` splicing cannot be resolved
 statically; they are tagged :attr:`ToolCallCategory.OBFUSCATED_COMMAND`
-instead. This is a floor for plainly-written commands, not a sandbox:
+instead. Comments are dropped and heredoc bodies are read as data unless
+a shell executes them; when the quoting does not balance, nothing is
+dropped. This is a floor for plainly-written commands, not a sandbox:
 anything the shell computes at runtime is outside its reach.
 """
 
@@ -22,7 +24,7 @@ import re
 import shlex
 from collections.abc import Mapping
 from enum import Enum
-from typing import Any
+from typing import Any, NamedTuple
 
 
 class ToolCallCategory(str, Enum):
@@ -84,6 +86,29 @@ _SEND_METHODS = {"POST", "PUT", "PATCH"}
 _SUBSTITUTED_FETCH = re.compile(
     r"(?:\beval\b|\b(?:ba|z|da|k)?sh\s+-c\b)[^\n]*?(?:\$\(|`)\s*(?:curl|wget)\b"
 )
+# `<<EOF`, `<<-'EOF'`, `<< "E"OF`; `<<<` (here-string) is matched first and skipped.
+_HEREDOC_OP = re.compile(r"<<(-?)[ \t]*((?:\\.|'[^'\n]*'|\"[^\"\n]*\"|[^\s;&|<>()'\"\\])+)")
+_HEREDOC_QUOTING = re.compile(r"['\"\\]")
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish", "source"}
+# A line ending in a pipe or list operator continues after the heredoc body.
+_CONTINUED_LINE = re.compile(r"(?:\|\|?|\|&|&&)\s*$")
+_WORD_BREAKS = " \t\n;|&()"
+# Nested contexts, longest opener first: arithmetic, substitution, parameter
+# expansion, ANSI-C and plain quotes. Inside "..." only expansions nest.
+_OPENERS = (
+    ("$((", "(("), ("((", "(("), ("$(", "("), ("${", "{"), ("$'", "$'"),
+    ("(", "("), ("'", "'"), ('"', '"'), ("`", "`"),
+)
+_QUOTED_OPENERS = (("$((", "(("), ("$(", "("), ("${", "{"), ("`", "`"))
+_CLOSERS = {"((": "))", "(": ")", "{": "}", "'": "'", "$'": "'", '"': '"', "`": "`"}
+# Where `#` starts a comment and `<<` opens a heredoc.
+_COMMAND_CONTEXTS = {"", "(", "`"}
+
+
+class _Heredoc(NamedTuple):
+    delimiter: str
+    quoted: bool
+    strip_tabs: bool
 
 
 def classify_tool_call(
@@ -122,9 +147,12 @@ def _classify_patch(patch: str) -> set[ToolCallCategory]:
 
 def _classify_shell(command: str) -> set[ToolCallCategory]:
     """Classify one shell command string."""
-    tokens = _tokenize(command)
-    segments, connectors = _split_segments(tokens)
+    script, executed_bodies = _split_heredocs(command)
     categories: set[ToolCallCategory] = set()
+    for body in executed_bodies:
+        categories |= _classify_shell(body)
+    tokens = _tokenize(script)
+    segments, connectors = _split_segments(tokens)
     for segment in segments:
         categories |= _classify_segment(segment)
     if _pipes_fetched_code_to_interpreter(segments, connectors):
@@ -134,16 +162,144 @@ def _classify_shell(command: str) -> set[ToolCallCategory]:
     return categories
 
 
+def _split_heredocs(command: str) -> tuple[str, list[str]]:
+    """Drop comments and heredoc bodies; return the script and the bodies that run as code.
+
+    A body is code when the line that opens it feeds a shell. Otherwise it is
+    data, and only the command substitutions of an unquoted body run. When the
+    quoting does not balance, the command comes back whole so nothing is hidden.
+    """
+    kept: list[str] = []
+    size = line_start = position = 0
+    executed: list[str] = []
+    pending: list[_Heredoc] = []
+    stack: list[str] = []
+    while position < len(command):
+        char = command[position]
+        top = stack[-1] if stack else ""
+        in_command = top in _COMMAND_CONTEXTS
+        step = char
+        if top in ("'", "$'"):
+            if top == "$'" and char == "\\":
+                step = command[position:position + 2]
+            elif char == "'":
+                stack.pop()
+        elif char == "\\":
+            step = command[position:position + 2]
+        elif top and command.startswith(_CLOSERS[top], position):
+            step = _CLOSERS[top]
+            stack.pop()
+        elif in_command and char == "#" and (not kept or kept[-1][-1] in _WORD_BREAKS):
+            end = command.find("\n", position)
+            position = len(command) if end < 0 else end
+            continue
+        elif in_command and command.startswith("<<<", position):
+            step = "<<<"
+        elif in_command and (heredoc := _HEREDOC_OP.match(command, position)):
+            word = heredoc.group(2)
+            pending.append(_Heredoc(
+                delimiter=_HEREDOC_QUOTING.sub("", word),
+                quoted=bool(_HEREDOC_QUOTING.search(word)),
+                strip_tabs=heredoc.group(1) == "-",
+            ))
+            step = heredoc.group(0)
+        elif in_command and char == "\n" and pending:
+            runs = _feeds_a_shell("".join(kept)[line_start:])
+            position += 1
+            for pending_heredoc in pending:
+                body, position = _read_heredoc_body(command, position, pending_heredoc)
+                if runs:
+                    executed.append(body)
+                elif not pending_heredoc.quoted:
+                    executed.extend(_substitutions(body))
+            pending.clear()
+            kept.append("\n")
+            size = line_start = size + 1
+            continue
+        elif opener := _opener(command, position, top):
+            step, context = opener
+            stack.append(context)
+        elif in_command and char == "\n":
+            line_start = size + 1
+        kept.append(step)
+        size += len(step)
+        position += len(step)
+    if stack:
+        return command, []
+    return "".join(kept), executed
+
+
+def _opener(command: str, position: int, top: str) -> tuple[str, str] | None:
+    """Return (opening text, context it pushes) if a nested context starts here."""
+    for text, context in _QUOTED_OPENERS if top == '"' else _OPENERS:
+        if command.startswith(text, position):
+            return text, context
+    return None
+
+
+def _feeds_a_shell(line: str) -> bool:
+    """True when a heredoc opened on this logical line may be run by a shell."""
+    if _CONTINUED_LINE.search(line):
+        return True
+    segments, _ = _split_segments(_tokenize(line))
+    return any(
+        segment and (segment[0] == "." or any(os.path.basename(t) in _SHELLS for t in segment))
+        for segment in segments
+    )
+
+
+def _read_heredoc_body(command: str, start: int, heredoc: _Heredoc) -> tuple[str, int]:
+    """Return the body starting at `start` and the position after its delimiter line."""
+    lines: list[str] = []
+    position = start
+    while position < len(command):
+        end = command.find("\n", position)
+        end = len(command) if end < 0 else end
+        line = command[position:end]
+        position = end + 1
+        if (line.lstrip("\t") if heredoc.strip_tabs else line) == heredoc.delimiter:
+            break
+        lines.append(line)
+    return "\n".join(lines), min(position, len(command))
+
+
+def _substitutions(body: str) -> list[str]:
+    """Return the `$(...)` and backtick commands an unquoted heredoc body expands."""
+    found: list[str] = []
+    position = 0
+    while position < len(body):
+        if body[position] == "\\":
+            position += 2
+        elif body.startswith("$(", position):
+            depth, end = 1, position + 2
+            while end < len(body) and depth:
+                depth += {"(": 1, ")": -1}.get(body[end], 0)
+                end += 1
+            found.append(body[position + 2:end - 1 if depth == 0 else end])
+            position = end
+        elif body[position] == "`":
+            end = body.find("`", position + 1)
+            end = len(body) if end < 0 else end
+            found.append(body[position + 1:end])
+            position = end + 1
+        else:
+            position += 1
+    return found
+
+
 def _tokenize(command: str) -> list[str]:
     """Split like a POSIX shell (quotes collapsed, operators separated)."""
-    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
+    prepared = command.replace("\\\n", "").replace("\n", " ; ")
+    lexer = shlex.shlex(prepared, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # Comments are already dropped; shlex would also end a word at `#`.
+    lexer.commenters = ""
     try:
         return list(lexer)
     except ValueError:
         # Unbalanced quotes: the shell would reject it too, but still
         # classify what is there rather than going blind.
-        return command.split()
+        return prepared.split()
 
 
 def _split_segments(tokens: list[str]) -> tuple[list[list[str]], list[str]]:

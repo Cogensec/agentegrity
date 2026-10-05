@@ -173,6 +173,13 @@ class TestModesAndChain:
         assert session._latest_score().composite < baseline
         session.handle({"session_id": "s-1", "hook_event_name": "PreCompact", "trigger": "auto"})
         _bash(session, "ls")
+        adversarial = next(r for r in session._latest_score().layer_results
+                           if r.layer_name == "adversarial")
+        assert adversarial.score == 1.0  # content threats cleared at once
+        # The recovery layer remembers the dip until it leaves its
+        # degradation window, so the composite returns a call or two later.
+        for _ in range(3):
+            _bash(session, "ls")
         assert session._latest_score().composite == baseline
 
     def test_session_end_closes_and_ignores_later_events(self, tmp_path):
@@ -181,3 +188,19 @@ class TestModesAndChain:
         session.handle({"session_id": "s-1", "hook_event_name": "SessionEnd", "reason": "other"})
         assert session.ended
         assert session.handle(_pre("Bash", {"command": "rm -rf ~/.bash_history"})) is None
+
+
+class TestAgentIdentity:
+    def test_defaults_to_the_host(self, tmp_path):
+        profile = _session(tmp_path, "codex")._adapter.profile
+        assert (profile.agent_id, profile.name) == ("codex", "codex")
+
+    def test_agent_id_and_display_name_are_configurable(self, tmp_path):
+        session = _session(tmp_path, agent_id="clauddy", agent_name="Clauddy")
+        profile = session._adapter.profile.to_dict()
+        assert (profile["agent_id"], profile["name"]) == ("clauddy", "Clauddy")
+
+    def test_model_id_is_configurable_and_unset_by_default(self, tmp_path):
+        assert _session(tmp_path)._adapter.profile.model_id is None
+        session = _session(tmp_path, model_id="claude-opus-5-5")
+        assert session._adapter.profile.to_dict()["model_id"] == "claude-opus-5-5"

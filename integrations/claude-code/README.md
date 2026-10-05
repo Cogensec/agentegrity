@@ -24,6 +24,9 @@ time:
   score until the context is compacted.
 - **Written content.** Instructions written into files (`Write`,
   `Edit`), the way an injection persists across sessions, **ask**.
+- **Behavioral drift.** Each clean session teaches a per-agent baseline
+  (`~/.agentegrity/claude-code/baselines/`); later sessions whose tool mix
+  departs from it lower the score and alert. Drift never blocks here.
 - **Governance.** Sensitive tool names are gated, MCP-aware:
   `file_delete` also gates `mcp__filesystem__file_delete`.
 - **Decision chain.** Every evaluation and every non-allow verdict is
@@ -64,6 +67,9 @@ Environment variables, all optional, shared with the Codex plugin:
 | `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating |
 | `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `<host>/<session>.chain.json` |
 | `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | Daemon exits after this long without a hook |
+| `AGENTEGRITY_AGENT_ID` | `claude-code` | Agent the console groups this host's sessions under |
+| `AGENTEGRITY_AGENT_NAME` | `claude-code` | Display name the console shows for that agent |
+| `AGENTEGRITY_MODEL_ID` | unset | Model reported on the agent profile (the configured model; a mid-session model switch is not tracked) |
 | `AGENTEGRITY_TOKEN`, `AGENTEGRITY_EXPORTER_URL` | unset | Stream sessions to a console |
 
 ## Failure semantics

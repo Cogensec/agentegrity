@@ -172,6 +172,9 @@ def _new_session(
     return HookSession(
         host, session_id, chain_path(host, session_id, env),
         mode=mode, risk_tier=risk_tier, stream=stream,
+        agent_id=env.get("AGENTEGRITY_AGENT_ID"),
+        agent_name=env.get("AGENTEGRITY_AGENT_NAME"),
+        model_id=env.get("AGENTEGRITY_MODEL_ID"),
     )
 
 
