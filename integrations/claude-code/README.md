@@ -24,6 +24,9 @@ time:
   score until the context is compacted.
 - **Written content.** Instructions written into files (`Write`,
   `Edit`), the way an injection persists across sessions, **ask**.
+- **Behavioral drift.** Each clean session teaches a per-agent baseline
+  (`~/.agentegrity/claude-code/baselines/`); later sessions whose tool mix
+  departs from it lower the score and alert. Drift never blocks here.
 - **Governance.** Sensitive tool names are gated, MCP-aware:
   `file_delete` also gates `mcp__filesystem__file_delete`.
 - **Decision chain.** Every evaluation and every non-allow verdict is

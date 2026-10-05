@@ -16,11 +16,14 @@ from typing import Any
 
 from agentegrity.adapters.hook_hosts import ADAPTERS_BY_HOST
 from agentegrity.core.attestation import AttestationChain
-from agentegrity.core.evaluator import IntegrityScore
+from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile, RiskTier
 from agentegrity.core.tool_classifier import PATCH_MARKER
 from agentegrity.hooks.protocol import normalize, render_decision, verdict_for
+from agentegrity.layers import default_layers
 from agentegrity.layers.adversarial import AdversarialLayer, default_detector_patterns
+from agentegrity.layers.baseline_store import FileBaselineStore
+from agentegrity.layers.checkpoint import validate_storage_identifier
 
 # Tool arguments are structured by construction, so the action_injection
 # patterns that key on quotes and braces would fire on ordinary code.
@@ -71,8 +74,11 @@ class HookSession:
         profile.model_id = model_id or None
         profile.risk_tier = risk_tier
         profile.metadata = {"host": host, "session_id": session_id}
+        store = _baseline_store(chain_path.parent, profile.agent_id)
+        evaluator = IntegrityEvaluator(layers=default_layers(baseline_store=store))
         self._adapter = ADAPTERS_BY_HOST[host](
-            profile=profile, chain=_load_chain(chain_path), stream_from_env=stream
+            profile=profile, evaluator=evaluator, chain=_load_chain(chain_path),
+            stream_from_env=stream,
         )
         self._written = AdversarialLayer(
             patterns=[
@@ -198,6 +204,19 @@ def _written_text(arguments: Mapping[str, Any]) -> str:
             if line.startswith("+") and not line.startswith("+++")
         )
     return "\n".join(parts)
+
+
+def _baseline_store(state_dir: Path, agent_id: str) -> FileBaselineStore | None:
+    """Persist drift baselines per agent under ``<state dir>/baselines``.
+
+    An agent id that is unsafe as a filename gets an in-memory baseline
+    instead: drift then only spans this session, but the hook keeps working.
+    """
+    try:
+        validate_storage_identifier(agent_id, kind="agent_id")
+    except ValueError:
+        return None
+    return FileBaselineStore(state_dir / "baselines")
 
 
 def _load_chain(path: Path) -> AttestationChain | None:

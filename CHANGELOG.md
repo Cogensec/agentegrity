@@ -15,8 +15,13 @@ in beta until the v1.0 stability criteria documented in
 - **Display name for coding-agent sessions.** The hook runtime reads `AGENTEGRITY_AGENT_NAME`, so a Claude Code or Codex agent can carry a readable name in the console instead of the host name. `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` both default to the host. `AGENTEGRITY_MODEL_ID` sets the model reported on the profile; it is the configured model, so a mid-session model switch is not reflected.
 - `ClaudeCodeAdapter` and `CodexAdapter` join the cross-adapter conformance matrix (they shipped in 0.11.0 without it), including the `subagent_start` lifecycle check.
 
+### Changed
+
+- **Drift above twice the tolerance alerts instead of blocking.** `CorticalLayer(block_on_drift=True)` restores blocking. With drift now live (below), keeping the block would deny calls whenever a session's tool mix departed from history, on every enforcing adapter and both coding-agent hosts.
+
 ### Fixed
 
+- **Drift and sustained degradation were never measured.** `CorticalLayer.update_baseline` and `RecoveryLayer.record_score` existed but nothing called them, so drift was always 0 and degradation never fired in any integration, and three of the four properties were constant: every quiet session averaged exactly 0.9295. Adapters now record every composite for degradation and, at close, teach the baseline from sessions that ended without `block` or `escalate` (`CorticalLayer.learn_session`, one store write per session). Recovery sees the learned baseline as `behavioral_baseline`. `default_layers(baseline_store=...)` persists it; the hook runtime keeps one per agent under `<hook dir>/<host>/baselines/` (agent ids unsafe as filenames fall back to an in-memory baseline). Learning happens at close even with no exporter attached.
 - `AGENTEGRITY_AGENT_ID` was read from the daemon's process environment instead of the hook environment the runtime passes in, unlike every other hook setting, and was not documented. It now follows the same path as the rest of the configuration.
 
 ## [0.11.0] - 2026-10-05

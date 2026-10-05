@@ -24,6 +24,9 @@ daemon for the session, so the layers see the whole conversation:
   recorded as a failure (Codex has no separate failure event).
 - **Written content.** Instructions added to files by `apply_patch`
   are **denied**.
+- **Behavioral drift.** Each clean session teaches a per-agent baseline
+  (`~/.agentegrity/codex/baselines/`); later sessions whose tool mix
+  departs from it lower the score and alert. Drift never blocks here.
 - **Decision chain** at `~/.agentegrity/codex/<session>.chain.json`:
 
   ```bash

@@ -33,7 +33,7 @@ import logging
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TypeVar
 from uuid import uuid4
 
 from agentegrity.core.approval import ApprovalDecision
@@ -51,12 +51,15 @@ from agentegrity.core.decision import (
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.tool_classifier import classify_tool_call
+from agentegrity.layers.cortical import CorticalLayer
+from agentegrity.layers.recovery import RecoveryLayer
 
 # Tool calls a tool error keeps counting against the score. A burst of
 # failures still alerts; an isolated old failure stops mattering.
 TOOL_ERROR_WINDOW = 10
 
 logger = logging.getLogger("agentegrity.adapters")
+_LayerT = TypeVar("_LayerT")
 
 
 class SessionExporter(Protocol):
@@ -291,6 +294,9 @@ class _BaseAdapter:
             self._attach_env_exporter()
         self._session_started = False
         self._session_ended = False
+        # Only sessions that never blocked or escalated teach the drift
+        # baseline, so an attack cannot become the new normal.
+        self._session_clean = True
         self._pending_topology_change: Any = None  # TopologyChange | None
         # Channels that have already emitted an overflow event, so a
         # sustained flood signals once instead of flooding the stream.
@@ -498,14 +504,20 @@ class _BaseAdapter:
             self._notify_exporters("on_event", self._session_id, event.to_dict())
 
     def close(self) -> None:
-        """Fire ``on_session_end`` on all registered exporters.
+        """End the session: teach the drift baseline, then notify exporters.
 
         Safe to call multiple times; subsequent calls are no-ops.
         """
-        if self._session_ended or not self._exporters:
-            self._session_ended = True
+        if self._session_ended:
             return
         self._session_ended = True
+        if self._session_clean:
+            for cortical in self._layers_of(CorticalLayer):
+                cortical.learn_session(
+                    dict(self._buffer.action_distribution), dict(self._buffer.tool_usage)
+                )
+        if not self._exporters:
+            return
         self._notify_exporters(
             "on_session_end",
             self._session_id,
@@ -545,8 +557,17 @@ class _BaseAdapter:
         self, context: dict[str, Any] | None = None
     ) -> IntegrityScore:
         ctx = context or self._buffer.to_evaluation_context()
+        role = (ctx.get("topology_context") or {}).get("role")
+        for cortical in self._layers_of(CorticalLayer):
+            baseline = cortical.load_baseline(self._profile, role)
+            if baseline.sample_count and "behavioral_baseline" not in ctx:
+                ctx = {**ctx, "behavioral_baseline": baseline.to_dict()}
         score = self._evaluator.evaluate(self._profile, ctx)
         self._evaluation_count += 1
+        for recovery in self._layers_of(RecoveryLayer):
+            recovery.record_score(score.composite)
+        if score.action in ("block", "escalate"):
+            self._session_clean = False
 
         prev_hash = self._chain.latest.content_hash if self._chain.latest else None
         # Consume the pending topology change (if any) so it lands on
@@ -782,6 +803,11 @@ class _BaseAdapter:
         return True
 
     # --- Enforcement ---
+
+    def _layers_of(self, kind: type[_LayerT]) -> list[_LayerT]:
+        """The evaluator's layers of one kind (empty for a custom evaluator without layers)."""
+        layers = getattr(self._evaluator, "layers", [])
+        return [layer for layer in layers if isinstance(layer, kind)]
 
     def _deny_payload(self, reason: str) -> dict[str, Any]:
         """Build the hook deny payload from a human-readable reason."""

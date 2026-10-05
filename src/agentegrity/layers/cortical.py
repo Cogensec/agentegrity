@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
@@ -184,6 +185,7 @@ class CorticalLayer:
         min_drift_samples: int = 20,
         baseline_store: "BaselineStore | None" = None,
         metric: DriftMetric = "js",
+        block_on_drift: bool = False,
     ):
         self.drift_tolerance = drift_tolerance
         self.memory_integrity_threshold = memory_integrity_threshold
@@ -191,6 +193,9 @@ class CorticalLayer:
         self._baseline = baseline
         self.min_drift_samples = min_drift_samples
         self._baseline_store = baseline_store
+        # Drift past twice the tolerance blocks only when opted in: a
+        # behavior change is a reason for review, not proof of compromise.
+        self.block_on_drift = block_on_drift
         self._observation_buffer: list[dict[str, Any]] = []
         self.metric: DriftMetric = metric
         # Resolved at construction so a missing scipy gets a single
@@ -229,18 +234,7 @@ class CorticalLayer:
         my_role = topology_ctx.get("role")
         self._last_role = my_role  # consumed by update_baseline save
 
-        # Initialize baseline if needed. If a baseline_store is wired,
-        # try to read through for this (agent_id, role) before falling
-        # back to a fresh in-memory baseline.
-        if self._baseline is None:
-            if self._baseline_store is not None:
-                stored = self._baseline_store.load(
-                    profile.agent_id, role=my_role
-                )
-                if stored is not None:
-                    self._baseline = stored
-            if self._baseline is None:
-                self._baseline = BehavioralBaseline(agent_id=profile.agent_id)
+        baseline = self.load_baseline(profile, my_role)
 
         # Evaluate each dimension
         reasoning = self._validate_reasoning(profile, ctx)
@@ -260,7 +254,7 @@ class CorticalLayer:
             action = "escalate"
             passed = False
         elif drift.drift_score > self.drift_tolerance * 2:
-            action = "block"
+            action = "block" if self.block_on_drift else "alert"
             passed = False
         elif (
             drift.drift_score > self.drift_tolerance
@@ -283,7 +277,7 @@ class CorticalLayer:
                 "reasoning": reasoning.to_dict(),
                 "memory": memory.to_dict(),
                 "drift": drift.to_dict(),
-                "baseline_sample_count": self._baseline.sample_count,
+                "baseline_sample_count": baseline.sample_count,
             },
         )
 
@@ -622,6 +616,35 @@ class CorticalLayer:
             # evaluate (rare) saves under role=None.
             role = getattr(self, "_last_role", None)
             self._baseline_store.save(self._baseline, role=role)
+
+    def load_baseline(self,
+        profile: AgentProfile,
+        role: str | None = None,
+    ) -> BehavioralBaseline:
+        """The baseline drift is measured against: from the store for (agent, role), else fresh."""
+        if self._baseline is None:
+            if self._baseline_store is not None:
+                self._baseline = self._baseline_store.load(profile.agent_id, role=role)
+            if self._baseline is None:
+                self._baseline = BehavioralBaseline(agent_id=profile.agent_id)
+        return self._baseline
+
+    def learn_session(self,
+        action_counts: Mapping[str, int],
+        tool_counts: Mapping[str, int],
+    ) -> None:
+        """Fold one finished session's counts into the baseline; one store write."""
+        if self._baseline is None or not any(action_counts.values()):
+            return
+        self._baseline.sample_count += sum(action_counts.values())
+        for name, count in action_counts.items():
+            dist = self._baseline.action_distribution
+            dist[name] = dist.get(name, 0) + count
+        for name, count in tool_counts.items():
+            dist = self._baseline.tool_usage_patterns
+            dist[name] = dist.get(name, 0) + count
+        if self._baseline_store is not None:
+            self._baseline_store.save(self._baseline, role=getattr(self, "_last_role", None))
 
     def __repr__(self) -> str:
         return (

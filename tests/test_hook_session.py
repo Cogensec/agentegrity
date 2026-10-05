@@ -173,6 +173,13 @@ class TestModesAndChain:
         assert session._latest_score().composite < baseline
         session.handle({"session_id": "s-1", "hook_event_name": "PreCompact", "trigger": "auto"})
         _bash(session, "ls")
+        adversarial = next(r for r in session._latest_score().layer_results
+                           if r.layer_name == "adversarial")
+        assert adversarial.score == 1.0  # content threats cleared at once
+        # The recovery layer remembers the dip until it leaves its
+        # degradation window, so the composite returns a call or two later.
+        for _ in range(3):
+            _bash(session, "ls")
         assert session._latest_score().composite == baseline
 
     def test_session_end_closes_and_ignores_later_events(self, tmp_path):

@@ -45,6 +45,7 @@ def default_layers(
     policy_set: str = "enterprise-default",
     prefer_llm: bool = False,
     api_key: str | None = None,
+    baseline_store: BaselineStore | None = None,
 ) -> list[Layer]:
     """Build the default four-layer integrity pipeline.
 
@@ -66,6 +67,9 @@ def default_layers(
         Anthropic API key for the LLM checkers. When omitted, the
         underlying checkers fall back to ``ANTHROPIC_API_KEY`` from the
         environment and fail open if it's also unset.
+    baseline_store : BaselineStore, optional
+        Persists the cortical layer's behavioral baseline so drift is
+        measured against earlier sessions, not only this process.
     """
     cortical: Layer
     if prefer_llm:
@@ -83,10 +87,11 @@ def default_layers(
             ) from exc
         from agentegrity.layers.cortical_llm import CorticalLLMLayer
         cortical = CorticalLLMLayer(
-            drift_tolerance=drift_tolerance, api_key=api_key
+            drift_tolerance=drift_tolerance, api_key=api_key,
+            baseline_store=baseline_store,
         )
     else:
-        cortical = CorticalLayer(drift_tolerance=drift_tolerance)
+        cortical = CorticalLayer(drift_tolerance=drift_tolerance, baseline_store=baseline_store)
 
     return [
         AdversarialLayer(coherence_threshold=coherence_threshold),

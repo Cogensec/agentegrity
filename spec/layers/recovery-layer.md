@@ -56,8 +56,13 @@ older or smaller baselines score progressively lower.
 Inspects a rolling window of recent composite scores (default 10) and looks
 for a sustained drop between the first and second halves of the window. A
 drop greater than `degradation_threshold` (default 0.15) raises the
-`sustained_degradation` flag and produces an `alert` action. Use
-`RecoveryLayer.record_score()` to feed scores into the window.
+`sustained_degradation` flag and produces an `alert` action. Adapters feed
+every composite into the window through `RecoveryLayer.record_score()`;
+call it yourself when evaluating outside an adapter.
+
+When the cortical layer holds a learned baseline, adapters pass it to this
+layer as `behavioral_baseline`, so the baseline sub-score reflects whether a
+restorable baseline exists.
 
 ### Recovery Capability Assessment
 
