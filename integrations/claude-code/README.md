@@ -37,8 +37,12 @@ time:
 ## Install
 
 ```bash
-pip install agentegrity          # must be importable by the python3 on PATH
+pip install "agentegrity>=0.11.0"   # must be importable by the python3 on PATH
 ```
+
+The plugin version matches the library version it needs. If the hook cannot run (library
+missing, or older than 0.11.0), the plugin shows a warning and the action goes through
+unchecked instead of being blocked.
 
 Then, inside Claude Code:
 

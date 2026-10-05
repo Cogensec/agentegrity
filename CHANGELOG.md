@@ -10,6 +10,18 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-05
+
+Coding agents, argument-level detection and credential provenance. Tool calls are classified
+by what their arguments do, Claude Code and Codex run on one stateful hook runtime, and an
+agent can attest which credentials it used without recording them.
+
+Read **Breaking** before you upgrade. Several default-on changes can deny calls that passed on
+0.10.0 under `enforce=True` (`ToolArgumentDetector`, GOV-005, tool results that are now
+scanned), and the plugin environment variables were renamed with the old names ignored.
+Upgrade the library before the plugin: plugin 0.11.0 calls `agentegrity hook`, which 0.10.0
+does not have.
+
 ### Added
 
 - **Credential provenance.** An agent can declare the credentials it uses with
@@ -52,6 +64,11 @@ in beta until the v1.0 stability criteria documented in
 
 ### Changed
 
+- The coding-agent plugins version in lockstep with the library, starting at 0.11.0, and
+  `scripts/check_versions.py` checks both manifests. The Claude Code plugin kept version 0.2.0
+  through the runtime rewrite, and Claude Code serves an installed plugin from its cache until
+  the version string changes, so existing installs would never have received it. The checker's
+  roadmap `(current)` rule also accepts `**vX.Y.Z: ...**` headings, so it keeps covering them.
 - `ToolSequenceDetector` counts calls tagged `reads_sensitive` / `sends_external` in addition to its tool-name categories.
 - **Scores recover according to what the evidence means.** Tool errors count only within the last `TOOL_ERROR_WINDOW` (10) tool calls; error entries carry `call_index`. Content threats (tool outputs, reasoning chain) persist until `pre_compact`, which archives them in the event (`archived_tool_outputs`, `archived_chain`) and clears them. Tool-call history is kept, so behavioral sequences stay session-scoped. Previously every historical error and injected output was re-scanned on every evaluation, so one early 429 lowered every later score.
 
@@ -62,6 +79,17 @@ in beta until the v1.0 stability criteria documented in
 
 ### Fixed
 
+- **A plugin over an older library blocked every action.** Library 0.10.0 answers
+  `agentegrity hook` with "unknown command" and exit 2, and both hosts treat exit 2 as block, so
+  the new plugin over 0.10.0 (or no library at all) would deny every tool call and prompt. Each
+  hook command now falls back to a `systemMessage` warning and lets the action through
+  unchecked, and the install docs pin `agentegrity>=0.11.0`. Known limit: Windows PowerShell
+  5.1 has no `||`, so there the command does not parse and the hook never runs; PowerShell 7,
+  Git Bash, cmd and POSIX shells are covered.
+- **The README undercounted what leaves the process.** It said there were exactly two ways. The
+  opt-in model-backed layers are a third: the `[llm]` layers send the content they classify to
+  Anthropic's API, and `AdversarialSLMLayer` to `AGENTEGRITY_SLM_BASE_URL`. The paragraph now
+  describes each path and how it is switched on, and carries no version number to go stale.
 - **Docs caught up with the code.** `spec/adapter-quick-reference.md` listed five Python adapters and two entry points that do not exist (`instrument_crew`, `instrument_agent`); it now covers all eight with verified snippets plus the coding-agent hosts. The README repository tree (which still said 145 tests and omitted three adapters, the exporters and `integrations/`) is rebuilt from the real layout, and its claim that the library never blocks on inferred risk is corrected: opt-in LLM/SLM layers can block on a model verdict. STATUS.md, the threat model (section 2.8, M-15 to M-20), decision provenance (`hook_verdict`), the quickstart and the telemetry page describe the hook runtime.
 - **Embedding similarity was salted per process.** `character_ngram_embed_fn` folded n-grams with the built-in `hash()`, which Python salts per process. Recall varied by run (the paraphrase test missed in 4 of 300 hash seeds), and a warm `cache_path` compared corpus vectors from one process with input vectors from another, so detection could silently fail after the first run. Buckets now come from a stable BLAKE2b digest, and the cache signature carries a format version, so caches written in the salted format are regenerated rather than reused.
 - Tool outputs are stored under `tool_outputs[*].content`, the key every scanning layer reads, so injection in tool results is scanned; structured responses are JSON-serialized. Tool failures reach the adversarial layer's tool-error check via `tool_outputs[*].error` (#48).
@@ -1249,7 +1277,8 @@ Severity tags below map to the audit: **Critical**, **High**,
 - Three working examples (`basic_evaluation.py`,
   `runtime_monitoring.py`, `custom_validator.py`).
 
-[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.11.0
 [0.10.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.10.0
 [0.9.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.9.0
 [0.8.1]: https://github.com/cogensec/agentegrity/releases/tag/v0.8.1

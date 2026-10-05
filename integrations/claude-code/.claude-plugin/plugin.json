@@ -1,7 +1,7 @@
 {
   "name": "agentegrity",
   "description": "Stateful integrity verification for every Claude Code tool call: argument classification, output scanning, sensitive-data egress gating, and a hash-linked decision chain you can verify after the session.",
-  "version": "0.2.0",
+  "version": "0.11.0",
   "author": {
     "name": "Cogensec Research"
   },
