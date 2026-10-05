@@ -192,3 +192,8 @@ class TestAgentIdentity:
         session = _session(tmp_path, agent_id="clauddy", agent_name="Clauddy")
         profile = session._adapter.profile.to_dict()
         assert (profile["agent_id"], profile["name"]) == ("clauddy", "Clauddy")
+
+    def test_model_id_is_configurable_and_unset_by_default(self, tmp_path):
+        assert _session(tmp_path)._adapter.profile.model_id is None
+        session = _session(tmp_path, model_id="claude-opus-5-5")
+        assert session._adapter.profile.to_dict()["model_id"] == "claude-opus-5-5"

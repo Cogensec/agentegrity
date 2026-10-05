@@ -12,7 +12,8 @@ in beta until the v1.0 stability criteria documented in
 
 ### Added
 
-- **Display name for coding-agent sessions.** The hook runtime reads `AGENTEGRITY_AGENT_NAME`, so a Claude Code or Codex agent can carry a readable name in the console instead of the host name. `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` both default to the host.
+- **Display name for coding-agent sessions.** The hook runtime reads `AGENTEGRITY_AGENT_NAME`, so a Claude Code or Codex agent can carry a readable name in the console instead of the host name. `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` both default to the host. `AGENTEGRITY_MODEL_ID` sets the model reported on the profile; it is the configured model, so a mid-session model switch is not reflected.
+- `ClaudeCodeAdapter` and `CodexAdapter` join the cross-adapter conformance matrix (they shipped in 0.11.0 without it), including the `subagent_start` lifecycle check.
 
 ### Fixed
 

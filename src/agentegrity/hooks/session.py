@@ -54,6 +54,7 @@ class HookSession:
         stream: bool = True,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        model_id: str | None = None,
     ) -> None:
         """Build the session, resuming the chain persisted at ``chain_path``."""
         self.host = host
@@ -65,6 +66,9 @@ class HookSession:
         # both default to the host so an unconfigured install still groups.
         profile = AgentProfile.default(name=agent_name or host)
         profile.agent_id = agent_id or host
+        # Hosts let the user switch models mid-session, so this is the
+        # configured model, not proof of the one that served each call.
+        profile.model_id = model_id or None
         profile.risk_tier = risk_tier
         profile.metadata = {"host": host, "session_id": session_id}
         self._adapter = ADAPTERS_BY_HOST[host](

@@ -66,6 +66,7 @@ Environment variables, all optional, shared with the Codex plugin:
 | `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | Daemon exits after this long without a hook |
 | `AGENTEGRITY_AGENT_ID` | `claude-code` | Agent the console groups this host's sessions under |
 | `AGENTEGRITY_AGENT_NAME` | `claude-code` | Display name the console shows for that agent |
+| `AGENTEGRITY_MODEL_ID` | unset | Model reported on the agent profile (the configured model; a mid-session model switch is not tracked) |
 | `AGENTEGRITY_TOKEN`, `AGENTEGRITY_EXPORTER_URL` | unset | Stream sessions to a console |
 
 ## Failure semantics

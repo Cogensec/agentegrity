@@ -58,7 +58,8 @@ Same environment variables as the Claude Code plugin:
 `AGENTEGRITY_HOOK_DIR`, `AGENTEGRITY_HOOK_IDLE_SECONDS`,
 `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` (the agent the
 console groups sessions under and its display name; both default to
-`codex`), and
+`codex`), `AGENTEGRITY_MODEL_ID` (the model reported on the profile),
+and
 `AGENTEGRITY_TOKEN` with `AGENTEGRITY_EXPORTER_URL` to stream sessions
 to a console.
 

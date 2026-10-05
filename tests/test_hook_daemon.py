@@ -112,10 +112,12 @@ def test_identity_comes_from_the_hook_environment(tmp_path, monkeypatch):
     from agentegrity.hooks.daemon import _new_session
 
     monkeypatch.setenv("AGENTEGRITY_AGENT_ID", "from-process-env")
+    monkeypatch.setenv("AGENTEGRITY_MODEL_ID", "from-process-env")
     env = {"AGENTEGRITY_HOOK_DIR": str(tmp_path), "AGENTEGRITY_AGENT_ID": "clauddy",
-           "AGENTEGRITY_AGENT_NAME": "Clauddy"}
+           "AGENTEGRITY_AGENT_NAME": "Clauddy", "AGENTEGRITY_MODEL_ID": "claude-opus-5-5"}
     profile = _new_session("claude-code", "s-id", env, stream=False)._adapter.profile
-    assert (profile.agent_id, profile.name) == ("clauddy", "Clauddy")
+    assert (profile.agent_id, profile.name, profile.model_id) == (
+        "clauddy", "Clauddy", "claude-opus-5-5")
 
 
 def test_identity_defaults_ignore_the_process_environment(tmp_path, monkeypatch):
