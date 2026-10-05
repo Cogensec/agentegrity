@@ -45,7 +45,7 @@
   "homepage": "https://github.com/cogensec/agentegrity/tree/main/clients/typescript/packages/crewai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cogensec/agentegrity.git",
+    "url": "git+https://github.com/Cogensec/agentegrity.git",
     "directory": "clients/typescript/packages/crewai"
   },
   "bugs": {

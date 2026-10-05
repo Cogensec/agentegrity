@@ -46,7 +46,7 @@
   "homepage": "https://github.com/cogensec/agentegrity/tree/main/clients/typescript/packages/google-adk",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cogensec/agentegrity.git",
+    "url": "git+https://github.com/Cogensec/agentegrity.git",
     "directory": "clients/typescript/packages/google-adk"
   },
   "bugs": {

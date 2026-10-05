@@ -10,6 +10,16 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+### Changed
+
+- **npm packages publish through trusted publishing.** The release workflow exchanges its
+  GitHub OIDC token for a short-lived npm credential instead of reading a stored `NPM_TOKEN`,
+  so there is no token to expire (npm caps publish tokens at 90 days, which is what failed the
+  first v0.11.0 npm publish), and every package carries a provenance attestation. Each
+  package's `repository.url` now uses the repository's exact casing (`Cogensec/agentegrity`),
+  because npm checks it against the provenance claim case-sensitively. `check-versions` fails
+  on a case-only mismatch and on a stale `@agentegrity/client` pin before anything publishes.
+
 ## [0.11.0] - 2026-10-05
 
 Coding agents, argument-level detection and credential provenance. Tool calls are classified
@@ -57,6 +67,7 @@ does not have.
   - New threat-model entries T-I4 (fingerprint brute-force) and T-I5 (plaintext via a label), and
     glossary terms *credential provenance* and *credential fingerprint*.
 - **Codex integration and a shared hook runtime.** `agentegrity hook --host claude-code|codex` handles one host hook (payload on stdin, verdict on stdout) and keeps a daemon per session over a private Unix socket, so output scanning, cross-call GOV-005 and compaction recovery work in coding agents. `integrations/codex` ships the plugin (`plugin.json`, `hooks/hooks.json`) and `.agents/plugins/marketplace.json` lists it. Codex specifics: `apply_patch` envelopes are classified by their file headers, never as shell; a `PostToolUse` with a non-zero `tool_response.exit_code` is recorded as a failure; escalations deny (Codex enforces only `deny`). Without Unix sockets (Windows) each call is evaluated in-process from the persisted chain. Daemons exit on `SessionEnd` or after `AGENTEGRITY_HOOK_IDLE_SECONDS` (1800).
+- Hook runtime settings and telemetry. `AGENTEGRITY_HOOK_TIMEOUT` (10 s) bounds how long a hook waits for its daemon; after that it stays silent and the call proceeds (fail-open). `AGENTEGRITY_AGENT_ID` names the agent in hook sessions and defaults to the host (`claude-code` or `codex`). Hook commands never fire `cli_run`; a daemon that closes a session with an exporter attached fires one `attestation_verified`.
 - `ClaudeCodeAdapter` and `CodexAdapter`; `_BaseAdapter(chain=...)` resumes a persisted chain and `stream_from_env=False` skips the env exporter.
 - **Argument-level tool-call classification.** `classify_tool_call()` tags each call with `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper` or `obfuscated_command`. Shell commands are tokenized POSIX-style and split into pipeline segments. Adapters store the tags on `action["categories"]` and expose the session's `tool_call_categories`. Generic shell tools (a coding agent's `Bash`, LangChain shell tools) previously looked identical to name-based rules whatever they ran.
 - **`ToolArgumentDetector`** (default-on, `AdversarialLayer(detect_tool_arguments=False)` to disable). `remote_code_exec` (0.95) and `log_tamper` (0.90) block under `block_on_critical`; `obfuscated_command` (0.70) alerts.
