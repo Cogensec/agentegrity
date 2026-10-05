@@ -41,6 +41,7 @@ from agentegrity.core.attestation import (
     AttestationChain,
     build_attestation_record,
 )
+from agentegrity.core.credentials import CredentialRef, CredentialRegistry
 from agentegrity.core.decision import (
     DecisionInput,
     DecisionRecord,
@@ -283,6 +284,7 @@ class _BaseAdapter:
         self._evaluation_count = 0
         self._session_id = uuid4().hex
         self._exporters: list[SessionExporter] = []
+        self._credentials = CredentialRegistry()
         if stream_from_env:
             self._attach_env_exporter()
         self._session_started = False
@@ -332,6 +334,26 @@ class _BaseAdapter:
         """
         if exporter not in self._exporters:
             self._exporters.append(exporter)
+
+    @property
+    def credentials(self) -> tuple[CredentialRef, ...]:
+        """Credentials declared on this adapter, as fingerprints and never values."""
+        return self._credentials.refs
+
+    def declare_credential(self,
+        provider: str,
+        secret: str,
+        *,
+        label: str | None = None,
+    ) -> CredentialRef | None:
+        """Record that this agent uses a credential, as a fingerprint and never the value."""
+        return self._credentials.declare(provider, secret, label=label)
+
+    def declare_from_env(self,
+        prefixes: list[str] | tuple[str, ...],
+    ) -> tuple[CredentialRef, ...]:
+        """Declare env vars whose names match the prefixes; opt-in, never a whole-env sweep."""
+        return self._credentials.declare_from_env(prefixes)
 
     def _attach_env_exporter(self) -> None:
         """Self-attach an HTTP exporter when the environment configures one.
@@ -517,6 +539,8 @@ class _BaseAdapter:
             recent_decisions=self._decisions_since_last_attestation(),
             topology=self._buffer.topology,
             topology_change=pending_change,
+            # Sticky, like topology: a leak found later still joins to every session.
+            credentials=self._credentials.refs,
         )
         self._chain.append(record)
         return score
