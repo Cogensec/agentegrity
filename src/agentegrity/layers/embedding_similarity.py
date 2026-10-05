@@ -105,6 +105,18 @@ def _cosine(a: Vector, b: Vector) -> float:
 # ---------------------------------------------------------------------------
 
 
+# Bumped when the embedding or signature format changes, so caches from an
+# older format are regenerated instead of compared against new vectors.
+# Format 1 (unversioned) folded n-grams with the salted built-in hash().
+_CACHE_FORMAT = b"2"
+
+
+def _stable_bucket(gram: str, dim: int) -> int:
+    """Map an n-gram to a bucket, identically in every process."""
+    digest = hashlib.blake2b(gram.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % dim
+
+
 def character_ngram_embed_fn(
     text: str,
     n: int = 3,
@@ -121,8 +133,9 @@ def character_ngram_embed_fn(
     Two modes:
 
     * **Hash-folded mode (default):** when ``vocab`` is None, every
-      n-gram is hashed into ``fixed_dim`` (default 1024) buckets via
-      Python's built-in ``hash()``. Output is a fixed-length dense
+      n-gram is hashed into ``fixed_dim`` (default 1024) buckets with
+      a stable BLAKE2b digest, so vectors are identical across
+      processes and safe to cache. Output is a fixed-length dense
       vector. Use this when you don't have a pre-built vocabulary —
       it's the simplest "just works" path.
 
@@ -161,10 +174,7 @@ def character_ngram_embed_fn(
     dim = fixed_dim or 1024
     out = [0.0] * dim
     for g, c in counts.items():
-        # Python's hash is salted per-process; deterministic within
-        # one run, which is what cosine similarity inside this run
-        # cares about. For cross-run stability use vocab mode.
-        idx = hash(g) % dim
+        idx = _stable_bucket(g, dim)
         out[idx] += float(c)
     return out
 
@@ -266,7 +276,7 @@ class EmbeddingSimilarityDetector:
         self._corpus_embeddings = self._load_or_compute_embeddings()
 
     def _corpus_signature(self) -> str:
-        h = hashlib.sha256()
+        h = hashlib.sha256(_CACHE_FORMAT + b"\x00")
         for text in self._corpus:
             h.update(text.encode("utf-8"))
             h.update(b"\x00")

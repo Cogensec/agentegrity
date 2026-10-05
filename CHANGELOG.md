@@ -30,6 +30,7 @@ in beta until the v1.0 stability criteria documented in
 
 ### Fixed
 
+- **Embedding similarity was salted per process.** `character_ngram_embed_fn` folded n-grams with the built-in `hash()`, which Python salts per process. Recall varied by run (the paraphrase test missed in 4 of 300 hash seeds), and a warm `cache_path` compared corpus vectors from one process with input vectors from another, so detection could silently fail after the first run. Buckets now come from a stable BLAKE2b digest, and the cache signature carries a format version, so caches written in the salted format are regenerated rather than reused.
 - Tool outputs are stored under `tool_outputs[*].content`, the key every scanning layer reads, so injection in tool results is scanned; structured responses are JSON-serialized. Tool failures reach the adversarial layer's tool-error check via `tool_outputs[*].error` (#48).
 
 ## [0.10.0] - 2026-08-03
