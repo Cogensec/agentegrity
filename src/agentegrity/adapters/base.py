@@ -262,6 +262,8 @@ class _BaseAdapter:
         api_key: str | None = None,
         signing_key: Any | None = None,
         approval_handler: Callable[..., bool] | None = None,
+        chain: AttestationChain | None = None,
+        stream_from_env: bool = True,
     ) -> None:
         self._profile = profile
         self._enforce = enforce
@@ -275,11 +277,14 @@ class _BaseAdapter:
         self._approval_handler = approval_handler
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
-        self._chain = AttestationChain()
+        # A resumed session passes its persisted chain so new records
+        # link onto it instead of starting a second root.
+        self._chain = chain if chain is not None else AttestationChain()
         self._evaluation_count = 0
         self._session_id = uuid4().hex
         self._exporters: list[SessionExporter] = []
-        self._attach_env_exporter()
+        if stream_from_env:
+            self._attach_env_exporter()
         self._session_started = False
         self._session_ended = False
         self._pending_topology_change: Any = None  # TopologyChange | None

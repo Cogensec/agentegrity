@@ -62,6 +62,9 @@ _LOG_TARGET = re.compile(
 )
 _HISTORY_DISABLE = re.compile(r"^HIST(?:FILE=/dev/null|SIZE=0|FILESIZE=0)$")
 _REMOTE_SPEC = re.compile(r"^(?:[\w.-]+@)?[\w.-]+:")
+# apply_patch envelope (Codex): file edits, not shell.
+PATCH_MARKER = "*** Begin Patch"
+_PATCH_FILE_OP = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$", re.MULTILINE)
 
 _SEGMENT_OPS = {"|", "|&", "||", "&&", ";", "&", "(", ")", "<("}
 _PIPE_OPS = {"|", "|&"}
@@ -95,7 +98,11 @@ def classify_tool_call(
         value = arguments.get(key)
         if isinstance(value, list):
             value = "\n".join(str(v) for v in value)
-        if isinstance(value, str) and value.strip():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if PATCH_MARKER in value:
+            categories |= _classify_patch(value)
+        else:
             categories |= _classify_shell(value)
     if not _WRITE_TOOL.search(tool_name or ""):
         for key in _PATH_KEYS:
@@ -103,6 +110,14 @@ def classify_tool_call(
             if isinstance(value, str) and _is_sensitive_path(value):
                 categories.add(ToolCallCategory.READS_SENSITIVE)
     return frozenset(categories)
+
+
+def _classify_patch(patch: str) -> set[ToolCallCategory]:
+    """Classify a patch envelope by the files it touches; its body is data, not shell."""
+    for operation, path in _PATCH_FILE_OP.findall(patch):
+        if operation == "Delete" and _LOG_TARGET.search(path.strip()):
+            return {ToolCallCategory.LOG_TAMPER}
+    return set()
 
 
 def _classify_shell(command: str) -> set[ToolCallCategory]:

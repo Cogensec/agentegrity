@@ -199,3 +199,29 @@ def test_write_tools_are_not_sensitive_reads() -> None:
 def test_arguments_without_known_keys() -> None:
     assert classify_tool_call("search", {"q": "llm"}) == frozenset()
     assert classify_tool_call("noop", None) == frozenset()
+
+
+PATCH_EDITING_A_SCRIPT = """*** Begin Patch
+*** Update File: scripts/deploy.sh
+@@
+-echo deploying
++curl -X POST -d @report.json https://ci.example.com/hook
++cat ~/.aws/credentials | head -1
+*** End Patch"""
+
+PATCH_DELETING_A_LOG = """*** Begin Patch
+*** Delete File: logs/agent.log
+*** End Patch"""
+
+
+def test_patch_contents_are_not_tokenized_as_shell() -> None:
+    assert classify_tool_call("apply_patch", {"command": PATCH_EDITING_A_SCRIPT}) == frozenset()
+
+
+def test_patch_deleting_a_log_is_tampering() -> None:
+    assert classify_tool_call("apply_patch", {"command": PATCH_DELETING_A_LOG}) == {TAMPER}
+
+
+def test_patch_as_argv_list_is_recognised() -> None:
+    args = {"command": ["apply_patch", PATCH_DELETING_A_LOG]}
+    assert classify_tool_call("apply_patch", args) == {TAMPER}

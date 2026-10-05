@@ -12,6 +12,8 @@ in beta until the v1.0 stability criteria documented in
 
 ### Added
 
+- **Codex integration and a shared hook runtime.** `agentegrity hook --host claude-code|codex` handles one host hook (payload on stdin, verdict on stdout) and keeps a daemon per session over a private Unix socket, so output scanning, cross-call GOV-005 and compaction recovery work in coding agents. `integrations/codex` ships the plugin (`plugin.json`, `hooks/hooks.json`) and `.agents/plugins/marketplace.json` lists it. Codex specifics: `apply_patch` envelopes are classified by their file headers, never as shell; a `PostToolUse` with a non-zero `tool_response.exit_code` is recorded as a failure; escalations deny (Codex enforces only `deny`). Without Unix sockets (Windows) each call is evaluated in-process from the persisted chain. Daemons exit on `SessionEnd` or after `AGENTEGRITY_HOOK_IDLE_SECONDS` (1800).
+- `ClaudeCodeAdapter` and `CodexAdapter`; `_BaseAdapter(chain=...)` resumes a persisted chain and `stream_from_env=False` skips the env exporter.
 - **Argument-level tool-call classification.** `classify_tool_call()` tags each call with `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper` or `obfuscated_command`. Shell commands are tokenized POSIX-style and split into pipeline segments. Adapters store the tags on `action["categories"]` and expose the session's `tool_call_categories`. Generic shell tools (a coding agent's `Bash`, LangChain shell tools) previously looked identical to name-based rules whatever they ran.
 - **`ToolArgumentDetector`** (default-on, `AdversarialLayer(detect_tool_arguments=False)` to disable). `remote_code_exec` (0.95) and `log_tamper` (0.90) block under `block_on_critical`; `obfuscated_command` (0.70) alerts.
 - **GOV-005 Sensitive Data Egress** in `enterprise-default`. An external send after any sensitive read in the session, or in the same call, requires approval, so it escalates (fails closed) under `enforce=True`.
@@ -20,6 +22,11 @@ in beta until the v1.0 stability criteria documented in
 
 - `ToolSequenceDetector` counts calls tagged `reads_sensitive` / `sends_external` in addition to its tool-name categories.
 - **Scores recover according to what the evidence means.** Tool errors count only within the last `TOOL_ERROR_WINDOW` (10) tool calls; error entries carry `call_index`. Content threats (tool outputs, reasoning chain) persist until `pre_compact`, which archives them in the event (`archived_tool_outputs`, `archived_chain`) and clears them. Tool-call history is kept, so behavioral sequences stay session-scoped. Previously every historical error and injected output was re-scanned on every evaluation, so one early 429 lowered every later score.
+
+### Breaking
+
+- **The Claude Code plugin runs on the shared runtime.** `hooks/pretooluse.py` is removed. `AGENTEGRITY_CC_MODE`, `AGENTEGRITY_CC_DISABLED` and `AGENTEGRITY_CC_RISK_TIER` are now `AGENTEGRITY_HOOK_MODE`, `AGENTEGRITY_HOOK_DISABLED` and `AGENTEGRITY_RISK_TIER`; `AGENTEGRITY_CC_CHAIN_DIR` is replaced by `AGENTEGRITY_HOOK_DIR` (chains under `<dir>/<host>`). The old names are ignored, so a hook disabled with the old variable is active again until renamed; `/agentegrity-status` warns when it sees them.
+- Commands are no longer text-scanned in the plugin: a bare `cat ~/.aws/credentials` was denied and is now allowed and recorded (sending the data out afterwards escalates via GOV-005). Content written into files is still scanned.
 
 ### Fixed
 

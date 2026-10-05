@@ -318,6 +318,22 @@ ok = adapter.attestation_chain.verify_cross_agent_links({
 
 Claude Agent SDK is single-agent at the framework level — no topology is declared, and the conformance suite pins the absence. Multi-agent layer checks (cascade detection, peer-authority, `GOV-004` gating, role-conformant drift via per-role `BaselineStore` keys) silently no-op for single-agent deployments.
 
+### Instrument a coding agent (Claude Code, Codex)
+
+Coding agents run commands through one generic shell tool, so the SDK
+ships a hook runtime for them: `agentegrity hook --host claude-code|codex`
+keeps a daemon per session, classifies each command by its arguments,
+scans tool output, gates sensitive-data egress and writes a verifiable
+decision chain. Install the plugin for your host from this repo's
+marketplace ([Claude Code](integrations/claude-code/README.md),
+[Codex](integrations/codex/README.md)).
+
+```bash
+pip install agentegrity
+codex plugin marketplace add cogensec/agentegrity          # Codex
+# Claude Code: /plugin marketplace add cogensec/agentegrity
+```
+
 ### Stream to a dashboard in one command
 
 Point an already-instrumented agent at an [**`agentegrity-pro`**](https://app.cogensec.com) dashboard with no code changes:

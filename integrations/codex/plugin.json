@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agentegrity",
+  "version": "0.2.0",
+  "description": "Stateful integrity verification for every Codex tool call: argument classification, output scanning, sensitive-data egress gating, and a hash-linked decision chain you can verify after the session.",
+  "author": {
+    "name": "Cogensec Research",
+    "url": "https://github.com/cogensec"
+  },
+  "homepage": "https://github.com/cogensec/agentegrity",
+  "repository": "https://github.com/cogensec/agentegrity",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "integrity",
+    "agents",
+    "hooks"
+  ]
+}
