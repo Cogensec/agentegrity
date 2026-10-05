@@ -10,6 +10,16 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+### Changed
+
+- **npm packages publish through trusted publishing.** The release workflow exchanges its
+  GitHub OIDC token for a short-lived npm credential instead of reading a stored `NPM_TOKEN`,
+  so there is no token to expire (npm caps publish tokens at 90 days, which is what failed the
+  first v0.11.0 npm publish), and every package carries a provenance attestation. Each
+  package's `repository.url` now uses the repository's exact casing (`Cogensec/agentegrity`),
+  because npm checks it against the provenance claim case-sensitively. `check-versions` fails
+  on a case-only mismatch and on a stale `@agentegrity/client` pin before anything publishes.
+
 ## [0.11.0] - 2026-10-05
 
 Coding agents, argument-level detection and credential provenance. Tool calls are classified

@@ -152,12 +152,15 @@ jobs:
         with:
           name: ts-workspace
           path: clients/typescript/
+      # Trusted publishing: npm exchanges this job's OIDC token (id-token: write)
+      # for a short-lived publish credential, so there is no stored token to
+      # expire, and provenance is attested. No registry-url: with one and no
+      # token, setup-node writes an .npmrc pointing at a placeholder token.
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "22"
+      - name: Install npm with trusted publishing support
+        run: npm install -g npm@^11.5.1
       - name: Publish @agentegrity/${{ matrix.package }}
         run: npm publish --access public
         working-directory: clients/typescript/packages/${{ matrix.package }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
