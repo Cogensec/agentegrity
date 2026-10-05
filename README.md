@@ -20,7 +20,7 @@
 
 ## Supported Frameworks
 
-Fourteen zero-config adapters — same three-line instrumentation, same signed attestation chain.
+Fourteen zero-config framework adapters with the same three-line instrumentation, plus hook plugins for two coding agents. One signed attestation chain format across all of them.
 
 <table>
   <tr>
@@ -80,6 +80,23 @@ Fourteen zero-config adapters — same three-line instrumentation, same signed a
         <sub><b>Vercel AI SDK</b></sub>
       </a><br/><sub>TypeScript</sub>
     </td>
+    <td align="center" width="110"></td>
+  </tr>
+  <tr>
+    <td align="center" width="110">
+      <a href="integrations/claude-code/README.md">
+        <img src="https://github.com/anthropics.png" width="48" alt="Claude Code"/><br/>
+        <sub><b>Claude Code</b></sub>
+      </a><br/><sub>hook plugin</sub>
+    </td>
+    <td align="center" width="110">
+      <a href="integrations/codex/README.md">
+        <img src="https://github.com/openai.png" width="48" alt="Codex"/><br/>
+        <sub><b>Codex</b></sub>
+      </a><br/><sub>hook plugin</sub>
+    </td>
+    <td align="center" width="110"></td>
+    <td align="center" width="110"></td>
     <td align="center" width="110"></td>
   </tr>
 </table>
@@ -153,10 +170,10 @@ We believe in being explicit about what the library is and is not, because a sec
 
 **What it does.** It provides a Python implementation of the four-layer verification architecture defined in the [Agentegrity Specification](spec/SPECIFICATION.md). It computes integrity scores from real evaluation runs, generates cryptographically signed attestation records, builds tamper-evident attestation chains, and produces structured audit logs for governance workflows. Evaluation runs locally with zero required dependencies. As of v0.10.0 there are exactly two ways anything leaves your process, and you control both. **Anonymous, shape-only telemetry** (enum values, counts, rounded scores; never prompts, tool arguments, or agent content) is on by default and disabled by `DO_NOT_TRACK=1`; every event is documented in [docs/telemetry.md](docs/telemetry.md). **A session exporter** streams full event content, including prompts and tool arguments, and runs only when you configure one, either by registering it in code or by setting `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL`. Configure neither and nothing leaves the process; `report()["exporters"]` names any sink that is attached. See [Telemetry](#telemetry-and-how-to-opt-out) below. It ships with extension points for custom threat detectors, custom policy rules, and custom validators.
 
-**What it does not do.** The adversarial layer ships a regex pattern taxonomy across eight attack families (prompt_injection, jailbreak, role_confusion, system_prompt_extraction, data_exfiltration, prompt_obfuscation, action_injection, tool_poisoning). Calibration is published in STATUS.md, weak numbers included: 1.000 TPR / 0.000 FPR on InjecAgent (N=2,108) after the action_injection family landed — calibrated on that suite, so read it as in-distribution recall — and **0.286 TPR / 0.113 FPR on AgentDojo's goal-text projection**, which regex cannot close because separating an injected goal from a legitimate user task requires session context, not content patterns. Paraphrased or non-English action injections will evade the regex tier; the LLM/SLM classifier layers are the semantic backstop. The cortical layer uses Jensen-Shannon distance with Laplace smoothing for drift detection (replaces the older asymmetric KL approximation) and structural memory-provenance inspection. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. As of v0.10.0 the library ships fourteen framework adapters — eight in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK, AutoGen, Agno, AWS Bedrock Agents) and six in TypeScript (the original five plus Vercel AI SDK). The Semantic Kernel adapter is deferred pending Microsoft Agent Framework GA (Q2 2026); one MAF adapter will cover both.
+**What it does not do.** The adversarial layer ships a regex pattern taxonomy across eight attack families (prompt_injection, jailbreak, role_confusion, system_prompt_extraction, data_exfiltration, prompt_obfuscation, action_injection, tool_poisoning). Calibration is published in STATUS.md, weak numbers included: 1.000 TPR / 0.000 FPR on InjecAgent (N=2,108) after the action_injection family landed — calibrated on that suite, so read it as in-distribution recall — and **0.286 TPR / 0.113 FPR on AgentDojo's goal-text projection**, which regex cannot close because separating an injected goal from a legitimate user task requires session context, not content patterns. Paraphrased or non-English action injections will evade the regex tier; the LLM/SLM classifier layers are the semantic backstop. The cortical layer uses Jensen-Shannon distance with Laplace smoothing for drift detection (replaces the older asymmetric KL approximation) and structural memory-provenance inspection. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. The library ships fourteen framework adapters: eight in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK, AutoGen, Agno, AWS Bedrock Agents) and six in TypeScript (the original five plus Vercel AI SDK). Coding agents (Claude Code, Codex) are covered by hook plugins on a shared runtime. Tool calls are classified by their arguments (`classify_tool_call()`), which is static analysis of what a command says: anything the shell computes at runtime (variable-built paths, command substitution, `$IFS` splicing) is flagged as obfuscated, not resolved, and Codex hook gaps (`write_stdin`, still-running commands, hosted tools) cannot be closed from a hook. The Semantic Kernel adapter is deferred pending Microsoft Agent Framework GA (Q2 2026); one MAF adapter will cover both.
 
 
-**What it deliberately is not.** It is not a guardrail. It does not block agent actions on its own — when an action is blocked, that is the result of explicit governance policy, not inferred risk. It is not a runtime enforcement layer trying to compete with WAF-style products. It is not a hosted service. It is a measurement and verification library, and everything it does is in service of producing evidence that an agent has (or lacks) the structural properties of a self-securing system.
+**What it deliberately is not.** It is not a guardrail. It blocks nothing unless you turn enforcement on (`enforce=True` on an adapter; the coding-agent plugins default to enforce and offer `alert` mode), and every verdict is recorded with its reason on the chain. With the default layers the cause is an explicit rule or a measured threshold: a governance policy, a tool-call category such as remote code execution or log tampering, a high-severity regex match, or drift and degradation past a configured bound. The opt-in LLM and SLM classifier layers can also block on a model's verdict (severity of 0.90 or more), so enable them under enforcement only after measuring them on your traffic. It is not a runtime enforcement layer trying to compete with WAF-style products. It is not a hosted service. It is a measurement and verification library, and everything it does is in service of producing evidence that an agent has (or lacks) the structural properties of a self-securing system.
 
 ---
 
@@ -500,76 +517,68 @@ See [`examples/`](examples/) for walkthroughs including custom threat detectors,
 agentegrity/
 ├── MANIFESTO.md                 # The Agentegrity Manifesto
 ├── README.md                    # You are here
-├── LICENSE                      # Apache 2.0
-├── pyproject.toml               # Package configuration
+├── STATUS.md                    # Maturity matrix + published benchmark numbers
+├── CHANGELOG.md
+├── SECURITY.md
+├── GET_STARTED_AI_GUIDE.md      # Self-install guide for coding agents
 ├── agentegrity-glossary.md      # Vocabulary of the discipline
+├── pyproject.toml
 │
 ├── spec/                        # Framework Specification
-│   ├── SPECIFICATION.md         # Full technical specification
-│   ├── properties/              # Property definitions
-│   │   ├── adversarial-coherence.md
-│   │   ├── environmental-portability.md
-│   │   └── verifiable-assurance.md
-│   └── layers/                  # Layer architecture
-│       ├── adversarial-layer.md
-│       ├── cortical-layer.md
-│       └── governance-layer.md
+│   ├── SPECIFICATION.md
+│   ├── threat-model.md          # STRIDE on the framework itself
+│   ├── adapter-quick-reference.md
+│   ├── properties/              # adversarial-coherence, environmental-portability,
+│   │                            # verifiable-assurance, decision-provenance,
+│   │                            # multi-agent-extensions
+│   └── layers/                  # adversarial, cortical, governance, recovery
 │
 ├── src/agentegrity/             # Python Reference Implementation
-│   ├── __init__.py
-│   ├── __main__.py              # `python -m agentegrity` + doctor CLI
-│   ├── claude.py                # Zero-config Claude Agent SDK surface
-│   ├── langchain.py             # Zero-config LangChain + LangGraph surface
-│   ├── openai_agents.py         # Zero-config OpenAI Agents SDK surface
-│   ├── crewai.py                # Zero-config CrewAI surface
-│   ├── google_adk.py            # Zero-config Google ADK surface
-│   ├── core/                    # Core abstractions
+│   ├── __main__.py              # CLI: info, doctor, pro, hook, verify-decisions, report
+│   ├── claude.py … bedrock_agents.py  # Zero-config surfaces, one per framework
+│   ├── core/
 │   │   ├── profile.py           # AgentProfile (+ .default() factory)
-│   │   ├── evaluator.py         # IntegrityEvaluator, PropertyWeights
+│   │   ├── evaluator.py         # IntegrityEvaluator, AsyncIntegrityEvaluator
 │   │   ├── attestation.py       # AttestationRecord, AttestationChain
-│   │   └── monitor.py           # IntegrityMonitor with @guard decorator
-│   ├── layers/                  # Layer implementations
-│   │   ├── adversarial.py       # AdversarialLayer (self-defense)
-│   │   ├── cortical.py          # CorticalLayer (self-stability)
-│   │   ├── governance.py        # GovernanceLayer (policy + audit)
-│   │   └── recovery.py          # RecoveryLayer (self-recovery)
-│   ├── adapters/                # Framework integrations
-│   │   ├── base.py              # _BaseAdapter + FrameworkAdapter Protocol
-│   │   ├── claude.py            # ClaudeAdapter
-│   │   ├── langchain.py         # LangChainAdapter (covers LangGraph)
-│   │   ├── openai_agents.py     # OpenAIAgentsAdapter
-│   │   ├── crewai.py            # CrewAIAdapter
-│   │   └── google_adk.py        # GoogleADKAdapter
-│   └── sdk/                     # High-level convenience wrapper
-│       └── client.py            # AgentegrityClient
+│   │   ├── decision.py          # DecisionRecord (decision provenance)
+│   │   ├── tool_classifier.py   # classify_tool_call(): argument-level categories
+│   │   ├── topology.py          # AgentTopology (multi-agent)
+│   │   ├── approval.py          # ApprovalWorkflow (HITL)
+│   │   ├── keys.py              # KeyProvider trust anchor
+│   │   ├── monitor.py           # IntegrityMonitor with @guard decorator
+│   │   └── telemetry.py         # Anonymous, shape-only telemetry
+│   ├── layers/
+│   │   ├── adversarial.py       # AdversarialLayer + ToolSequenceDetector + ToolArgumentDetector
+│   │   ├── adversarial_llm.py   # Opt-in Claude-backed semantic classifier
+│   │   ├── adversarial_slm.py   # Opt-in local-model classifier
+│   │   ├── embedding_similarity.py
+│   │   ├── cortical.py / cortical_llm.py
+│   │   ├── governance.py        # GovernanceLayer (GOV-001 to GOV-005)
+│   │   ├── recovery.py          # RecoveryLayer
+│   │   └── checkpoint.py / kms_checkpoint.py / baseline_store.py
+│   ├── adapters/                # _BaseAdapter + one adapter per framework,
+│   │                            # hook_hosts.py (ClaudeCodeAdapter, CodexAdapter)
+│   ├── hooks/                   # Coding-agent hook runtime
+│   │   ├── protocol.py          # Host payloads to adapter events, verdicts per host
+│   │   ├── session.py           # HookSession: stateful adapter + chain persistence
+│   │   └── daemon.py            # Per-session daemon + fail-open hook client
+│   ├── exporters/               # http.py, otel.py, alerts.py
+│   └── sdk/                     # AgentegrityClient
+│
+├── integrations/
+│   ├── claude-code/             # Claude Code plugin (hooks, /agentegrity-status)
+│   └── codex/                   # Codex plugin (plugin.json, hooks)
+├── .claude-plugin/              # Claude Code marketplace
+├── .agents/plugins/             # Codex marketplace
 │
 ├── schemas/                     # Cross-language wire contract
 │   ├── exporter/                # JSON Schema (Draft 2020-12)
-│   │   ├── common.json          # Shared $defs (profile, event, score)
-│   │   ├── session_start.json
-│   │   ├── event.json
-│   │   └── session_end.json
-│   └── openapi.yaml             # OpenAPI 3.1 spec for exporter endpoints
+│   └── openapi.yaml             # OpenAPI 3.1 for the exporter endpoints
 │
-├── clients/
-│   └── typescript/              # @agentegrity/client — TS/Bun/Node reporter
-│       ├── src/                 # AgentegrityReporter + types
-│       ├── examples/            # basic.ts wiring example
-│       ├── package.json
-│       └── README.md
-│
-├── tests/                       # Test suite (145 tests, all passing)
-│
-└── examples/                    # Usage examples
-    ├── claude_adapter.py
-    ├── claude_adapter_advanced.py
-    ├── langchain_adapter.py
-    ├── openai_agents_adapter.py
-    ├── crewai_adapter.py
-    ├── google_adk_adapter.py
-    ├── basic_evaluation.py
-    ├── runtime_monitoring.py
-    └── custom_validator.py
+├── clients/typescript/          # @agentegrity/client + six framework packages
+├── docs/                        # quickstart.md, telemetry.md
+├── tests/                       # pytest suite (`pytest`; benchmarks via `-m benchmark`)
+└── examples/                    # Adapter examples + exporter_receiver/
 ```
 
 ---
@@ -601,6 +610,8 @@ agentegrity/
 **v0.9.0 — Telemetry + injection-path hardening.** Anonymous, shape-only usage telemetry (enum values, counts, rounded scores; never prompts, tool arguments, or agent content) to guide adapter and evaluation-surface priorities. Stdlib-only sender, no new dependencies, and it can never break the host process. Opt out with `DO_NOT_TRACK=1`, `AGENTEGRITY_TELEMETRY_DISABLED=1`, or `agentegrity.disable_telemetry()`; every event is documented in [docs/telemetry.md](docs/telemetry.md). Two injection-path fixes ship alongside it: tool arguments can no longer shadow the fields governance matches on (a prompt-injected agent could name an argument `tool` and skip GOV-001's approval gate entirely), and the LLM classifier now covers `shared_memory` and `broadcast_channels`, closing the cross-agent cascade path those v0.8 channels exist to defend. LLM classification cost is bounded with concurrency and per-evaluation ceilings, plus verdict caching. **Breaking:** tool-call actions nest their arguments under `action["arguments"]`; custom `PolicyRule` conditions reading call-derived keys off the top level must be updated. See CHANGELOG for migration.
 
 **v0.10.0 — Session export + detection hardening (current).** Two ways to get evaluated session data off the agent, both riding the existing `SessionExporter` seam: **OpenTelemetry** (`pip install "agentegrity[otel]"`) with one trace per session and metrics to any OTLP backend, and **direct HTTP** via a stdlib-only `HTTPExporter` plus an `agentegrity pro` CLI; attaching a sink is never silent, and `AGENTEGRITY_TOKEN` + `AGENTEGRITY_URL` (previously inert) now activate streaming. The adversarial layer closes its disclosed action-oriented-injection gap: an `action_injection` family (InjecAgent TPR 0.000 → 1.000, calibrated on that suite and labelled as in-distribution recall), a `tool_poisoning` family with a `tool_definitions` channel for MCP metadata attacks, reasoning-trace scanning, and a behavioral `ToolSequenceDetector` that flags sensitive-read → external-send tool sequences no content pattern can see. `AdversarialSLMLayer` runs the semantic classifier against any OpenAI-compatible local server (Ollama / llama.cpp / vLLM) with zero added dependencies. Distribution: two-line `agentegrity.init()` with framework auto-detection, a Claude Code plugin whose allow/ask/deny verdicts append to a verifiable per-session decision chain, and MCP-aware governance matching. Assurance: `ApprovalWorkflow` (HITL that fails closed on timeout, approvals recorded as signed provenance), webhook/Slack alert exporters, the `KeyProvider` trust anchor with **strict** cross-agent verification, and `agentegrity report` for audit reports mapped to EU AI Act / NIST AI RMF.
+
+**Unreleased: coding agents + detection correctness.** Tool calls are classified by their arguments (`classify_tool_call()`): shell commands are tokenized the way the shell sees them and split into pipelines, so `curl … | sh`, log tampering and `$IFS` obfuscation are caught by structure, and a new `ToolArgumentDetector` blocks remote code execution and evidence tampering under enforcement. **GOV-005** escalates an external send after a secret was read anywhere in the session. Three correctness fixes: tool outputs and failures now reach the layers that scan them (they were stored under keys no layer read), scores recover according to what the evidence means (tool errors age out after 10 calls, injected content clears at compaction, behavioral sequences stay session-scoped), and hash-folded embeddings no longer depend on Python's per-process hash salt. Coding agents get a stateful hook runtime (`agentegrity hook --host claude-code|codex`, one daemon per session) with plugins for **Claude Code** and **Codex**. **Breaking:** the Claude Code plugin's `AGENTEGRITY_CC_*` variables are renamed; see CHANGELOG.
 
 **Federation + fleet (next).** `FederationLayer` at pipeline position 0 producing topology context the existing layers consume. `Coordination Integrity` property at default weight 0.0 (rebalanced to ~0.10-0.15 in a follow-up). `KeyProvider` Protocol with multi-agent signatures + per-agent attestation chains (pattern b). Fleet aggregator for population posture formalizing the glossary's "Agentegrity Posture." Deliberately unnumbered: it has slipped a version twice already, and pinning it just forces a roadmap edit every time an unplanned release lands.
 

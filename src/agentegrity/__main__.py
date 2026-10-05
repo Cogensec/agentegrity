@@ -546,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args:
         telemetry_capture("cli_run", properties={"command": "info"})
         return _info()
-    # Hook commands run on every tool call: no telemetry, no network.
+    # Hook commands run on every tool call, so they capture no cli_run event.
     if args[0] == "hook":
         return _hook(args[1:])
     if args[0] == "hook-daemon":

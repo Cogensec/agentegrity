@@ -463,6 +463,72 @@ peer-authority check.
   trust-boundary action and only invoke it from a code path
   that cannot be replaced by adversary code at runtime.
 
+### 2.8 Coding-agent hook runtime
+
+Claude Code and Codex call `agentegrity hook` on every hook event;
+one daemon per session holds the adapter
+(`src/agentegrity/hooks/`). The agent being evaluated runs as the
+same OS user as the runtime, which bounds what the runtime can
+defend against.
+
+**T-HOOK1: Another local user hijacks or impersonates the session
+daemon.** A process injects forged hook payloads or reads verdicts
+through the daemon's socket.
+
+- **Mitigation.** Sockets live in a per-uid runtime directory that
+  must be owned by the user with no group or other access; otherwise
+  the runtime refuses the daemon and evaluates in-process. Sockets
+  are created 0600. Chain files are written atomically with mode
+  0600.
+- **Residual.** Any process running as the same user can connect.
+  That is the agent's own trust domain: the runtime does not defend
+  against code that already runs with the agent's privileges.
+
+**T-HOOK2: The agent evades argument classification.** Commands
+built at runtime (variables, command substitution, `$IFS`
+splicing, `python -c` doing its own I/O) cannot be resolved by
+static analysis. On Codex, input typed into a running shell
+(`write_stdin`), output of commands still running when the call
+returns, and hosted tools never reach a hook.
+
+- **Mitigation.** Computed executables and `$IFS` splicing are
+  tagged `obfuscated_command`, which escalates. The Codex gaps are
+  documented in the plugin README.
+- **Residual.** Classification is a floor for plainly written
+  commands. Semantic layers (LLM/SLM classifiers) are the backstop.
+
+**T-HOOK3: The agent covers its tracks.** It deletes or truncates
+logs and shell history, or rewrites its own decision chain.
+
+- **Mitigation.** Deleting, truncating or redirecting over logs and
+  history, `history -c`, `unset HISTFILE` and patch deletions of log
+  files are tagged `log_tamper` and blocked under enforcement. The
+  chain is hash-linked, so editing one record breaks
+  `verify_chain()`; with streaming enabled a copy leaves the host.
+- **Residual.** The chain is unsigned until the KeyProvider work
+  lands, so a same-user process can rewrite it wholesale. Stream to
+  an off-host console where that matters.
+
+**T-HOOK4: Persistence through written instructions.** An
+injected agent writes instructions into files the next session
+reads (`AGENTS.md`, `CLAUDE.md`, configs).
+
+- **Mitigation.** Content written by `Write`, `Edit` and
+  `apply_patch` additions is scanned with the injection patterns and
+  escalates on a strong match.
+- **Residual.** A compaction summary can carry injected instructions
+  forward, and hosts do not expose the summary to hooks.
+
+**T-HOOK5: Denial of service disables enforcement.** A wedged or
+crashed daemon would otherwise stall every tool call.
+
+- **Mitigation.** The client waits at most
+  `AGENTEGRITY_HOOK_TIMEOUT` (10 s), then stays silent; daemons exit
+  after `AGENTEGRITY_HOOK_IDLE_SECONDS` without a hook.
+- **Residual.** Fail-open is deliberate: whoever can wedge the
+  daemon (same user only, per T-HOOK1) turns enforcement off for that
+  session. The host's own permission flow still applies.
+
 ---
 
 ## 3. Out of scope
@@ -475,7 +541,9 @@ The threat model deliberately does not cover:
   it.
 - **The framework SDK we adapt.** Issues in Claude Agent SDK,
   LangChain, OpenAI Agents SDK, CrewAI, Google ADK, or Vercel AI
-  SDK are not agentegrity issues. Report them upstream.
+  SDK are not agentegrity issues. Report them upstream. The same
+  holds for coding-agent hosts: Codex's hook coverage gaps
+  (`write_stdin`, still-running commands, hosted tools) are upstream.
 - **Detection coverage.** "The regex taxonomy doesn't detect attack
   pattern X" is a feature gap (see STATUS.md), not a vulnerability.
 - **agentegrity-pro.** The commercial dashboard ships under a separate
@@ -501,6 +569,12 @@ The threat model deliberately does not cover:
 | M-12 | Performance budget | `tests/test_perf_budget.py` |
 | M-13 | Detection regression gate | `tests/test_benchmarks.py` (synthetic + InjecAgent) |
 | M-14 | Tamper-recovery round trip | `tests/test_recovery_restore.py` |
+| M-15 | Argument-level tool-call classification; blocks remote code execution and log tampering | `core/tool_classifier.py`, `ToolArgumentDetector`; `tests/test_tool_classifier.py`, `tests/test_tool_argument_enforcement.py` |
+| M-16 | Sensitive-data egress gate (GOV-005), cross-call and in-call | `layers/governance.py`; `tests/test_tool_argument_enforcement.py` |
+| M-17 | Private per-uid runtime dir, 0600 sockets and chain files | `hooks/daemon.py`, `hooks/session.py`; `tests/test_hook_daemon.py` |
+| M-18 | Written-content injection scan | `hooks/session.py`; `tests/test_hook_session.py` |
+| M-19 | Evidence-aware score recovery (error window, compaction clearing) | `adapters/base.py`; `tests/test_score_recovery.py` |
+| M-20 | Process-independent hashing for persisted embeddings | `layers/embedding_similarity.py`; `tests/test_embedding_similarity.py` |
 
 ## 5. Open items (v0.7+)
 

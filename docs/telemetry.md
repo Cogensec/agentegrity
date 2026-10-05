@@ -18,7 +18,7 @@ Every property is built in one auditable module, [`src/agentegrity/core/_telemet
 | `adapter_created` | `AgentegrityClient.create_adapter` | `adapter` (registry key), `framework_available` — fired even when the framework import fails, so we can see demand for adapters people can't install |
 | `monitor_violation` | `IntegrityMonitor` | `action` (log/alert/block/escalate), `property` (lowest-scoring integrity property) |
 | `attestation_verified` | `AttestationChain.verify_chain` | `record_count`, `decision_count`, `verified` |
-| `cli_run` | `python -m agentegrity` | `command` (`info`, `doctor`, or `verify-decisions`) |
+| `cli_run` | `python -m agentegrity` | `command` (`info`, `pro`, `doctor`, `verify-decisions`, or `report`). The coding-agent `hook` and `hook-daemon` commands never fire it, since they run on every tool call; a hook daemon that closes a session with an exporter attached fires one `attestation_verified` when the session summary verifies the chain |
 | `agentegrity_uncaught_exception` | outermost telemetry scope | `exception_type` (exception **class name only**) |
 
 Every event also carries coarse environment tags built in [`telemetry.py`](../src/agentegrity/core/telemetry.py): `agentegrity_version`, `python_version` (major.minor), `environment` (`local`/`ci`/`docker`/`colab`/`kaggle`), `os_type` (`sys.platform`), a per-process `$session_id`, and the tags `component`/`operation` naming which API surface fired the event.

@@ -65,6 +65,10 @@ A category-honest framing. `subagent_start` fires when the **child** starts runn
 
 Only adapters with genuine subagent semantics (Agno teams, AWS Bedrock collaborators) emit `subagent_start` in normal operation.
 
+### `hook_verdict` (coding-agent hosts)
+
+The hook runtime (`agentegrity.hooks`) records the verdict it returns to the host. After the adapter's own `pre_tool_use` record, every non-allow verdict appends a second `DecisionRecord` with `decision_point="hook_verdict"`, `candidate_action={"tool", "arguments"}` and a `reasoning_chain` of `verdict:<allow|ask|deny>`, `mode:<enforce|alert>` and the threats and rules that drove it. In `alert` mode the record still names the verdict that would have been enforced, so a dry run produces the same audit evidence. Allow verdicts add no record: the attestation for the call already shows nothing fired. Chains persist per session and resume across daemon restarts, so one session yields one verifiable chain.
+
 ## Required Controls
 
 A conforming implementation MUST:
