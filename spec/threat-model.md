@@ -601,6 +601,7 @@ The threat model deliberately does not cover:
 | M-18 | Written-content injection scan | `hooks/session.py`; `tests/test_hook_session.py` |
 | M-19 | Evidence-aware score recovery (error window, compaction clearing) | `adapters/base.py`; `tests/test_score_recovery.py` |
 | M-20 | Process-independent hashing for persisted embeddings | `layers/embedding_similarity.py`; `tests/test_embedding_similarity.py` |
+| M-21 | Org-keyed credential fingerprints, fail-closed; no plaintext in chain, events, summary, logs or exporter payloads (T-I4, T-I5) | `core/credentials.py`; `tests/test_credential_provenance.py` |
 
 ## 5. Open items (v0.7+)
 

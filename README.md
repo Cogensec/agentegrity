@@ -541,6 +541,7 @@ agentegrity/
 │   │   ├── evaluator.py         # IntegrityEvaluator, AsyncIntegrityEvaluator
 │   │   ├── attestation.py       # AttestationRecord, AttestationChain
 │   │   ├── decision.py          # DecisionRecord (decision provenance)
+│   │   ├── credentials.py       # fingerprint(), CredentialRegistry (credential provenance)
 │   │   ├── tool_classifier.py   # classify_tool_call(): argument-level categories
 │   │   ├── topology.py          # AgentTopology (multi-agent)
 │   │   ├── approval.py          # ApprovalWorkflow (HITL)
