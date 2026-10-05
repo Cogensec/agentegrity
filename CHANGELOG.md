@@ -12,6 +12,38 @@ in beta until the v1.0 stability criteria documented in
 
 ### Added
 
+- **Credential provenance.** An agent can declare the credentials it uses with
+  `adapter.declare_credential("openai", key, label="openai/api_key")`. The attestation chain
+  records each as `Evidence(evidence_type="credential_use")` carrying a non-reversible
+  fingerprint, never the value. This makes leaked-credential blast radius provable: a secret
+  scanner says a secret exists, but not which agent used it, in which sessions, or what it did
+  with it. A scanner computes the same fingerprint over a found secret, and the match names the
+  agent and every attestation the credential was live for.
+  - **HMAC-SHA256 keyed to the org** via `AGENTEGRITY_FINGERPRINT_KEY`, not a bare hash. An
+    unkeyed digest is globally joinable and cheap to brute-force (real keys are structured:
+    `sk-`, `ghp_`, `AKIA`), and the chain is signed and exported, so it travels.
+  - **Fails closed.** With no key, nothing is fingerprinted or recorded, with one INFO line.
+    It never downgrades to an unkeyed hash.
+  - **Declaration is explicit.** Sweeping the environment for secret-shaped values would guess,
+    and would pull in credentials the agent never uses. `declare_from_env(prefixes=[...])` is
+    opt-in and records variable names, never values.
+  - **Labels are names, not samples.** A masked hint such as `sk-...f3a2` would put characters of
+    a live credential into a record that is signed, chained and streamed to every exporter.
+  - **Fingerprints reach subscribers.** The exporter wire format carries no chain records, so
+    declaring a credential also emits a `credential_declared` event, and `get_summary()` lists
+    the session's credentials. A credential declared before any exporter is registered is
+    replayed right after `on_session_start`, with its original timestamp, so a late exporter
+    still receives it exactly once.
+  - **Public API in both runtimes.** `fingerprint` and `CredentialRef` are exported from
+    `agentegrity`, and `@agentegrity/client` ships `credentialFingerprint()`. A consumer
+    reimplementing it would return zero matches on drift, which looks like "no leaks found", so
+    both runtimes assert against one shared vector file
+    (`tests/fixtures/credential_fingerprint_vectors.json`).
+  - Limitation: a resumed session (`_BaseAdapter(chain=...)`) restores the chain but not the
+    registry, like topology, so it stops attesting a credential until redeclared. The coding-agent
+    hooks do not declare credentials yet.
+  - New threat-model entries T-I4 (fingerprint brute-force) and T-I5 (plaintext via a label), and
+    glossary terms *credential provenance* and *credential fingerprint*.
 - **Codex integration and a shared hook runtime.** `agentegrity hook --host claude-code|codex` handles one host hook (payload on stdin, verdict on stdout) and keeps a daemon per session over a private Unix socket, so output scanning, cross-call GOV-005 and compaction recovery work in coding agents. `integrations/codex` ships the plugin (`plugin.json`, `hooks/hooks.json`) and `.agents/plugins/marketplace.json` lists it. Codex specifics: `apply_patch` envelopes are classified by their file headers, never as shell; a `PostToolUse` with a non-zero `tool_response.exit_code` is recorded as a failure; escalations deny (Codex enforces only `deny`). Without Unix sockets (Windows) each call is evaluated in-process from the persisted chain. Daemons exit on `SessionEnd` or after `AGENTEGRITY_HOOK_IDLE_SECONDS` (1800).
 - `ClaudeCodeAdapter` and `CodexAdapter`; `_BaseAdapter(chain=...)` resumes a persisted chain and `stream_from_env=False` skips the env exporter.
 - **Argument-level tool-call classification.** `classify_tool_call()` tags each call with `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper` or `obfuscated_command`. Shell commands are tokenized POSIX-style and split into pipeline segments. Adapters store the tags on `action["categories"]` and expose the session's `tool_call_categories`. Generic shell tools (a coding agent's `Bash`, LangChain shell tools) previously looked identical to name-based rules whatever they ran.

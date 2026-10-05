@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +35,39 @@ def _adapter():
 def _drive(adapter):
     """Produce an attestation so chain evidence exists to inspect."""
     adapter._evaluate_sync("user_prompt_submit", {"prompt": "hi"})
+
+
+class _CapturingExporter:
+    """Records what crosses the wire to a subscriber, in order.
+
+    Pro sees only these payloads, so asserting here proves the plumbing and not just the maths.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.events: list[dict] = []
+        self.summaries: list[dict] = []
+        self.profiles: list[dict] = []
+
+    async def on_session_start(self, session_id, adapter_name, profile):
+        self.calls.append("start")
+        self.profiles.append(profile)
+
+    async def on_event(self, session_id, event):
+        self.calls.append(f"event:{event['event_type']}")
+        self.events.append(event)
+
+    async def on_session_end(self, session_id, summary):
+        self.calls.append("end")
+        self.summaries.append(summary)
+
+    def everything(self) -> str:
+        return json.dumps(
+            {"e": self.events, "s": self.summaries, "p": self.profiles}, default=str
+        )
+
+    def declared(self) -> list[dict]:
+        return [e for e in self.events if e["event_type"] == "credential_declared"]
 
 
 def _credential_evidence(adapter):
@@ -246,3 +280,220 @@ def test_empty_secret_does_not_claim_the_key_is_missing(caplog):
         CredentialRegistry().declare("openai", "", key=KEY)
 
     assert not caplog.records
+
+
+# --- transport: the fingerprint has to reach a subscriber ---
+
+
+def test_exporter_receives_the_fingerprint(monkeypatch):
+    """The join happens in Pro, which sees only exporter payloads."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    _drive(adapter)
+
+    [declared] = sink.declared()
+    assert declared["data"]["credential"] == {
+        "provider": "openai",
+        "label": "openai/api_key",
+        "fingerprint": fingerprint(SECRET, key=KEY),
+    }
+
+
+def test_exporter_registered_before_declaring_gets_it_exactly_once(monkeypatch):
+    """Replay must not re-send what a live exporter already received."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    _drive(adapter)
+    _drive(adapter)
+
+    assert len(sink.declared()) == 1
+
+
+def test_late_exporter_still_receives_the_credential(monkeypatch):
+    """Declared before any exporter existed: _emit_event had nobody to tell."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+    _drive(adapter)
+
+    assert len(sink.declared()) == 1
+    assert sink.declared()[0]["data"]["credential"]["fingerprint"] == fingerprint(SECRET, key=KEY)
+
+
+def test_late_exporter_gets_it_after_session_start_and_before_the_first_event(monkeypatch):
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+    _drive(adapter)
+
+    assert sink.calls[:3] == ["start", "event:credential_declared", "event:user_prompt_submit"]
+
+
+def test_replayed_event_keeps_the_original_declaration_time(monkeypatch):
+    """A replay reports when the credential was declared, not when the session began."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    declared_at = adapter.events[0].timestamp.isoformat()
+
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+    _drive(adapter)
+
+    assert sink.declared()[0]["timestamp"] == declared_at
+
+
+def test_credentials_declared_before_and_after_the_exporter_each_arrive_once(monkeypatch):
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+    _drive(adapter)
+    adapter.declare_credential("github", "ghp_SECONDTOKEN", label="github/token")
+    _drive(adapter)
+
+    labels = sorted(e["data"]["credential"]["label"] for e in sink.declared())
+    assert labels == ["github/token", "openai/api_key"]
+
+
+def test_declaring_twice_emits_one_event(monkeypatch):
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    _drive(adapter)
+
+    assert len(sink.declared()) == 1
+
+
+def test_declaring_does_not_force_an_attestation(monkeypatch):
+    """Evidence is sticky and lands on the next attestation, so declaring is configuration."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    before = len(adapter.attestation_chain.records)
+
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+
+    assert len(adapter.attestation_chain.records) == before
+
+
+def test_session_summary_lists_credentials(monkeypatch):
+    """Belt and braces: a session that ends still reports what it used."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    _drive(adapter)
+    adapter.close()
+
+    assert sink.summaries[-1]["credentials"] == [
+        {
+            "provider": "openai",
+            "label": "openai/api_key",
+            "fingerprint": fingerprint(SECRET, key=KEY),
+        }
+    ]
+
+
+def test_summary_credentials_empty_without_declarations(monkeypatch):
+    monkeypatch.delenv(ENV_FINGERPRINT_KEY, raising=False)
+    assert _adapter().get_summary()["credentials"] == []
+
+
+def test_no_plaintext_crosses_the_wire(monkeypatch):
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+    _drive(adapter)
+    adapter.close()
+
+    assert "SUPERSECRETVALUE" not in sink.everything()
+
+
+def test_no_key_emits_no_event(monkeypatch):
+    monkeypatch.delenv(ENV_FINGERPRINT_KEY, raising=False)
+    adapter = _adapter()
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+
+    adapter.declare_credential("openai", SECRET)
+    _drive(adapter)
+
+    assert sink.declared() == []
+
+
+def test_declare_from_env_emits_one_event_per_credential(monkeypatch):
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    monkeypatch.setenv("OPENAI_API_KEY", SECRET)
+    adapter = _adapter()
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+
+    adapter.declare_from_env(prefixes=["OPENAI_"])
+    _drive(adapter)
+
+    [declared] = sink.declared()
+    assert declared["data"]["credential"]["label"] == "OPENAI_API_KEY"
+
+
+def test_join_works_from_payloads_alone(monkeypatch):
+    """Rebuild the blast radius using only what a late subscriber received."""
+    monkeypatch.setenv(ENV_FINGERPRINT_KEY, KEY)
+    adapter = _adapter()
+    adapter.declare_credential("openai", SECRET, label="openai/api_key")
+    sink = _CapturingExporter()
+    adapter.register_exporter(sink)
+    _drive(adapter)
+
+    # The scanner finds the same secret in a repo, with stray whitespace.
+    probe = fingerprint(f"  {SECRET}\n", key=KEY)
+    matches = [e for e in sink.declared() if e["data"]["credential"]["fingerprint"] == probe]
+
+    assert len(matches) == 1
+    assert matches[0]["adapter_name"] == "openai_agents"
+
+
+# --- public API: a consumer must not reimplement and drift ---
+
+
+def test_fingerprint_is_public_api():
+    import agentegrity
+    from agentegrity.core.credentials import fingerprint as core_fingerprint
+
+    assert agentegrity.fingerprint is core_fingerprint
+    assert hasattr(agentegrity, "CredentialRef")
+
+
+# --- cross-runtime golden vectors, shared with the TypeScript suite ---
+
+
+def test_matches_shared_golden_vectors():
+    """A drifted fingerprint yields zero matches, which looks identical to 'no leaks'."""
+    path = Path(__file__).parent / "fixtures" / "credential_fingerprint_vectors.json"
+    vectors = json.loads(path.read_text())
+    assert vectors, "vector file must not be empty"
+    for case in vectors:
+        assert fingerprint(case["secret"], key=case["key"]) == case["expected"], case["name"]

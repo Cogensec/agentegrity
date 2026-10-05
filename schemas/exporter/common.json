@@ -230,6 +230,31 @@
               }
             }
           }
+        },
+        "credentials": {
+          "type": "array",
+          "description": "Credentials this session used, identified by keyed fingerprint rather than value, so a consumer can join an externally discovered leaked secret back to the agent that used it. Never contains the credential itself.",
+          "items": {
+            "type": "object",
+            "required": [
+              "provider",
+              "label",
+              "fingerprint"
+            ],
+            "properties": {
+              "provider": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string",
+                "description": "A name, never a sample of the secret."
+              },
+              "fingerprint": {
+                "type": "string",
+                "description": "HMAC-SHA256 hex under the org key."
+              }
+            }
+          }
         }
       },
       "additionalProperties": true

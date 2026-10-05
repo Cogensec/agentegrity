@@ -250,6 +250,32 @@ Multiple agents sharing a single `FileBaselineStore` directory or
   cheap to instantiate; create one per tenant rather than one per
   cluster.
 
+**T-I4: Credential fingerprint brute-force.**
+Credential provenance records an HMAC-SHA256 fingerprint of each declared credential as
+`Evidence(evidence_type="credential_use")` and publishes it in `credential_declared` events and the
+session summary. An unkeyed digest would be globally joinable: anyone holding a chain could test
+candidate secrets against it offline, and real credentials (`sk-`, `ghp_`, `AKIA`) are structured
+enough to make that cheap. The chain is signed and exported, so it travels.
+
+- **Mitigation.** The fingerprint is keyed to the organization via `AGENTEGRITY_FINGERPRINT_KEY`, so
+  it is only joinable by a party holding that key. With no key configured the framework records
+  nothing rather than falling back to a bare hash, and logs that it is doing so.
+- **Operator must.** Treat the fingerprint key as a secret of the same class as the credentials it
+  fingerprints, and use a distinct key per tenant. One key shared across tenants makes their
+  fingerprints joinable across each other. Rotating the key invalidates every historical
+  fingerprint, so decide a rotation policy before a consumer depends on the join.
+
+**T-I5: Credential plaintext reaching the chain through a label.**
+`CredentialRef.label` is serialised into a signed record and streamed to every registered exporter.
+A masked-hint convention such as `sk-...f3a2` would put characters of a live credential into the
+chain, the exporter payload and any log that renders them.
+
+- **Mitigation.** Labels are names, never samples: `declare_from_env` derives the label from the
+  variable name, and tests assert that no substring of a declared secret appears in chain records,
+  events, summaries, exporter payloads or log output.
+- **Operator must.** Pass labels that are identifiers when calling `declare_credential(...,
+  label=...)`. The framework cannot tell a descriptive label from a pasted secret.
+
 ### 2.5 Denial of service
 
 **T-D1 — Resource exhaustion via huge prompts.**
