@@ -1,33 +1,34 @@
 # agentegrity for Claude Code
 
-In-process integrity verification for every tool call in a Claude Code
-session. No backend, no network round-trip, no GPU: the full evaluation
-runs locally in the hook, typically in single-digit milliseconds after
-interpreter startup.
+Stateful integrity verification for every tool call in a Claude Code
+session, with a hash-linked decision chain you can verify afterwards.
+Everything runs locally. Sessions stream to an
+[agentegrity-pro](https://app.cogensec.com) console only when you set
+`AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL`.
 
 ## What it does
 
-Every tool call passes through a `PreToolUse` hook before it executes:
+The plugin registers `agentegrity hook --host claude-code` on every
+session event. The first hook starts a small daemon for the session,
+so the layers see the whole conversation in order, not one call at a
+time:
 
-- The **adversarial layer** scans the tool arguments for injection and
-  exfiltration shapes (32-pattern taxonomy, minus the structure-cue
-  patterns that would false-positive on ordinary code).
-- Shell commands are **classified by structure** (`classify_tool_call`):
-  a downloaded or base64-decoded payload piped into an interpreter, or
-  deleting/truncating logs and shell history, is denied; `$IFS` splicing
-  and computed executables ask. Hooks are stateless per call, so a
-  secret read in one call and sent in a later one needs the stateful
-  adapter (GOV-005); read-and-send in one command is caught here.
-- The **governance layer** gates sensitive tool names, MCP-aware:
-  `file_delete` in the sensitive set also gates
-  `mcp__filesystem__file_delete`, and glob entries like `mcp__db__*`
-  gate a whole server.
-- The verdict maps to Claude Code's permission flow: **allow** (hook
-  stays silent), **ask** (inline approval with the reason), or
-  **deny** (blocked before the tool runs).
-- Every evaluated call appends a hash-linked `DecisionRecord` to a
-  per-session chain, so the session itself becomes verifiable
-  evidence:
+- **Argument classification.** Shell commands are tokenized like the
+  shell sees them and tagged: a downloaded or decoded payload piped
+  into an interpreter, or deleting logs and shell history, is
+  **denied**; `$IFS` splicing and computed executables **ask**.
+- **Sensitive-data egress (GOV-005).** An external send after a secret
+  was read anywhere in the session (or in the same command) **asks**.
+  Reading a secret alone is allowed and recorded.
+- **Output scanning.** Injection in anything a tool returns lowers the
+  score until the context is compacted.
+- **Written content.** Instructions written into files (`Write`,
+  `Edit`), the way an injection persists across sessions, **ask**.
+- **Governance.** Sensitive tool names are gated, MCP-aware:
+  `file_delete` also gates `mcp__filesystem__file_delete`.
+- **Decision chain.** Every evaluation and every non-allow verdict is
+  appended to `~/.agentegrity/claude-code/<session>.chain.json`.
+  Verify it with:
 
   ```bash
   agentegrity verify-decisions ~/.agentegrity/claude-code/<session>.chain.json
@@ -36,7 +37,7 @@ Every tool call passes through a `PreToolUse` hook before it executes:
 ## Install
 
 ```bash
-pip install agentegrity          # the hook imports it at evaluation time
+pip install agentegrity          # must be importable by the python3 on PATH
 ```
 
 Then, inside Claude Code:
@@ -50,29 +51,47 @@ Check the wiring with `/agentegrity-status`.
 
 ## Configuration
 
-Environment variables, all optional:
+Environment variables, all optional, shared with the Codex plugin:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AGENTEGRITY_CC_MODE` | `enforce` | `alert` records verdicts but never blocks or asks |
-| `AGENTEGRITY_CC_DISABLED` | unset | `1` disables the hook entirely |
-| `AGENTEGRITY_CC_RISK_TIER` | `high` | Profile risk tier for governance gating |
-| `AGENTEGRITY_CC_CHAIN_DIR` | `~/.agentegrity/claude-code` | Decision-chain directory |
+| `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts but never blocks or asks |
+| `AGENTEGRITY_HOOK_DISABLED` | unset | `1` disables the hook entirely |
+| `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating |
+| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `<host>/<session>.chain.json` |
+| `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | Daemon exits after this long without a hook |
+| `AGENTEGRITY_TOKEN`, `AGENTEGRITY_EXPORTER_URL` | unset | Stream sessions to a console |
 
 ## Failure semantics
 
-Fail-open by design: if `agentegrity` is not importable for the
-`python3` on PATH, the payload is malformed, or chain persistence
-fails, the hook stays silent and Claude Code's normal permission flow
-decides. A fail-open event is logged to stderr, and
-`/agentegrity-status` reports it. The decision chain records what the
-verdict *would have been* in `alert` mode, so a dry run produces the
-same auditable evidence as enforcement.
+The hook never breaks a session. If the daemon cannot run (no Unix
+sockets, or the runtime directory is not private to your user), each
+call is evaluated in-process from the persisted chain: single-call rules
+still enforce, but cross-call rules and streaming are lost. If the
+daemon is up but does not answer in time, or `agentegrity` is not
+importable, the hook stays silent and Claude Code's normal permission
+flow decides. In `alert` mode the chain records what the verdict would
+have been.
+
+## Migrating from 0.1
+
+The per-call `hooks/pretooluse.py` is replaced by the shared runtime.
+
+- Environment variables were renamed: `AGENTEGRITY_CC_MODE` is
+  `AGENTEGRITY_HOOK_MODE`, `AGENTEGRITY_CC_DISABLED` is
+  `AGENTEGRITY_HOOK_DISABLED`, `AGENTEGRITY_CC_RISK_TIER` is
+  `AGENTEGRITY_RISK_TIER`, and `AGENTEGRITY_CC_CHAIN_DIR` is replaced by
+  `AGENTEGRITY_HOOK_DIR` (chains now live under `<dir>/claude-code`).
+  **The old names are ignored**, so a hook you disabled with
+  `AGENTEGRITY_CC_DISABLED=1` is active again until you rename it.
+- Commands are no longer text-scanned. A bare `cat ~/.aws/credentials`
+  used to be denied; it is now allowed and recorded, and sending the
+  data out afterwards asks.
+- Existing chain files are resumed, not replaced.
 
 ## What this is not
 
-The hook evaluates tool *calls*, not the model's reasoning, and its
-regex tier only catches the attack shapes it knows (see STATUS.md for
-published benchmark numbers, including the weak ones). Treat it as a
-measurement and enforcement seam with verifiable provenance, not a
-guarantee.
+The hook evaluates tool calls, not the model's reasoning. Static
+command analysis is a floor: anything the shell computes at runtime is
+flagged as obfuscated, not resolved. Treat it as a measurement and
+enforcement seam with verifiable provenance, not a guarantee.

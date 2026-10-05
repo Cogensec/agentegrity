@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from agentegrity.core.attestation import AttestationChain
 from agentegrity.core.decision import DecisionRecord
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture
+from agentegrity.hooks import HOSTS, run_hook, serve
 from agentegrity.sdk.client import AgentegrityClient
 
 
@@ -504,12 +506,51 @@ def _pro(rest: list[str]) -> int:
     return 0  # pragma: no cover - execvp replaces the process
 
 
+def _hook_args(rest: list[str], needs_session: bool) -> tuple[str, str] | None:
+    """Parse ``--host <host> [--session <id>]``; None when invalid."""
+    options = dict(zip(rest[::2], rest[1::2]))
+    host = options.get("--host", "")
+    session = options.get("--session", "")
+    if host not in HOSTS or (needs_session and not session):
+        return None
+    return host, session
+
+
+def _hook(rest: list[str]) -> int:
+    """Handle one host hook: payload on stdin, host output on stdout. Never fails."""
+    parsed = _hook_args(rest, needs_session=False)
+    if parsed is None:
+        print(f"usage: agentegrity hook --host {{{','.join(HOSTS)}}}", file=sys.stderr)
+        return 0
+    output = run_hook(parsed[0], sys.stdin.read(), os.environ)
+    if output:
+        print(output)
+    return 0
+
+
+def _hook_daemon(rest: list[str]) -> int:
+    """Run the per-session hook daemon (started by ``agentegrity hook``)."""
+    parsed = _hook_args(rest, needs_session=True)
+    if parsed is None:
+        print(
+            f"usage: agentegrity hook-daemon --host {{{','.join(HOSTS)}}} --session <id>",
+            file=sys.stderr,
+        )
+        return 2
+    return serve(parsed[0], parsed[1], os.environ)
+
+
 @scoped_telemetry
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
         telemetry_capture("cli_run", properties={"command": "info"})
         return _info()
+    # Hook commands run on every tool call: no telemetry, no network.
+    if args[0] == "hook":
+        return _hook(args[1:])
+    if args[0] == "hook-daemon":
+        return _hook_daemon(args[1:])
     if args[0] == "pro":
         telemetry_capture("cli_run", properties={"command": "pro"})
         return _pro(args[1:])
@@ -590,6 +631,7 @@ def main(argv: list[str] | None = None) -> int:
         print("    --push                        verify and report the connection")
         print("    -- <command>...               run <command> with streaming enabled")
         print("  doctor                          run an end-to-end self-check")
+        print("  hook --host claude-code|codex   handle one coding-agent hook (stdin -> stdout)")
         print("  verify-decisions <chain.json>   verify a serialized chain")
         print("    --trusted-key <pub.hex>       pin a signing key (repeatable);")
         print("                                  without it, signatures are self-vouched")
