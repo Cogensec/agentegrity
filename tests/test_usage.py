@@ -7,7 +7,28 @@ source reports them, so a missing breakdown never reads as zero.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
 from agentegrity.core.usage import TokenUsage, UsageLedger
+
+# Shared with the TypeScript suite so both ledgers report identical usage.
+_VECTORS = json.loads(
+    (Path(__file__).parent / "fixtures" / "usage_ledger_vectors.json").read_text()
+)
+
+
+@pytest.mark.parametrize("vector", _VECTORS, ids=[v["name"] for v in _VECTORS])
+def test_shared_vectors(vector: dict) -> None:
+    ledger = UsageLedger()
+    for r in vector["records"]:
+        ledger.record(r["key"], r["model"], TokenUsage(**r["usage"]),
+                      source=r["source"], complete=r["complete"])
+    if vector["mark_incomplete"]:
+        ledger.mark_incomplete()
+    assert ledger.to_dict() == vector["expected"]
 
 
 def test_empty_ledger_reports_nothing() -> None:

@@ -44,3 +44,5 @@ export type {
   TopologyChangeData,
 } from "./topology.js";
 export type { Evidence, EvidenceType } from "./evidence.js";
+export { UsageLedger, UNKNOWN_MODEL } from "./usage.js";
+export type { TokenUsage, UsageSource, RecordOptions } from "./usage.js";
