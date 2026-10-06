@@ -29,7 +29,7 @@ Event mapping (both paths converge on the same canonical events):
         BeforeToolCallEvent            ->  pre_tool_use
         AfterToolCallEvent  (ok)       ->  post_tool_use
         AfterToolCallEvent  (exc)      ->  post_tool_use_failure
-        AfterInvocationEvent           ->  stop
+        AfterInvocationEvent           ->  stop (and token usage of the invocation)
 
     boto3 TracePart variants:
         wrap_client.invoke_agent call  ->  user_prompt_submit
@@ -42,6 +42,7 @@ Event mapping (both paths converge on the same canonical events):
         orchestrationTrace.observation.agentCollaboratorInvocationOutput
                                         ->  subagent_stop
         failureTrace                    ->  post_tool_use_failure
+        *Trace.modelInvocationOutput    ->  token usage (per traceId)
         EventStream exhausted           ->  stop
 """
 
@@ -50,16 +51,23 @@ from __future__ import annotations
 import logging
 import warnings
 from typing import TYPE_CHECKING, Any, Iterator
+from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.core.evaluator import IntegrityEvaluator
 from agentegrity.core.profile import AgentProfile
+from agentegrity.core.usage import TokenUsage
 
 if TYPE_CHECKING:
     from strands.agent import Agent as StrandsAgent
     from strands.hooks import HookRegistry
 
 logger = logging.getLogger("agentegrity.adapters.bedrock_agents")
+SOURCE = "trace"
+# Trace types whose model invocations report usage.
+_MODEL_TRACES = (
+    "orchestrationTrace", "preProcessingTrace", "postProcessingTrace", "routingClassifierTrace",
+)
 
 
 class BedrockAgentsAdapter(_BaseAdapter):
@@ -75,6 +83,41 @@ class BedrockAgentsAdapter(_BaseAdapter):
         api_key: str | None = None,
     ) -> None:
         super().__init__(profile, evaluator, enforce, api_key)
+        # Foundation model per trace id, from invocation inputs that name it.
+        self._trace_models: dict[str, str] = {}
+
+    def _record_trace_usage(self, trace: dict[str, Any]) -> None:
+        """Count each model invocation a trace reports, keyed by its trace id."""
+        for kind in _MODEL_TRACES:
+            part = trace.get(kind) or {}
+            model_input = part.get("modelInvocationInput") or {}
+            if model_input.get("traceId") and model_input.get("foundationModel"):
+                self._trace_models[model_input["traceId"]] = model_input["foundationModel"]
+            model_output = part.get("modelInvocationOutput") or {}
+            usage = (model_output.get("metadata") or {}).get("usage")
+            if not isinstance(usage, dict):
+                continue
+            trace_id = model_output.get("traceId") or uuid4().hex
+            self.record_usage(
+                f"bedrock:{trace_id}", self._trace_models.get(trace_id),
+                TokenUsage(input_tokens=_int(usage.get("inputTokens")),
+                           output_tokens=_int(usage.get("outputTokens"))),
+                source=SOURCE,
+            )
+
+    def _record_invocation_usage(self, event: Any) -> None:
+        """Count a Strands invocation's usage from its result metrics."""
+        metrics = getattr(getattr(event, "result", None), "metrics", None)
+        invocation = getattr(metrics, "latest_agent_invocation", None)
+        usage = getattr(invocation, "usage", None)
+        if not isinstance(usage, dict):
+            return
+        config = getattr(getattr(getattr(event, "agent", None), "model", None), "config", None)
+        model = config.get("model_id") if isinstance(config, dict) else None
+        cycles = getattr(invocation, "cycles", None)
+        self.record_usage(f"strands:{uuid4().hex}", model, _strands_usage(
+            usage, requests=len(cycles) if isinstance(cycles, list) else None,
+        ), source="provider_response")
 
     # --- v0.8 multi-agent topology helpers ---
 
@@ -275,6 +318,10 @@ class _StrandsHookProvider:
         self._adapter._dispatch("user_prompt_submit", {"prompt": prompt})
 
     def _on_after_invocation(self, event: Any) -> None:
+        try:
+            self._adapter._record_invocation_usage(event)
+        except Exception as exc:
+            logger.warning("usage capture failed: %s", exc)
         result = getattr(event, "result", None)
         self._adapter._dispatch(
             "stop", {"output": str(result) if result is not None else ""}
@@ -369,6 +416,10 @@ def _handle_stream_event(adapter: BedrockAgentsAdapter, raw_event: dict[str, Any
     if not trace_part:
         return  # chunk / files / returnControl / exception variants — caller handles
     trace = trace_part.get("trace") or {}
+    try:
+        adapter._record_trace_usage(trace)
+    except Exception as exc:
+        logger.warning("usage capture failed: %s", exc)
 
     failure = trace.get("failureTrace")
     if failure:
@@ -429,3 +480,26 @@ def _handle_stream_event(adapter: BedrockAgentsAdapter, raw_event: dict[str, Any
             {"agent_id": collab_out.get("agentCollaboratorName", "")},
         )
         return
+
+
+def _strands_usage(usage: dict[str, Any], *, requests: int | None) -> TokenUsage:
+    """Normalize Strands usage; providers differ on whether input includes the cache.
+
+    Same rule Strands applies: when input + output equals the total, the
+    cache is already inside the input count; otherwise it is added on top.
+    """
+    inputs, output = _int(usage.get("inputTokens")), _int(usage.get("outputTokens"))
+    cache_read = _int(usage.get("cacheReadInputTokens"))
+    cache_write = _int(usage.get("cacheWriteInputTokens"))
+    if inputs + output != _int(usage.get("totalTokens")):
+        inputs += cache_read + cache_write
+    return TokenUsage(
+        input_tokens=inputs, output_tokens=output,
+        cache_read_tokens=cache_read if "cacheReadInputTokens" in usage else None,
+        cache_write_tokens=cache_write if "cacheWriteInputTokens" in usage else None,
+        requests=requests,
+    )
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0

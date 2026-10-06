@@ -12,6 +12,7 @@ Event mapping:
     on_tool_error                -> post_tool_use_failure
     on_chain_start (sub-chain)   -> subagent_start  (graph nodes)
     on_chain_end (top-level)     -> stop
+    on_llm_end                   -> token usage (usage_metadata, per run_id)
 
 Usage (LangChain):
     from agentegrity.langchain import instrument_chain, report
@@ -33,14 +34,45 @@ from typing import Any
 from uuid import UUID
 
 from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.core.usage import TokenUsage
 
 logger = logging.getLogger("agentegrity.adapters.langchain")
+SOURCE = "provider_response"
 
 
 class LangChainAdapter(_BaseAdapter):
     """Instruments a LangChain chain or LangGraph graph with agentegrity."""
 
     _name = "langchain"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Model named at chat-model start, for responses that do not name it.
+        self._start_models: dict[UUID, str] = {}
+
+    def _record_llm_result(self, response: Any, run_id: UUID) -> None:
+        """Count each generation's ``usage_metadata``, keyed by run so a repeat counts once."""
+        start_model = self._start_models.pop(run_id, None)
+        recorded = False
+        for i, generations in enumerate(getattr(response, "generations", None) or []):
+            for j, generation in enumerate(generations):
+                message = getattr(generation, "message", None)
+                usage = getattr(message, "usage_metadata", None)
+                if not isinstance(usage, dict):
+                    continue
+                metadata = getattr(message, "response_metadata", None) or {}
+                model = metadata.get("model_name") or metadata.get("model") or start_model
+                self.record_usage(f"langchain:{run_id}:{i}:{j}", model, _metadata_usage(usage),
+                                  source=SOURCE)
+                recorded = True
+        llm_output = getattr(response, "llm_output", None) or {}
+        legacy = llm_output.get("token_usage")
+        if not recorded and isinstance(legacy, dict):
+            model = llm_output.get("model_name") or start_model
+            self.record_usage(f"langchain:{run_id}", model, TokenUsage(
+                input_tokens=_int(legacy.get("prompt_tokens")),
+                output_tokens=_int(legacy.get("completion_tokens")),
+            ), source=SOURCE)
 
     def create_callback_handler(self) -> Any:
         """Return a ``BaseCallbackHandler`` subclass instance bound to this adapter.
@@ -99,6 +131,32 @@ class LangChainAdapter(_BaseAdapter):
             ) -> None:
                 if parent_run_id is None:
                     adapter._dispatch("stop", {"outputs": outputs})
+
+            def on_chat_model_start(
+                self,
+                serialized: dict[str, Any] | None,
+                messages: Any,
+                *,
+                run_id: UUID,
+                metadata: dict[str, Any] | None = None,
+                **kwargs: Any,
+            ) -> None:
+                model = (metadata or {}).get("ls_model_name")
+                if isinstance(model, str) and model:
+                    adapter._start_models[run_id] = model
+
+            def on_llm_end(
+                self,
+                response: Any,
+                *,
+                run_id: UUID,
+                parent_run_id: UUID | None = None,
+                **kwargs: Any,
+            ) -> None:
+                try:
+                    adapter._record_llm_result(response, run_id)
+                except Exception as exc:
+                    logger.warning("usage capture failed: %s", exc)
 
             def on_tool_start(
                 self,
@@ -260,3 +318,34 @@ class LangChainAdapter(_BaseAdapter):
             comm_channels=frozenset({"peer_messages"}),
         )
         self.set_topology(topology, my_role=my_role)
+
+
+def _metadata_usage(usage: dict[str, Any]) -> TokenUsage:
+    """Normalize ``usage_metadata``, whose input count already includes the cache.
+
+    Provider packages add keys beyond the base schema: Anthropic splits cache
+    writes into ``ephemeral_5m_input_tokens`` / ``ephemeral_1h_input_tokens``
+    (leaving ``cache_creation`` at 0), and OpenAI prefixes keys by service
+    tier (``priority_cache_read``, ``flex_reasoning``).
+    """
+    inputs = usage.get("input_token_details")
+    outputs = usage.get("output_token_details")
+    cache_read = cache_write = reasoning = None
+    if isinstance(inputs, dict):
+        cache_read = sum(_int(v) for k, v in inputs.items() if k.endswith("cache_read"))
+        creation = sum(_int(v) for k, v in inputs.items() if k.endswith("cache_creation"))
+        split = sum(_int(v) for k, v in inputs.items() if k.startswith("ephemeral_"))
+        cache_write = max(creation, split)
+    if isinstance(outputs, dict):
+        reasoning = sum(_int(v) for k, v in outputs.items() if k.endswith("reasoning"))
+    return TokenUsage(
+        input_tokens=_int(usage.get("input_tokens")),
+        output_tokens=_int(usage.get("output_tokens")),
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        reasoning_tokens=reasoning,
+    )
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0

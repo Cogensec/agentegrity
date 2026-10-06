@@ -22,6 +22,13 @@ maps the three GenAI span types AutoGen emits onto canonical events:
 The ``create_agent`` span is ignored: agent construction does not
 emit a canonical event in our model.
 
+Token usage is not on the spans. AutoGen's model clients log an
+``LLMCallEvent`` (or ``LLMStreamEndEvent``) per call to the
+``autogen_core.events`` logger, which is below INFO by default. The
+adapter lowers that logger to INFO and adds a filter that records the
+usage and lets through only the records the logger emitted before, so
+the user's log output does not change.
+
 Limitations:
 
 * ``enforce=True`` is observation-only on this adapter. OTel spans are
@@ -44,12 +51,16 @@ Usage::
 from __future__ import annotations
 
 import logging
+import threading
 import warnings
+import weakref
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.core.evaluator import IntegrityEvaluator
 from agentegrity.core.profile import AgentProfile
+from agentegrity.core.usage import TokenUsage
 
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
@@ -70,6 +81,40 @@ _GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id"
 
 _OP_INVOKE_AGENT = "invoke_agent"
 _OP_EXECUTE_TOOL = "execute_tool"
+
+# AutoGen's EVENT_LOGGER_NAME, hard-coded so this module imports without autogen.
+_EVENT_LOGGER = "autogen_core.events"
+_LLM_EVENTS = frozenset({"LLMCallEvent", "LLMStreamEndEvent"})
+
+
+class _UsageFilter(logging.Filter):
+    """Record LLM call usage for every live adapter; pass on only what the logger emitted before.
+
+    One filter per process: a logger stops at the first filter that drops a
+    record, so a filter per adapter would starve every adapter after the
+    first. ``pass_level`` is the logger's effective level before it was
+    lowered; ``saved_level`` is its own level to restore, or None when it
+    was not changed.
+    """
+
+    def __init__(self, pass_level: int, saved_level: int | None) -> None:
+        super().__init__()
+        self.adapters: weakref.WeakSet[AutoGenAdapter] = weakref.WeakSet()
+        self.pass_level = pass_level
+        self.saved_level = saved_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if type(record.msg).__name__ in _LLM_EVENTS:
+            for adapter in list(self.adapters):
+                try:
+                    adapter._record_llm_event(record.msg)
+                except Exception as exc:
+                    logger.warning("usage capture failed: %s", exc)
+        return record.levelno >= self.pass_level
+
+
+_usage_filter: _UsageFilter | None = None
+_usage_filter_lock = threading.Lock()
 
 
 class AutoGenAdapter(_BaseAdapter):
@@ -112,6 +157,7 @@ class AutoGenAdapter(_BaseAdapter):
             ) from None
 
         adapter = self
+        self._capture_usage()
 
         # The lazy import above makes _SpanProcessor a real class at
         # runtime, but mypy can't see that when opentelemetry-sdk isn't
@@ -172,6 +218,60 @@ class AutoGenAdapter(_BaseAdapter):
                 )
             trace.set_tracer_provider(tracer_provider)
         return tracer_provider
+
+    def close(self) -> None:
+        """End the session and stop capturing usage from AutoGen's event logger."""
+        global _usage_filter
+        super().close()
+        with _usage_filter_lock:
+            if _usage_filter is None:
+                return
+            _usage_filter.adapters.discard(self)
+            if _usage_filter.adapters:
+                return
+            events_logger = logging.getLogger(_EVENT_LOGGER)
+            events_logger.removeFilter(_usage_filter)
+            if _usage_filter.saved_level is not None:
+                events_logger.setLevel(_usage_filter.saved_level)
+            _usage_filter = None
+
+    def _capture_usage(self) -> None:
+        """Start recording usage from AutoGen's LLM call events (idempotent)."""
+        global _usage_filter
+        with _usage_filter_lock:
+            if _usage_filter is None:
+                events_logger = logging.getLogger(_EVENT_LOGGER)
+                pass_level = events_logger.getEffectiveLevel()
+                saved_level = events_logger.level if pass_level > logging.INFO else None
+                _usage_filter = _UsageFilter(pass_level, saved_level)
+                if saved_level is not None:
+                    events_logger.setLevel(logging.INFO)
+                events_logger.addFilter(_usage_filter)
+            _usage_filter.adapters.add(self)
+
+    def _record_llm_event(self, event: Any) -> None:
+        """Count one model call; Anthropic responses leave the cache out of prompt_tokens."""
+        prompt = _int(getattr(event, "prompt_tokens", 0))
+        completion = _int(getattr(event, "completion_tokens", 0))
+        response = _dict((getattr(event, "kwargs", None) or {}).get("response"))
+        raw = _dict(response.get("usage"))
+        cache_read = cache_write = reasoning = None
+        if "cache_read_input_tokens" in raw or "cache_creation_input_tokens" in raw:
+            cache_read = _int(raw.get("cache_read_input_tokens"))
+            cache_write = _int(raw.get("cache_creation_input_tokens"))
+            prompt += cache_read + cache_write
+        elif "prompt_tokens_details" in raw:
+            cache_read = _int(_dict(raw["prompt_tokens_details"]).get("cached_tokens"))
+        if "completion_tokens_details" in raw:
+            reasoning = _int(_dict(raw["completion_tokens_details"]).get("reasoning_tokens"))
+        model = response.get("model")
+        self.record_usage(
+            f"autogen:{uuid4().hex}", model if isinstance(model, str) else None,
+            TokenUsage(input_tokens=prompt, output_tokens=completion,
+                       cache_read_tokens=cache_read, cache_write_tokens=cache_write,
+                       reasoning_tokens=reasoning),
+            source="provider_response",
+        )
 
     # --- Internal span -> event mapping ---
 
@@ -313,3 +413,11 @@ class AutoGenAdapter(_BaseAdapter):
                 created_at=new_topology.created_at,
             )
         self.set_topology(new_topology, my_role=AgentRole.PEER)
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
