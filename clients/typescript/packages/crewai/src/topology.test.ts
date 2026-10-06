@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { AgentRole, TopologyKind } from "@agentegrity/client";
 import { adapter, instrument, reset } from "./index.js";
 
+const bus = { on: () => () => {} };
+
 describe("CrewAI adapter — instrument({ crew }) topology", () => {
   it("sequential crew → HUB_SPOKE", () => {
     reset();
@@ -18,7 +20,7 @@ describe("CrewAI adapter — instrument({ crew }) topology", () => {
       ],
       process: "sequential",
     };
-    instrument({ crew });
+    instrument(bus, { crew });
     const t = adapter().topology;
     assert.ok(t);
     assert.equal(t.kind, TopologyKind.HUB_SPOKE);
@@ -34,7 +36,7 @@ describe("CrewAI adapter — instrument({ crew }) topology", () => {
       agents: [{ role: "manager" }, { role: "worker" }],
       process: "hierarchical",
     };
-    instrument({ crew });
+    instrument(bus, { crew });
     const t = adapter().topology;
     assert.ok(t);
     assert.equal(t.kind, TopologyKind.HIERARCHICAL_DAG);
@@ -42,7 +44,7 @@ describe("CrewAI adapter — instrument({ crew }) topology", () => {
 
   it("instrument() without crew → no topology", () => {
     reset();
-    instrument();
+    instrument(bus);
     assert.equal(adapter().topology, null);
   });
 
@@ -52,7 +54,7 @@ describe("CrewAI adapter — instrument({ crew }) topology", () => {
       agents: [{ role: "lead" }, { role: "m1" }, { role: "m2" }],
       process: "sequential",
     };
-    instrument({ crew });
+    instrument(bus, { crew });
     const t = adapter().topology;
     assert.ok(t);
     const lead = t.member("lead");

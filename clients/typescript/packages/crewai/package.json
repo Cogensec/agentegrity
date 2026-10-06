@@ -1,7 +1,7 @@
 {
   "name": "@agentegrity/crewai",
   "version": "0.11.0",
-  "description": "Zero-config agentegrity adapter for CrewAI JS. Mirrors the Python agentegrity.crewai module.",
+  "description": "Zero-config agentegrity adapter for CrewAI TypeScript (@crewai-ts/core). Mirrors the Python agentegrity.crewai module.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -34,10 +34,19 @@
   "dependencies": {
     "@agentegrity/client": "0.11.0"
   },
+  "peerDependencies": {
+    "@crewai-ts/core": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@crewai-ts/core": {
+      "optional": true
+    }
+  },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "@crewai-ts/core": "^0.2.6",
+    "@types/node": "^20.0.0",
     "tsx": "^4.7.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.4.0"
   },
   "engines": {
     "node": ">=18"

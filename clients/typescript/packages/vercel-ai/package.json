@@ -36,7 +36,7 @@
     "@agentegrity/client": "0.11.0"
   },
   "peerDependencies": {
-    "ai": ">=3.0.0"
+    "ai": ">=3.4.10"
   },
   "peerDependenciesMeta": {
     "ai": {
@@ -44,9 +44,13 @@
     }
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "ai": "^6.0.0",
+    "ai5": "npm:ai@^5.0.0",
+    "ai7": "npm:ai@^7.0.0",
     "tsx": "^4.7.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.4.0",
+    "zod": "^4"
   },
   "engines": {
     "node": ">=18"

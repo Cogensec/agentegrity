@@ -38,6 +38,10 @@ Environment variables:
 | `AGENTEGRITY_TOKEN` | _(none)_ | Bearer token |
 | `AGENTEGRITY_DISABLED` | _(unset)_ | Set to `1` to no-op the handler |
 
+## Token usage
+
+Each model call's `usage_metadata` is recorded in `handleLLMEnd`, keyed by run id so a handler attached at more than one level counts the call once, and sent on every `stop` event and in the session summary. LangChain's input count already includes cached tokens; cache, reasoning and service-tier-prefixed detail keys are included. A chain is top level when LangChain gives it no parent run, so nested chains and graph nodes do not emit their own `stop`.
+
 ## API
 
 | Function | Returns |

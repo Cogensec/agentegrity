@@ -12,15 +12,24 @@ npm i @agentegrity/claude-sdk @anthropic-ai/claude-agent-sdk
 ## Use
 
 ```ts
-import { ClaudeSDKClient } from "@anthropic-ai/claude-agent-sdk";
-import { hooks, report } from "@agentegrity/claude-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { hooks, observe, report } from "@agentegrity/claude-sdk";
 
-const client = new ClaudeSDKClient({ hooks: hooks() });
-// ... run your agent ...
+for await (const message of query({ prompt: "...", options: { hooks: hooks() } })) {
+  observe(message); // optional: exact token totals
+}
 console.log(await report());
 ```
 
-That's the full integration — three lines.
+`hooks()` returns the SDK's `Options["hooks"]` shape: one matcher per event
+(`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+`SubagentStart`, `SubagentStop`, `PreCompact`, `Stop`), each letting the SDK
+continue.
+
+Token usage is read from the session transcript the hooks name, and from
+each subagent's transcript, at every `Stop`. Only usage counts, request ids
+and model names are kept. Passing each message to `observe()` replaces that
+estimate with the SDK's own `modelUsage` totals, which include subagents.
 
 ## Config
 
@@ -42,7 +51,8 @@ Environment variables:
 
 | Function | Returns |
 |---|---|
-| `hooks(options?)` | Hook object for `ClaudeSDKClient({ hooks })` |
+| `hooks(options?)` | `Options["hooks"]` for `query()` |
+| `observe(message)` | Records exact usage from `result` messages (optional) |
 | `report()` | Session summary snapshot |
 | `reset()` | Discard the module-global adapter |
 | `registerExporter(exporter)` | Subscribe an additional `SessionExporter` |

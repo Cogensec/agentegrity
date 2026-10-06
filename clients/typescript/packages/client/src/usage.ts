@@ -91,6 +91,12 @@ export class UsageLedger {
     }
   }
 
+  /** Forget every entry and gap, for a fresh session. */
+  clear(): void {
+    this.entries.clear();
+    this.gap = false;
+  }
+
   /** Flag a known gap: calls happened that no source can account for. */
   markIncomplete(): void {
     this.gap = true;

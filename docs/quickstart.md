@@ -81,8 +81,8 @@ Exporter exceptions are caught and logged — the exporter can never break the i
 ```bash
 npm i @agentegrity/claude-sdk      # Claude Agent SDK — options.hooks = hooks()
 npm i @agentegrity/langchain       # LangChain JS — callbacks: [instrument()]
-npm i @agentegrity/openai-agents   # OpenAI Agents SDK — run(..., { hooks: runHooks() })
-npm i @agentegrity/crewai          # CrewAI JS — instrument().attach(crew.events)
+npm i @agentegrity/openai-agents   # OpenAI Agents SDK: instrument(new Runner())
+npm i @agentegrity/crewai          # CrewAI TypeScript: instrument(crewaiEventBus, { crew })
 npm i @agentegrity/google-adk      # Google ADK — instrument(agent)
 npm i @agentegrity/vercel-ai       # Vercel AI SDK — experimental_telemetry: instrument()
 ```

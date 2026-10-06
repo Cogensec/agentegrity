@@ -13,17 +13,28 @@ npm i @agentegrity/openai-agents @openai/agents
 
 ```ts
 import { Agent, Runner } from "@openai/agents";
-import { runHooks, report } from "@agentegrity/openai-agents";
+import { instrument, report } from "@agentegrity/openai-agents";
 
-await Runner.run(agent, "hello", { hooks: runHooks() });
+const runner = instrument(new Runner());
+await runner.run(agent, "hello");
 console.log(await report());
 ```
+
+The adapter listens on the runner's lifecycle events (`agent_start`,
+`agent_tool_start`, `agent_tool_end`, `agent_handoff`, `agent_end`). The
+SDK's `run()` helper uses an internal runner, so create a `Runner` to
+instrument it.
+
+Token usage is read from the run's shared `Usage`, one entry per model
+request, and sent on every `stop` event and in the session summary. Calls
+made by agents run as tools share that `Usage` and are counted too.
 
 ## API
 
 | Function | Returns |
 |---|---|
-| `runHooks(options?)` | Hook object for `Runner.run(..., { hooks })` |
+| `instrument(runner, options?)` | Listens on a `Runner`'s events; returns the runner |
+| `flush()` | Waits until every event received so far has been handled |
 | `report()` | Session summary snapshot |
 | `reset()` | Discard the module-global adapter |
 | `registerExporter(exporter)` | Subscribe an additional `SessionExporter` |

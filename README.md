@@ -408,15 +408,16 @@ await new ChatAnthropic({ callbacks: [instrument()] }).invoke("hi");
 
 **OpenAI Agents SDK:**
 ```ts
-import { Agent, run } from "@openai/agents";
-import { runHooks } from "@agentegrity/openai-agents";
-await run(agent, "hi", { hooks: runHooks() });
+import { Runner } from "@openai/agents";
+import { instrument } from "@agentegrity/openai-agents";
+await instrument(new Runner()).run(agent, "hi");
 ```
 
-**CrewAI JS:**
+**CrewAI TypeScript** (`@crewai-ts/core`, Node 22+):
 ```ts
+import { crewaiEventBus } from "@crewai-ts/core";
 import { instrument } from "@agentegrity/crewai";
-instrument().attach(crew.events);
+const close = instrument(crewaiEventBus, { crew });
 ```
 
 **Google ADK:**
@@ -430,6 +431,7 @@ const close = instrument(agent);
 import { streamText } from "ai";
 import { instrument } from "@agentegrity/vercel-ai";
 await streamText({ model, prompt: "hi", experimental_telemetry: instrument() });
+// AI SDK 7 dropped the tracer option: registerTelemetry(telemetry()) once at startup.
 ```
 
 **Multi-agent in TypeScript (v0.8+).** The TS adapters mirror the Python multi-agent surface: `@agentegrity/client` ships `AgentTopology` / `AgentMember` / `AgentRole` / `TopologyKind` / `Evidence` types with a cross-runtime SHA-256 `contentHash()` that matches Python byte-for-byte. Each adapter declares topology at the right discovery point:
@@ -440,11 +442,11 @@ import { instrumentGraph } from "@agentegrity/langchain";
 instrumentGraph(compiledGraph);
 
 // OpenAI Agents JS — seeds PEER_TO_PEER on first agent, grows on each handoff
-// (no extra call: runHooks() already does this when used with handoffs)
+// (no extra call: instrument(runner) already does this when used with handoffs)
 
-// CrewAI JS — instrument({ crew }) walks crew.agents
+// CrewAI TypeScript: the crew option walks crew.agents
 import { instrument } from "@agentegrity/crewai";
-instrument({ crew });
+instrument(crewaiEventBus, { crew });
 
 // Google ADK JS — walks agent.subAgents (or sub_agents)
 import { instrument } from "@agentegrity/google-adk";
