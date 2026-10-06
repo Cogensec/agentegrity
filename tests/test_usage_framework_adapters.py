@@ -30,7 +30,12 @@ def _usage(adapter: _BaseAdapter) -> dict[str, Any]:
 
 
 def _needs(package: str) -> pytest.MarkDecorator:
-    return pytest.mark.skipif(find_spec(package) is None, reason=f"{package} not installed")
+    # find_spec imports a dotted name's parent, which raises when it is missing.
+    try:
+        installed = find_spec(package) is not None
+    except ModuleNotFoundError:
+        installed = False
+    return pytest.mark.skipif(not installed, reason=f"{package} not installed")
 
 
 @_needs("agents")
