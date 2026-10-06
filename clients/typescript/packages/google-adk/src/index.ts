@@ -1,27 +1,35 @@
 /**
  * `@agentegrity/google-adk` — zero-config adapter for the Google Agent
- * Development Kit (ADK) JS. Mirrors the Python
- * `agentegrity.google_adk` module 1:1.
- *
- * Google ADK JS exposes a plugin / callback registration API on
- * `Agent` and `Runner`. This package provides a single `instrument(agent)`
- * function that wires agentegrity callbacks into the agent's lifecycle
- * without coupling to a specific ADK version.
- *
- * Usage:
+ * Development Kit for TypeScript (`@google/adk`).
  *
  * ```ts
- * import { Agent, Runner } from "@google/adk";
+ * import { InMemoryRunner, LlmAgent } from "@google/adk";
  * import { instrument, report } from "@agentegrity/google-adk";
  *
- * const agent = new Agent({ name: "my-agent" });
- * instrument(agent);
- * const runner = new Runner(agent);
- * await runner.run({ input: "hello" });
+ * const agent = new LlmAgent({ name: "my-agent", model: "gemini-2.5-flash" });
+ * const close = instrument(agent);
+ * const runner = new InMemoryRunner({ agent, appName: "app" });
+ * // ... runner.runAsync({ userId, sessionId, newMessage }) ...
+ * await close();
  * console.log(await report());
  * ```
+ *
+ * `instrument()` adds callbacks to the agent and to every agent reachable
+ * from it (`subAgents`, and agents wrapped as tools), ahead of any callbacks
+ * already set. ADK stops at the first callback that returns a value; these
+ * return nothing, so the user's callbacks still run and decide.
+ *
+ * Event mapping:
+ *
+ *   beforeAgentCallback  -> user_prompt_submit (instrumented agent)
+ *                           subagent_start (any other agent)
+ *   afterAgentCallback   -> stop / subagent_stop
+ *   beforeToolCallback   -> pre_tool_use
+ *   afterToolCallback    -> post_tool_use
+ *   afterModelCallback   -> token usage (final responses; partials skipped)
  */
 
+import { randomUUID } from "node:crypto";
 import {
   AgentMember,
   AgentRole,
@@ -32,6 +40,7 @@ import {
   type DefaultAdapter,
   type SessionExporter,
   type SessionSummary,
+  type TokenUsage,
 } from "@agentegrity/client";
 
 /**
@@ -78,116 +87,137 @@ function maybeDeclareWorkflowTopology(
   void ad.setTopology(topology, AgentRole.SUPERVISOR);
 }
 
+
+type Context = {
+  eventActions?: object;
+  invocationContext?: { agent?: { name?: string; canonicalModel?: { model?: unknown } } };
+};
+type Callback = (...args: any[]) => unknown;
+type Usage = Record<string, unknown>;
+
+/** The parts of an ADK agent the adapter touches. */
+export interface AdkAgentLike {
+  name?: string;
+  subAgents?: unknown[];
+  sub_agents?: unknown[];
+  tools?: unknown[];
+  beforeAgentCallback?: Callback[];
+  afterAgentCallback?: Callback[];
+  beforeToolCallback?: Callback | Callback[];
+  afterToolCallback?: Callback | Callback[];
+  afterModelCallback?: Callback | Callback[];
+  [k: string]: unknown;
+}
+
+const instrumented = new WeakSet<object>();
+const callKeys = new WeakMap<object, string>();
+
+function prepend(existing: Callback | Callback[] | undefined, ours: Callback): Callback[] {
+  return [ours, ...(Array.isArray(existing) ? existing : existing ? [existing] : [])];
+}
+
+function count(usage: Usage, key: string): number | null {
+  const value = usage[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Normalize Gemini usage metadata: the prompt count already includes cached
+ * tokens; tool-use prompt and thinking tokens are reported beside it.
+ */
+function modelUsage(usage: Usage): TokenUsage {
+  const thoughts = count(usage, "thoughtsTokenCount");
+  return {
+    input_tokens: (count(usage, "promptTokenCount") ?? 0) + (count(usage, "toolUsePromptTokenCount") ?? 0),
+    output_tokens: (count(usage, "candidatesTokenCount") ?? 0) + (thoughts ?? 0),
+    cache_read_tokens: count(usage, "cachedContentTokenCount"),
+    reasoning_tokens: thoughts,
+  };
+}
+
+function nameOf(agent: unknown): string {
+  return String((agent as { name?: string } | null)?.name ?? "agent");
+}
+
+/** Agents reachable from `root`: sub-agents and agents wrapped as tools. */
+function reachable(root: AdkAgentLike): AdkAgentLike[] {
+  const found: AdkAgentLike[] = [];
+  const visit = (agent: unknown) => {
+    if (!agent || typeof agent !== "object" || found.includes(agent as AdkAgentLike)) return;
+    found.push(agent as AdkAgentLike);
+    const a = agent as AdkAgentLike;
+    for (const sub of a.subAgents ?? a.sub_agents ?? []) visit(sub);
+    for (const tool of a.tools ?? []) visit((tool as { agent?: unknown } | null)?.agent);
+  };
+  visit(root);
+  return found;
+}
+
+function attach(agent: AdkAgentLike, ad: DefaultAdapter, isRoot: boolean): void {
+  if (instrumented.has(agent)) return;
+  instrumented.add(agent);
+  if (Array.isArray(agent.beforeAgentCallback)) {
+    agent.beforeAgentCallback.unshift(async (context: Context) => {
+      const name = nameOf(context?.invocationContext?.agent ?? agent);
+      await ad.emit(isRoot
+        ? { event_type: "user_prompt_submit", data: { agent: name } }
+        : { event_type: "subagent_start", data: { agent_id: name } });
+      return undefined;
+    });
+  }
+  if (Array.isArray(agent.afterAgentCallback)) {
+    agent.afterAgentCallback.unshift(async () => {
+      await ad.emit(isRoot
+        ? { event_type: "stop", data: { agent: nameOf(agent) } }
+        : { event_type: "subagent_stop", data: { agent_id: nameOf(agent) } });
+      return undefined;
+    });
+  }
+  // Workflow agents have no model or tool callbacks and reject unknown fields.
+  if (!("afterModelCallback" in agent)) return;
+  agent.beforeToolCallback = prepend(agent.beforeToolCallback, async ({ tool, args }: { tool: unknown; args: unknown }) => {
+    await ad.emit({ event_type: "pre_tool_use", data: { tool_name: nameOf(tool), tool_input: args ?? {} } });
+    return undefined;
+  });
+  agent.afterToolCallback = prepend(agent.afterToolCallback, async ({ tool, response }: { tool: unknown; response: unknown }) => {
+    await ad.emit({ event_type: "post_tool_use", data: { tool_name: nameOf(tool), tool_response: response } });
+    return undefined;
+  });
+  agent.afterModelCallback = prepend(agent.afterModelCallback, ({ context, response }: { context: Context; response: { partial?: boolean; usageMetadata?: Usage } }) => {
+    const usage = response?.usageMetadata;
+    if (!usage || response.partial === true) return undefined;
+    // Every response of one model call shares its eventActions, so the last one wins.
+    const call = context?.eventActions ?? response;
+    let key = callKeys.get(call);
+    if (!key) callKeys.set(call, (key = `google-adk:${randomUUID()}`));
+    const model = context?.invocationContext?.agent?.canonicalModel?.model;
+    ad.recordUsage(key, typeof model === "string" ? model : null, modelUsage(usage), { source: "provider_response" });
+    return undefined;
+  });
+}
+
 let _default: DefaultAdapter | null = null;
 
 function defaultAdapter(): DefaultAdapter {
-  if (_default === null) {
-    _default = createDefaultAdapter({ adapterName: "google_adk" });
-  }
+  if (_default === null) _default = createDefaultAdapter({ adapterName: "google_adk" });
   return _default;
 }
 
 export interface InstrumentOptions {
   profile?: Partial<AgentProfile>;
-  enforce?: boolean;
 }
 
 /**
- * Any object that exposes a subset of the Google ADK Agent hook-
- * registration methods. Methods we call are duck-typed so this adapter
- * works across ADK JS 0.x versions without importing the SDK.
+ * Add agentegrity callbacks to an ADK agent and every agent reachable from
+ * it. Instrumenting an agent again is a no-op. Returns a function that ends
+ * the session.
  */
-export interface AdkAgentLike {
-  addBeforeAgentCallback?(fn: (...args: unknown[]) => unknown): void;
-  addAfterAgentCallback?(fn: (...args: unknown[]) => unknown): void;
-  addBeforeToolCallback?(fn: (...args: unknown[]) => unknown): void;
-  addAfterToolCallback?(fn: (...args: unknown[]) => unknown): void;
-  addPlugin?(plugin: Record<string, unknown>): void;
-  on?(event: string, listener: (...args: unknown[]) => void): unknown;
-  [k: string]: unknown;
-}
-
-/**
- * Wire agentegrity callbacks into a Google ADK Agent. Safe to call
- * multiple times — subsequent calls on the same agent are no-ops.
- *
- * Returns a cleanup function that fires `session_end` when called.
- */
-export function instrument(
-  agent: AdkAgentLike,
-  options: InstrumentOptions = {},
-): () => Promise<void> {
+export function instrument(agent: AdkAgentLike, options: InstrumentOptions = {}): () => Promise<void> {
   const ad = options.profile
     ? createDefaultAdapter({ adapterName: "google_adk", profile: options.profile })
     : defaultAdapter();
-
-  // v0.8: declare HIERARCHICAL_DAG topology when sub_agents present.
-  maybeDeclareWorkflowTopology(
-    agent as { sub_agents?: unknown; subAgents?: unknown; name?: string; [k: string]: unknown },
-    ad,
-  );
-
-  if ((agent as { __agentegrityAttached?: boolean }).__agentegrityAttached) {
-    return async () => {
-      await ad.end();
-    };
-  }
-  (agent as { __agentegrityAttached?: boolean }).__agentegrityAttached = true;
-
-  const beforeAgent = async (ctx: unknown) => {
-    await ad.emit({ event_type: "user_prompt_submit", data: { context: ctx } });
-  };
-  const afterAgent = async (ctx: unknown) => {
-    await ad.emit({ event_type: "stop", data: { context: ctx } });
-  };
-  const beforeTool = async (tool: unknown, args: unknown) => {
-    const t = (tool ?? {}) as { name?: string };
-    await ad.emit({
-      event_type: "pre_tool_use",
-      data: { tool_name: t.name ?? "unknown", tool_input: args },
-    });
-  };
-  const afterTool = async (tool: unknown, result: unknown) => {
-    const t = (tool ?? {}) as { name?: string };
-    await ad.emit({
-      event_type: "post_tool_use",
-      data: { tool_name: t.name ?? "unknown", tool_response: result },
-    });
-  };
-
-  // Try the primary callback-registration API.
-  if (typeof agent.addBeforeAgentCallback === "function") {
-    agent.addBeforeAgentCallback(beforeAgent);
-  }
-  if (typeof agent.addAfterAgentCallback === "function") {
-    agent.addAfterAgentCallback(afterAgent);
-  }
-  if (typeof agent.addBeforeToolCallback === "function") {
-    agent.addBeforeToolCallback(beforeTool);
-  }
-  if (typeof agent.addAfterToolCallback === "function") {
-    agent.addAfterToolCallback(afterTool);
-  }
-
-  // Fallback — EventEmitter-style API.
-  if (typeof agent.on === "function") {
-    agent.on("agent:start", beforeAgent);
-    agent.on("agent:end", afterAgent);
-    agent.on("tool:start", (tool: unknown, args: unknown) => void beforeTool(tool, args));
-    agent.on("tool:end", (tool: unknown, result: unknown) => void afterTool(tool, result));
-  }
-
-  // Fallback — plugin-registration API.
-  if (typeof agent.addPlugin === "function") {
-    agent.addPlugin({
-      name: "agentegrity",
-      beforeAgent,
-      afterAgent,
-      beforeTool,
-      afterTool,
-    });
-  }
-
+  maybeDeclareWorkflowTopology(agent, ad);
+  for (const reached of reachable(agent)) attach(reached, ad, reached === agent);
   return async () => {
     await ad.end();
   };
