@@ -1,17 +1,19 @@
 """
 Google Agent Development Kit (ADK) adapter for agentegrity.
 
-Instruments ``google.adk`` ``LlmAgent``/``Agent`` instances by attaching
-the six callback hooks ADK exposes on ``Agent``:
+Instruments ``google.adk`` agents by putting callbacks ahead of the
+user's on the agent and on every agent reachable from it (``sub_agents``,
+and agents wrapped in an ``AgentTool``):
 
-    before_agent_callback  -> user_prompt_submit
-    after_agent_callback   -> stop
+    before_agent_callback  -> user_prompt_submit (instrumented agent)
+                              subagent_start (any other agent)
+    after_agent_callback   -> stop / subagent_stop
     before_tool_callback   -> pre_tool_use
     after_tool_callback    -> post_tool_use
     after_model_callback   -> token usage (final responses; partial chunks skipped)
 
-Sub-agent handoffs through ``AgentTool`` fire ``before_agent_callback``
-with a non-root invocation context; we map those to ``subagent_start``.
+ADK does not run an agent's after-agent callbacks once it has transferred
+to another agent, so a run that ends in a transfer reports no ``stop``.
 
 Limitation: this adapter is fundamentally observation-only. ADK's
 ``before_*`` callbacks expose no return-value or exception-signaling
@@ -57,6 +59,7 @@ class GoogleADKAdapter(_BaseAdapter):
         api_key: str | None = None,
     ) -> None:
         super().__init__(profile, evaluator, enforce, api_key)
+        self._instrumented: list[Any] = []
         if enforce:
             warnings.warn(
                 "GoogleADKAdapter is observation-only: ADK before_* callbacks "
@@ -71,75 +74,19 @@ class GoogleADKAdapter(_BaseAdapter):
     def instrument(self, agent: Any) -> Any:
         """Attach agentegrity callbacks to a Google ADK agent.
 
-        Mutates the passed agent's ``before_*`` / ``after_*`` callback
-        attributes and returns it for chaining. If the agent already has
-        user-supplied callbacks, agentegrity chains onto them — original
-        callbacks still fire.
+        Callbacks go on the agent and on every agent reachable from it
+        (``sub_agents``, and agents wrapped in an ``AgentTool``), ahead of
+        any callbacks already set. ADK stops at the first callback that
+        returns a value; these return nothing, so the user's callbacks still
+        run and decide. Instrumenting an agent again is a no-op. Returns the
+        agent for chaining.
         """
-        adapter = self
-
-        def _wrap(existing: Any, fn: Any) -> Any:
-            if existing is None:
-                return fn
-
-            def _chained(*args: Any, **kwargs: Any) -> Any:
-                try:
-                    fn(*args, **kwargs)
-                except Exception as exc:
-                    logger.warning("google_adk agentegrity callback failed: %s", exc)
-                return existing(*args, **kwargs)
-
-            return _chained
-
-        def _before_agent(callback_context: Any) -> None:
-            parent = getattr(callback_context, "parent", None)
-            if parent is None:
-                prompt = str(getattr(callback_context, "user_content", "") or "")
-                adapter._dispatch("user_prompt_submit", {"prompt": prompt})
-            else:
-                adapter._dispatch(
-                    "subagent_start",
-                    {"agent_id": getattr(callback_context, "agent_name", "") or ""},
-                )
-
-        def _after_agent(callback_context: Any) -> None:
-            parent = getattr(callback_context, "parent", None)
-            if parent is None:
-                adapter._dispatch("stop", {})
-
-        def _before_tool(tool: Any, args: Any, tool_context: Any) -> None:
-            tool_name = getattr(tool, "name", str(tool))
-            adapter._dispatch(
-                "pre_tool_use",
-                {"tool_name": tool_name, "tool_input": dict(args) if args else {}},
-            )
-
-        def _after_model(callback_context: Any, llm_response: Any) -> None:
-            adapter._record_model_response(agent, llm_response)
-
-        def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
-            tool_name = getattr(tool, "name", str(tool))
-            adapter._dispatch(
-                "post_tool_use",
-                {"tool_name": tool_name, "tool_response": str(tool_response)},
-            )
-
         try:
-            agent.before_agent_callback = _wrap(
-                getattr(agent, "before_agent_callback", None), _before_agent
-            )
-            agent.after_agent_callback = _wrap(
-                getattr(agent, "after_agent_callback", None), _after_agent
-            )
-            agent.before_tool_callback = _wrap(
-                getattr(agent, "before_tool_callback", None), _before_tool
-            )
-            agent.after_tool_callback = _wrap(
-                getattr(agent, "after_tool_callback", None), _after_tool
-            )
-            # Workflow agents have no model callback and reject unknown fields.
-            if hasattr(agent, "after_model_callback"):
-                agent.after_model_callback = _wrap(agent.after_model_callback, _after_model)
+            for reached in _reachable(agent):
+                # ADK agents are unhashable, so instrumented agents are matched by identity.
+                if not any(reached is done for done in self._instrumented):
+                    self._attach(reached, is_root=reached is agent)
+                    self._instrumented.append(reached)
         except Exception as exc:
             raise ImportError(
                 "google-adk is required for the Google ADK adapter, or the "
@@ -152,6 +99,51 @@ class GoogleADKAdapter(_BaseAdapter):
         # topology. Plain Agent without sub_agents stays single-agent.
         self._maybe_declare_workflow_topology(agent)
         return agent
+
+    def _attach(self, agent: Any, is_root: bool) -> None:
+        """Put this adapter's callbacks first on one agent."""
+        name = str(getattr(agent, "name", "") or "")
+        adapter = self
+
+        def _before_agent(callback_context: Any) -> None:
+            if is_root:
+                prompt = str(getattr(callback_context, "user_content", "") or "")
+                adapter._dispatch("user_prompt_submit", {"prompt": prompt})
+            else:
+                adapter._dispatch("subagent_start", {"agent_id": name})
+
+        def _after_agent(callback_context: Any) -> None:
+            if is_root:
+                adapter._dispatch("stop", {})
+            else:
+                adapter._dispatch("subagent_stop", {"agent_id": name})
+
+        def _before_tool(tool: Any, args: Any, tool_context: Any) -> None:
+            adapter._dispatch("pre_tool_use", {
+                "tool_name": getattr(tool, "name", str(tool)),
+                "tool_input": dict(args) if args else {},
+            })
+
+        def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
+            adapter._dispatch("post_tool_use", {
+                "tool_name": getattr(tool, "name", str(tool)),
+                "tool_response": str(tool_response),
+            })
+
+        def _after_model(callback_context: Any, llm_response: Any) -> None:
+            adapter._record_model_response(agent, llm_response)
+
+        agent.before_agent_callback = _prepend(
+            getattr(agent, "before_agent_callback", None), _before_agent)
+        agent.after_agent_callback = _prepend(
+            getattr(agent, "after_agent_callback", None), _after_agent)
+        # Workflow agents have no tool or model callbacks and reject unknown fields.
+        if hasattr(agent, "before_tool_callback"):
+            agent.before_tool_callback = _prepend(agent.before_tool_callback, _before_tool)
+            agent.after_tool_callback = _prepend(
+                getattr(agent, "after_tool_callback", None), _after_tool)
+        if hasattr(agent, "after_model_callback"):
+            agent.after_model_callback = _prepend(agent.after_model_callback, _after_model)
 
     def _record_model_response(self, agent: Any, response: Any) -> None:
         """Count one model call from its final response; streamed partials are skipped.
@@ -226,3 +218,46 @@ def _optional(source: Any, name: str) -> int | None:
 
 def _count(source: Any, name: str) -> int:
     return _optional(source, name) or 0
+
+
+def _safe(fn: Any) -> Any:
+    """Run an agentegrity callback without ever failing the agent's run."""
+    def _callback(*args: Any, **kwargs: Any) -> None:
+        try:
+            fn(*args, **kwargs)
+        except Exception as exc:
+            logger.warning("google_adk agentegrity callback failed: %s", exc)
+    return _callback
+
+
+def _prepend(existing: Any, fn: Any) -> Any:
+    """Run ``fn`` ahead of the callback, or list of callbacks, already set.
+
+    ``fn`` returns nothing, so whatever the user's callbacks return still
+    decides, as ADK takes the first value a callback returns.
+    """
+    ours = _safe(fn)
+    if existing is None:
+        return ours
+    if isinstance(existing, (list, tuple)):
+        return [ours, *existing]
+
+    def _chained(*args: Any, **kwargs: Any) -> Any:
+        ours(*args, **kwargs)
+        return existing(*args, **kwargs)
+
+    return _chained
+
+
+def _reachable(root: Any) -> list[Any]:
+    """The agent, its sub-agents, and agents wrapped as tools, transitively."""
+    found: list[Any] = []
+    pending = [root]
+    while pending:
+        agent = pending.pop()
+        if agent is None or any(agent is seen for seen in found):
+            continue
+        found.append(agent)
+        pending.extend(getattr(agent, "sub_agents", None) or [])
+        pending.extend(getattr(tool, "agent", None) for tool in getattr(agent, "tools", None) or [])
+    return found
