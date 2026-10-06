@@ -159,6 +159,12 @@
         },
         "data": {
           "type": "object",
+          "properties": {
+            "usage": {
+              "$ref": "#/$defs/SessionUsage",
+              "description": "On stop events: the session's usage so far."
+            }
+          },
           "additionalProperties": true
         },
         "evaluation_result": {
@@ -255,9 +261,131 @@
               }
             }
           }
+        },
+        "usage": {
+          "$ref": "#/$defs/SessionUsage"
         }
       },
       "additionalProperties": true
+    },
+    "TokenUsage": {
+      "type": "object",
+      "description": "Token counts normalized across frameworks: cache and reasoning counts are parts of input and output, never added to them.",
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens"
+      ],
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Every input token processed, cached or not."
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Every generated token, reasoning included."
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "input_tokens + output_tokens."
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Part of input_tokens read from a prompt cache. Absent when no source reported it."
+        },
+        "cache_write_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Part of input_tokens written to a prompt cache. Absent when no source reported it."
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Part of output_tokens spent on reasoning. Absent when no source reported it."
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Model calls counted. Absent when the source reports running totals without a call count."
+        }
+      },
+      "additionalProperties": false
+    },
+    "SessionUsage": {
+      "type": "object",
+      "description": "Running token usage for a session: overall, per model, and how it was measured.",
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "complete",
+        "sources",
+        "by_model"
+      ],
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Every input token processed, cached or not."
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Every generated token, reasoning included."
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "input_tokens + output_tokens."
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Part of input_tokens read from a prompt cache. Absent when no source reported it."
+        },
+        "cache_write_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Part of input_tokens written to a prompt cache. Absent when no source reported it."
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Part of output_tokens spent on reasoning. Absent when no source reported it."
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Model calls counted. Absent when the source reports running totals without a call count."
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "False when calls are known to be missing (a transcript that starts after compaction, a request without its final usage line, an estimate from running totals), so the totals are a lower bound."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "transcript",
+              "provider_response",
+              "trace"
+            ]
+          },
+          "description": "Where the counts came from: a host transcript, the framework's model response, or a framework trace."
+        },
+        "by_model": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/TokenUsage"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

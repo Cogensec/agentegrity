@@ -24,6 +24,9 @@ daemon for the session, so the layers see the whole conversation:
   recorded as a failure (Codex has no separate failure event).
 - **Written content.** Instructions added to files by `apply_patch`
   are **denied**.
+- **Token usage.** Read from the rollout's `token_usage_record` lines (one
+  per response), totalled per model, and sent on every turn and at session
+  end. Only usage counts and model names are kept from the rollout.
 - **Behavioral drift.** Each clean session teaches a per-agent baseline
   (`~/.agentegrity/codex/baselines/`); later sessions whose tool mix
   departs from it lower the score and alert. Drift never blocks here.

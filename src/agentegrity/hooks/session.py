@@ -9,11 +9,13 @@ per host conversation.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.adapters.hook_hosts import ADAPTERS_BY_HOST
 from agentegrity.core.attestation import AttestationChain
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
@@ -88,6 +90,12 @@ class HookSession:
             detect_tool_arguments=False,
         )
         self._persisted_records = len(self._adapter.attestation_chain.records)
+        # Where the transcripts were read to, so a restarted daemon reports
+        # only tokens spent after the last one stopped.
+        self._usage_path = chain_path.with_name(
+            chain_path.name.removesuffix(".chain.json") + ".usage.json"
+        )
+        self._persisted_usage = _restore_usage_state(self._adapter, self._usage_path)
 
     def handle(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
         """Process one hook payload; return the host output, or None to stay silent."""
@@ -129,17 +137,17 @@ class HookSession:
         self.persist()
 
     def persist(self) -> None:
-        """Write the chain atomically (mode 0600) when it has new records."""
+        """Write the chain and the transcript read state when they changed."""
         chain = self._adapter.attestation_chain
-        if len(chain.records) == self._persisted_records:
-            return
-        self.chain_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        tmp_path = self.chain_path.with_name(self.chain_path.name + ".tmp")
-        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(chain.to_json())
-        os.replace(tmp_path, self.chain_path)
-        self._persisted_records = len(chain.records)
+        if len(chain.records) != self._persisted_records:
+            _write_private(self.chain_path, chain.to_json())
+            self._persisted_records = len(chain.records)
+        reader = self._adapter._usage_reader
+        if reader is not None:
+            state = json.dumps(reader.state(), sort_keys=True)
+            if state != self._persisted_usage:
+                _write_private(self._usage_path, state)
+                self._persisted_usage = state
 
     def _latest_score(self) -> IntegrityScore:
         """The evaluation the adapter just ran for this tool call."""
@@ -217,6 +225,29 @@ def _baseline_store(state_dir: Path, agent_id: str) -> FileBaselineStore | None:
     except ValueError:
         return None
     return FileBaselineStore(state_dir / "baselines")
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Write a file atomically, readable only by the user (mode 0600)."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp_path, path)
+
+
+def _restore_usage_state(adapter: _BaseAdapter, path: Path) -> str | None:
+    """Resume the adapter's transcript reads; return the state as last written."""
+    reader = adapter._usage_reader
+    if reader is None or not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+        reader.restore(json.loads(text))
+    except (OSError, ValueError):
+        return None
+    return text
 
 
 def _load_chain(path: Path) -> AttestationChain | None:
