@@ -52,10 +52,17 @@
         "@agentegrity/client": "0.11.0",
       },
       "devDependencies": {
+        "@crewai-ts/core": "^0.2.6",
         "@types/node": "^20.0.0",
         "tsx": "^4.7.0",
         "typescript": "^5.4.0",
       },
+      "peerDependencies": {
+        "@crewai-ts/core": ">=0.1.0",
+      },
+      "optionalPeers": [
+        "@crewai-ts/core",
+      ],
     },
     "packages/google-adk": {
       "name": "@agentegrity/google-adk",
@@ -183,6 +190,8 @@
     "@cfworker/json-schema": ["@cfworker/json-schema@4.1.1", "", {}, "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og=="],
 
     "@colors/colors": ["@colors/colors@1.6.1", "", {}, "sha512-dTmUJzXSuayBK+hZydEaXd2mhx61qWQwkwaBBY6LyEOVx/L9aQU5ac8eFNEsd9nrD1+zb9zvDCphLSe8g1F4Qw=="],
+
+    "@crewai-ts/core": ["@crewai-ts/core@0.2.6", "", {}, "sha512-h3tnCBj8kpEHO6yjm/EvJEcvtxfYSOx9FIIw4ssFBnRf8rteM+iI9eLQ80MxfMq20XEqhCbFp0EPcCwiE2dq7A=="],
 
     "@dabh/diagnostics": ["@dabh/diagnostics@2.0.9", "", { "dependencies": { "@so-ric/colorspace": "^1.1.6", "enabled": "2.0.x", "kuler": "^2.0.0" } }, "sha512-R6siwR65Hm+3yfgP7o8DKhNvputQAwfoz9zTc3kyDudnomj2/BcLmD+uGQQPICjuFUp8ounPBU+jmKsocwVVAg=="],
 
