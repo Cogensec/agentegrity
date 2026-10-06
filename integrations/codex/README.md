@@ -43,7 +43,7 @@ shown.
 ## Install
 
 ```bash
-pip install "agentegrity>=0.11.0"   # must be importable by python3 on PATH
+pip install "agentegrity>=0.12.0"   # must be importable by python3 on PATH
 codex plugin marketplace add cogensec/agentegrity
 ```
 
