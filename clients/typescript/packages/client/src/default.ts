@@ -29,6 +29,7 @@ import type {
   SessionExporter,
   SessionSummary,
 } from "./types.js";
+import { UsageLedger, type RecordOptions, type TokenUsage } from "./usage.js";
 
 export interface AdapterConfig {
   /** Adapter name (e.g. "langchain"). Sent as `adapter_name` on the wire. */
@@ -88,6 +89,12 @@ export interface DefaultAdapter {
   registerExporter(exporter: SessionExporter): void;
   /** Snapshot summary for `report()` helpers. */
   getSummary(): SessionSummary;
+  /**
+   * Record one model call's tokens, normalized (see `usage.ts`). Recording
+   * the same key again replaces the entry. A missing model falls back to
+   * the profile's `model_id`. `stop` events and the summary carry the total.
+   */
+  recordUsage(key: string, model: string | null | undefined, usage: TokenUsage, options: RecordOptions): void;
   /**
    * Declare or update the in-process multi-agent topology this
    * adapter participates in (v0.8).
@@ -181,6 +188,7 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
   let shutdownRegistered = false;
   let topology: AgentTopology | null = null;
   let myRole: AgentRole | null = null;
+  let usage = new UsageLedger();
 
   const registerShutdown = () => {
     if (shutdownRegistered || disabled) return;
@@ -222,14 +230,16 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
       if (!started) await api.ensureStart();
       eventCount++;
       if (event.evaluation_result) evaluationCount++;
+      const totals = event.event_type === "stop" ? usage.toDict() : null;
+      const data = totals ? { ...(event.data ?? {}), usage: totals } : event.data ?? {};
       const full: FrameworkEvent = {
         event_type: event.event_type,
         timestamp: event.timestamp ?? new Date().toISOString(),
         adapter_name: adapterName,
-        data: event.data ?? {},
+        data,
         evaluation_result: event.evaluation_result ?? null,
       };
-      await reporter.emit(event);
+      await reporter.emit({ ...event, data });
       for (const exp of exporters) {
         await safeCall(
           () => exp.on_event?.(reporter.sessionId, full),
@@ -264,6 +274,11 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
       evaluationCount = 0;
       topology = null;
       myRole = null;
+      usage = new UsageLedger();
+    },
+
+    recordUsage(key, model, tokens, options) {
+      usage.record(key, model || profile.model_id, tokens, options);
     },
 
     get topology() {
@@ -318,6 +333,7 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
         attestation_records: 0,
         chain_hash_linked: true,
         enforce_mode: false,
+        ...(usage.empty ? {} : { usage: usage.toDict() }),
       };
     },
   };

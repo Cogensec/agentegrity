@@ -1,0 +1,306 @@
+[
+  {
+    "name": "empty ledger reports nothing",
+    "records": [],
+    "mark_incomplete": false,
+    "expected": null
+  },
+  {
+    "name": "sums per model and overall",
+    "records": [
+      {
+        "key": "r1",
+        "model": "opus",
+        "usage": {
+          "input_tokens": 100,
+          "output_tokens": 10
+        },
+        "source": "transcript",
+        "complete": true
+      },
+      {
+        "key": "r2",
+        "model": "opus",
+        "usage": {
+          "input_tokens": 50,
+          "output_tokens": 5
+        },
+        "source": "transcript",
+        "complete": true
+      },
+      {
+        "key": "r3",
+        "model": "haiku",
+        "usage": {
+          "input_tokens": 7,
+          "output_tokens": 1
+        },
+        "source": "transcript",
+        "complete": true
+      }
+    ],
+    "mark_incomplete": false,
+    "expected": {
+      "input_tokens": 157,
+      "output_tokens": 16,
+      "requests": 3,
+      "total_tokens": 173,
+      "complete": true,
+      "sources": [
+        "transcript"
+      ],
+      "by_model": {
+        "haiku": {
+          "input_tokens": 7,
+          "output_tokens": 1,
+          "requests": 1,
+          "total_tokens": 8
+        },
+        "opus": {
+          "input_tokens": 150,
+          "output_tokens": 15,
+          "requests": 2,
+          "total_tokens": 165
+        }
+      }
+    }
+  },
+  {
+    "name": "repeated key replaces",
+    "records": [
+      {
+        "key": "r1",
+        "model": "opus",
+        "usage": {
+          "input_tokens": 100,
+          "output_tokens": 8
+        },
+        "source": "transcript",
+        "complete": false
+      },
+      {
+        "key": "r1",
+        "model": "opus",
+        "usage": {
+          "input_tokens": 100,
+          "output_tokens": 182
+        },
+        "source": "transcript",
+        "complete": true
+      }
+    ],
+    "mark_incomplete": false,
+    "expected": {
+      "input_tokens": 100,
+      "output_tokens": 182,
+      "requests": 1,
+      "total_tokens": 282,
+      "complete": true,
+      "sources": [
+        "transcript"
+      ],
+      "by_model": {
+        "opus": {
+          "input_tokens": 100,
+          "output_tokens": 182,
+          "requests": 1,
+          "total_tokens": 282
+        }
+      }
+    }
+  },
+  {
+    "name": "breakdowns absent until reported",
+    "records": [
+      {
+        "key": "r1",
+        "model": "m",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 2
+        },
+        "source": "trace",
+        "complete": true
+      },
+      {
+        "key": "r2",
+        "model": "m",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 2,
+          "cache_read_tokens": 4
+        },
+        "source": "trace",
+        "complete": true
+      }
+    ],
+    "mark_incomplete": false,
+    "expected": {
+      "input_tokens": 20,
+      "output_tokens": 4,
+      "cache_read_tokens": 4,
+      "requests": 2,
+      "total_tokens": 24,
+      "complete": true,
+      "sources": [
+        "trace"
+      ],
+      "by_model": {
+        "m": {
+          "input_tokens": 20,
+          "output_tokens": 4,
+          "cache_read_tokens": 4,
+          "requests": 2,
+          "total_tokens": 24
+        }
+      }
+    }
+  },
+  {
+    "name": "incomplete entry marks total incomplete",
+    "records": [
+      {
+        "key": "r1",
+        "model": "m",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1
+        },
+        "source": "transcript",
+        "complete": true
+      },
+      {
+        "key": "r2",
+        "model": "m",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1
+        },
+        "source": "transcript",
+        "complete": false
+      }
+    ],
+    "mark_incomplete": false,
+    "expected": {
+      "input_tokens": 2,
+      "output_tokens": 2,
+      "requests": 2,
+      "total_tokens": 4,
+      "complete": false,
+      "sources": [
+        "transcript"
+      ],
+      "by_model": {
+        "m": {
+          "input_tokens": 2,
+          "output_tokens": 2,
+          "requests": 2,
+          "total_tokens": 4
+        }
+      }
+    }
+  },
+  {
+    "name": "known gap",
+    "records": [
+      {
+        "key": "r1",
+        "model": "m",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1
+        },
+        "source": "transcript",
+        "complete": true
+      }
+    ],
+    "mark_incomplete": true,
+    "expected": {
+      "input_tokens": 1,
+      "output_tokens": 1,
+      "requests": 1,
+      "total_tokens": 2,
+      "complete": false,
+      "sources": [
+        "transcript"
+      ],
+      "by_model": {
+        "m": {
+          "input_tokens": 1,
+          "output_tokens": 1,
+          "requests": 1,
+          "total_tokens": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "unknown model and snapshot request counts",
+    "records": [
+      {
+        "key": "r1",
+        "model": null,
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 1
+        },
+        "source": "trace",
+        "complete": true
+      },
+      {
+        "key": "run-1",
+        "model": "gpt",
+        "usage": {
+          "input_tokens": 1300,
+          "output_tokens": 40,
+          "requests": 3,
+          "reasoning_tokens": 7
+        },
+        "source": "provider_response",
+        "complete": true
+      },
+      {
+        "key": "x",
+        "model": "gpt",
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 1,
+          "requests": null,
+          "cache_write_tokens": 2
+        },
+        "source": "provider_response",
+        "complete": true
+      }
+    ],
+    "mark_incomplete": false,
+    "expected": {
+      "input_tokens": 1308,
+      "output_tokens": 42,
+      "cache_write_tokens": 2,
+      "reasoning_tokens": 7,
+      "requests": 4,
+      "total_tokens": 1350,
+      "complete": true,
+      "sources": [
+        "provider_response",
+        "trace"
+      ],
+      "by_model": {
+        "gpt": {
+          "input_tokens": 1305,
+          "output_tokens": 41,
+          "cache_write_tokens": 2,
+          "reasoning_tokens": 7,
+          "requests": 3,
+          "total_tokens": 1346
+        },
+        "unknown": {
+          "input_tokens": 3,
+          "output_tokens": 1,
+          "requests": 1,
+          "total_tokens": 4
+        }
+      }
+    }
+  }
+]
