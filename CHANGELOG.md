@@ -19,6 +19,7 @@ in beta until the v1.0 stability criteria documented in
 
 ### Changed
 
+- **Framework extras require the releases the usage code needs.** `agentegrity[crewai]` now requires `crewai>=1.15.0`, the first release with `UsageMetrics.from_provider_dict`, and `agentegrity[google-adk]` requires `google-adk>=1.18.0`, the first with `LlmResponse.model_version`. With the old floors, installing every extra resolved to crewai 1.6.1 and google-adk 1.10.0. An older crewai installed outside the extra still runs the adapter; it reports lifecycle events and no usage.
 - **Drift above twice the tolerance alerts instead of blocking.** `CorticalLayer(block_on_drift=True)` restores blocking. With drift now live (below), keeping the block would deny calls whenever a session's tool mix departed from history, on every enforcing adapter and both coding-agent hosts.
 
 ### Fixed
