@@ -37,7 +37,7 @@ this document is the operational version of it.
 | `monitor.IntegrityMonitor`                 |   ✅   | `@guard` decorator, violation callbacks, four `ViolationAction` modes. Optional `signing_key=` signs every attestation; `record_decision()` mirrors the adapter-side capture API for non-framework agents. |
 | `profile.AgentProfile`                     |   ✅   | Type-safe enums for `AgentType` / `DeploymentContext` / `RiskTier`; `default()` factory. |
 | `tool_classifier.classify_tool_call`       |   🟡   | Tags each tool call with `reads_sensitive` / `sends_external` / `remote_code_exec` / `log_tamper` / `obfuscated_command` from its arguments. Shell commands are tokenized POSIX-style (`shlex`, quotes collapsed) and split into pipeline segments; `apply_patch` envelopes are classified by their file headers, never as shell. Stdlib only. Static analysis is a floor: runtime-computed commands are flagged as obfuscated, not resolved. 72 tests including quote-collapse evasion and benign look-alikes (`.pub` keys, `.env.example`, plain downloads). |
-| `usage.UsageLedger`                        |   🟡   | Per-session token usage, normalized across frameworks (`input_tokens` includes cache; cache and reasoning are parts of input and output) and totalled per model. Entries are keyed per model call, so repeated lines and running totals count once; `complete` flags known gaps. Reported on `stop` events and the session summary by both coding-agent hosts (transcripts) and all eight Python adapters (each framework's model-response usage, or Bedrock traces). Not yet: the TypeScript packages. See `spec/token-usage.md`. |
+| `usage.UsageLedger`                        |   🟡   | Per-session token usage, normalized across frameworks (`input_tokens` includes cache; cache and reasoning are parts of input and output) and totalled per model. Entries are keyed per model call, so repeated lines and running totals count once; `complete` flags known gaps. Reported on `stop` events and the session summary by both coding-agent hosts (transcripts), all eight Python adapters (each framework's model-response usage, or Bedrock traces) and all six TypeScript packages, whose `DefaultAdapter.recordUsage()` shares the Python ledger's test vectors. See `spec/token-usage.md`. |
 
 ## Layers (`src/agentegrity/layers/`)
 
@@ -79,15 +79,21 @@ package with a multi-agent-capable framework primitive declares an
 shared `setTopology()` API via `@agentegrity/client`. Claude SDK
 and Vercel AI SDK stay single-agent by framework design.
 
+Through 0.11.0, four of the six packages attached to APIs their
+frameworks do not have and received no events, and LangChain and Vercel
+AI reported the events they did receive wrongly. Each now subscribes to
+its framework's real lifecycle surface and is tested against the
+framework itself, with an offline model.
+
 | Package                    | Status | v0.8 Topology | Notes |
 |----------------------------|:------:|:-------------:|-------|
 | `@agentegrity/client`      |   ✅   | core types | Shared `createDefaultAdapter()`, `AgentegrityReporter`, types, `process.beforeExit` shutdown, exporter fan-out. v0.8: ships `AgentTopology` / `AgentMember` / `AgentRole` / `TopologyKind` / `TopologyChange` immutable types + `Evidence` / `EvidenceType` mirroring the Python core. `DefaultAdapter.setTopology(topology, myRole?)` is the canonical entry point; cross-runtime SHA-256 `contentHash()` matches Python byte-for-byte. |
 | `@agentegrity/claude-sdk`  |   ✅   | n/a | Single-agent by framework design. Pinning test asserts no topology is ever declared. Mirrors the Python Claude adapter. |
-| `@agentegrity/langchain`   |   ✅   | HIERARCHICAL_DAG / PEER_TO_PEER | LangChain JS callback handler. v0.8: new `instrumentGraph(graph)` walks `graph.getGraph().nodes` and declares topology — supervisor pattern (node named `supervisor`/`supervisor_agent`/`orchestrator`) → HIERARCHICAL_DAG; otherwise PEER_TO_PEER. Plain Runnables (single-agent) unchanged. |
-| `@agentegrity/openai-agents` | ✅ | PEER_TO_PEER (incremental) | OpenAI Agents JS SDK. v0.8: `onAgentStart` seeds PEER_TO_PEER; each `onHandoff` appends the target as a PEER via `setTopology` (emits `topology_change`). |
-| `@agentegrity/crewai`      |   ✅   | HUB_SPOKE / HIERARCHICAL_DAG | CrewAI JS event hooks. v0.8: `instrument({ crew })` walks `crew.agents` and declares topology — sequential process → HUB_SPOKE; hierarchical → HIERARCHICAL_DAG with SUPERVISOR/WORKER. |
-| `@agentegrity/google-adk`  |   ✅   | HIERARCHICAL_DAG | Google ADK JS bindings. v0.8: `instrument(agent)` walks `agent.subAgents` (or `sub_agents` — ADK JS naming varies). SequentialAgent / ParallelAgent / LoopAgent → HIERARCHICAL_DAG; plain Agent stays single-agent. |
-| `@agentegrity/vercel-ai`   |   🧪   | n/a | TS-native; uses the AI SDK's OpenTelemetry tracer surface. Single-agent by framework design (no multi-agent primitive in the AI SDK). Pinning test asserts no topology. |
+| `@agentegrity/langchain`   |   ✅   | HIERARCHICAL_DAG / PEER_TO_PEER | LangChain JS callback handler; top-level runs are found by parent run id, tool names by run name. v0.8: new `instrumentGraph(graph)` walks `graph.getGraph().nodes` to declare topology: supervisor pattern (node named `supervisor`/`supervisor_agent`/`orchestrator`) → HIERARCHICAL_DAG; otherwise PEER_TO_PEER. Plain Runnables (single-agent) unchanged. |
+| `@agentegrity/openai-agents` | ✅ | PEER_TO_PEER (incremental) | OpenAI Agents JS SDK. `instrument(runner)` listens on the `Runner`'s lifecycle events. `agent_start` seeds PEER_TO_PEER; each `agent_handoff` appends the target as a PEER via `setTopology` (emits `topology_change`). |
+| `@agentegrity/crewai`      |   ✅   | HUB_SPOKE / HIERARCHICAL_DAG | CrewAI TypeScript (`@crewai-ts/core`, Node 22+). `instrument(crewaiEventBus, { crew })` subscribes to the event bus and walks `crew.agents` to declare topology: sequential process → HUB_SPOKE; hierarchical → HIERARCHICAL_DAG with SUPERVISOR/WORKER. |
+| `@agentegrity/google-adk`  |   ✅   | HIERARCHICAL_DAG | Google ADK for TypeScript (`@google/adk`). `instrument(agent)` adds callbacks ahead of the user's on the agent and every agent reachable through `subAgents` or agent tools. SequentialAgent / ParallelAgent / LoopAgent → HIERARCHICAL_DAG; plain Agent stays single-agent. |
+| `@agentegrity/vercel-ai`   |   ✅   | n/a | TS-native; the AI SDK's OpenTelemetry tracer surface for AI SDK 3 to 6, and `registerTelemetry(telemetry())` for AI SDK 7. Single-agent by framework design (no multi-agent primitive in the AI SDK). Pinning test asserts no topology. |
 
 ## Approval & Alerting
 

@@ -27,10 +27,10 @@ One npm package per framework; all depend on `@agentegrity/client` for the share
 |---|---|---|
 | Claude Agent SDK | `@agentegrity/claude-sdk` | `query({ options: { hooks: hooks() } })` |
 | LangChain JS | `@agentegrity/langchain` | `new ChatX({ callbacks: [instrument()] })` |
-| OpenAI Agents SDK | `@agentegrity/openai-agents` | `run(agent, input, { hooks: runHooks() })` |
-| CrewAI JS | `@agentegrity/crewai` | `instrument().attach(crew.events)` |
+| OpenAI Agents SDK | `@agentegrity/openai-agents` | `const runner = instrument(new Runner())` |
+| CrewAI TypeScript | `@agentegrity/crewai` | `const close = instrument(crewaiEventBus, { crew })` |
 | Google ADK | `@agentegrity/google-adk` | `const close = instrument(agent)` |
-| Vercel AI SDK *(TS-only)* | `@agentegrity/vercel-ai` | `streamText({ experimental_telemetry: instrument() })` |
+| Vercel AI SDK *(TS-only)* | `@agentegrity/vercel-ai` | `streamText({ experimental_telemetry: instrument() })`; AI SDK 7: `registerTelemetry(telemetry())` |
 
 ## Coding-agent hosts (hook runtime)
 
@@ -52,12 +52,12 @@ All fourteen framework adapters conform to the same contract:
 - **Fail-open**: exporter exceptions are caught and logged; the instrumented agent never breaks because of the adapter.
 - **Event vocabulary**: every adapter maps framework-specific hooks onto the canonical event types defined in `schemas/exporter/` (`user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `pre_compact`, `stop`, plus the v0.8 multi-agent events).
 - **Argument classification**: every `pre_tool_use` is tagged by `classify_tool_call()` (`reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper`, `obfuscated_command`), so generic shell tools are judged by what they run, not by their name.
-- **Idempotent**: instrumenting the same agent / graph / emitter twice is a no-op.
+- **Idempotent**: instrumenting the same agent / graph / runner / event bus twice is a no-op.
 - **Version parity**: Python `pyproject.toml` and every `@agentegrity/*` package publish with the same version string (enforced in CI by `clients/typescript/scripts/check-versions.ts`).
 
 ## Token usage
 
-Adapters put the session's running token usage on each `stop` event and in the session summary, normalized so `input_tokens` always includes cached tokens. Reported by both coding-agent hosts and all eight Python adapters; the TypeScript packages follow. Field meanings, provenance and per-integration sources: [token-usage.md](token-usage.md).
+Adapters put the session's running token usage on each `stop` event and in the session summary, normalized so `input_tokens` always includes cached tokens. Reported by both coding-agent hosts, all eight Python adapters and all six TypeScript packages. Field meanings, provenance and per-integration sources: [token-usage.md](token-usage.md).
 
 ## Wire format
 
