@@ -243,7 +243,11 @@ class CrewAIAdapter(_BaseAdapter):
         """Count one LLM call; CrewAI's normalizer makes the input count include the cache."""
         from crewai.types.usage_metrics import UsageMetrics
 
-        metrics = UsageMetrics.from_provider_dict(getattr(event, "usage", None))
+        # The normalizer first shipped in crewai 1.15; older releases report nothing.
+        normalize = getattr(UsageMetrics, "from_provider_dict", None)
+        if normalize is None:
+            return
+        metrics = normalize(getattr(event, "usage", None))
         if metrics is None:
             return
         call = getattr(event, "call_id", None) or getattr(event, "event_id", None)

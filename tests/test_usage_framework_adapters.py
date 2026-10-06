@@ -233,6 +233,18 @@ class TestCrewAI:
         assert (usage["cache_write_tokens"], usage["reasoning_tokens"]) == (5, 2)
         assert set(usage["by_model"]) == {"claude-x", "gpt-5.5"}
 
+    def test_releases_without_the_normalizer_report_no_usage(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # UsageMetrics.from_provider_dict first shipped in crewai 1.15.
+        from crewai.types.usage_metrics import UsageMetrics
+
+        monkeypatch.delattr(UsageMetrics, "from_provider_dict", raising=False)
+        adapter = self._adapter()
+        adapter._record_llm_call(self._event("c1", {"prompt_tokens": 5, "completion_tokens": 1}))
+        assert "usage" not in adapter.get_summary()
+        assert not caplog.records
+
     def test_a_call_without_usage_is_skipped_and_repeats_count_once(self) -> None:
         adapter = self._adapter()
         adapter._record_llm_call(self._event("c1", None))
