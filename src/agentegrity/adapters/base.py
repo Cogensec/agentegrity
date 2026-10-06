@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, TypeVar
 from uuid import uuid4
 
+from agentegrity.adapters.transcripts import TranscriptUsage
 from agentegrity.core.approval import ApprovalDecision
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -51,6 +52,7 @@ from agentegrity.core.decision import (
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.tool_classifier import classify_tool_call
+from agentegrity.core.usage import TokenUsage, UsageLedger
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.recovery import RecoveryLayer
 
@@ -250,6 +252,8 @@ class _BaseAdapter:
     """
 
     _name: str = "base"
+    # Hosts whose hooks name a transcript set a reader for its usage lines.
+    _usage_reader_type: type[TranscriptUsage] | None = None
 
     # Per-session ceiling on each accumulating context buffer. A
     # malicious peer/tool can flood peer_messages / shared_memory /
@@ -301,6 +305,10 @@ class _BaseAdapter:
         # Channels that have already emitted an overflow event, so a
         # sustained flood signals once instead of flooding the stream.
         self._buffer_overflow_signaled: set[str] = set()
+        self._usage = UsageLedger()
+        self._usage_reader: TranscriptUsage | None = (
+            self._usage_reader_type(self._usage) if self._usage_reader_type else None
+        )
 
         if evaluator is not None:
             self._evaluator = evaluator
@@ -332,6 +340,38 @@ class _BaseAdapter:
     @property
     def session_id(self) -> str:
         return self._session_id
+
+    def record_usage(self,
+        key: str,
+        model: str | None,
+        usage: TokenUsage,
+        *,
+        source: str,
+        complete: bool = True,
+    ) -> None:
+        """Record one model call's tokens, normalized (see :mod:`agentegrity.core.usage`).
+
+        ``key`` identifies the call: recording the same key again replaces
+        the entry, so a source that repeats a call or reports a running
+        total is not double counted. A missing model falls back to the
+        profile's ``model_id``.
+        """
+        self._usage.record(
+            key, model or self._profile.model_id, usage, source=source, complete=complete,
+        )
+
+    def _refresh_usage(self) -> None:
+        """Read usage the host wrote to its transcripts since the last read."""
+        if self._usage_reader is not None:
+            try:
+                self._usage_reader.refresh()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("%s usage read failed: %s", self.name, exc)
+
+    def _with_usage(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Event data plus the session's running token usage, when there is any."""
+        usage = self._usage.to_dict()
+        return {**data, "usage": usage} if usage is not None else data
 
     def register_exporter(self, exporter: SessionExporter) -> None:
         """Register a :class:`SessionExporter` to receive live session data.
@@ -511,6 +551,7 @@ class _BaseAdapter:
         if self._session_ended:
             return
         self._session_ended = True
+        self._refresh_usage()
         if self._session_clean:
             for cortical in self._layers_of(CorticalLayer):
                 cortical.learn_session(
@@ -766,6 +807,8 @@ class _BaseAdapter:
             "task_started": self._handle_task_started,
             "credential_declared": self._handle_credential_declared,
         }
+        if self._usage_reader is not None:
+            self._usage_reader.note(event_data)
         handler = handlers.get(event_type)
         if handler:
             try:
@@ -1001,7 +1044,8 @@ class _BaseAdapter:
             },
             decision_inputs=self._collect_decision_inputs(),
         )
-        self._emit_event("stop", data, score)
+        self._refresh_usage()
+        self._emit_event("stop", self._with_usage(data), score)
         return {}
 
     def _handle_subagent_start(
@@ -1213,7 +1257,7 @@ class _BaseAdapter:
         decision_count = sum(
             1 for r in records if r.record_kind == "decision"
         )
-        return {
+        summary: dict[str, Any] = {
             "adapter": self.name,
             "agent_id": self._profile.agent_id,
             "evaluations": self._evaluation_count,
@@ -1229,3 +1273,7 @@ class _BaseAdapter:
             # Fingerprints, not values: lets a consumer recover the set if an event was lost.
             "credentials": [asdict(ref) for ref in self._credentials.refs],
         }
+        usage = self._usage.to_dict()
+        if usage is not None:
+            summary["usage"] = usage
+        return summary

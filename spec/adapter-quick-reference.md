@@ -55,6 +55,10 @@ All fourteen framework adapters conform to the same contract:
 - **Idempotent**: instrumenting the same agent / graph / emitter twice is a no-op.
 - **Version parity**: Python `pyproject.toml` and every `@agentegrity/*` package publish with the same version string (enforced in CI by `clients/typescript/scripts/check-versions.ts`).
 
+## Token usage
+
+Adapters put the session's running token usage on each `stop` event and in the session summary, normalized so `input_tokens` always includes cached tokens. Reported today by Claude Code, Codex and the Python Claude Agent SDK adapter; the other adapters follow. Field meanings, provenance and per-integration sources: [token-usage.md](token-usage.md).
+
 ## Wire format
 
 All adapters emit the same JSON payloads. The contract is authoritative:

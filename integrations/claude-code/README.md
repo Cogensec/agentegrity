@@ -24,6 +24,9 @@ time:
   score until the context is compacted.
 - **Written content.** Instructions written into files (`Write`,
   `Edit`), the way an injection persists across sessions, **ask**.
+- **Token usage.** Read from the session transcript and each subagent's,
+  normalized and totalled per model, and sent on every turn and at session
+  end. Only usage counts and model names are kept from the transcript.
 - **Behavioral drift.** Each clean session teaches a per-agent baseline
   (`~/.agentegrity/claude-code/baselines/`); later sessions whose tool mix
   departs from it lower the score and alert. Drift never blocks here.
