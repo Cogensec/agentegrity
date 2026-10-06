@@ -85,9 +85,14 @@ test("an unnamed model falls back to the profile model", () => {
   assert.deepEqual(Object.keys(usage.by_model), ["configured-model"]);
 });
 
-test("reset starts a fresh ledger", () => {
+test("reset clears the ledger in place", () => {
   const adapter = offlineAdapter();
+  const ledger = adapter.usage;
   adapter.recordUsage("c1", "m", { input_tokens: 1, output_tokens: 1 }, { source: "trace" });
+  ledger.markIncomplete();
   adapter.reset();
-  assert.equal("usage" in adapter.getSummary(), false);
+  assert.equal(adapter.usage, ledger);
+  adapter.recordUsage("c2", "m", { input_tokens: 1, output_tokens: 1 }, { source: "trace" });
+  assert.equal((adapter.getSummary().usage as { complete: boolean; requests: number }).complete, true);
+  assert.equal((adapter.getSummary().usage as { requests: number }).requests, 1);
 });

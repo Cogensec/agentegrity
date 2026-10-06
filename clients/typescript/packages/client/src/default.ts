@@ -95,6 +95,8 @@ export interface DefaultAdapter {
    * the profile's `model_id`. `stop` events and the summary carry the total.
    */
   recordUsage(key: string, model: string | null | undefined, usage: TokenUsage, options: RecordOptions): void;
+  /** This session's usage ledger, for readers that also mark gaps or discard a source. */
+  readonly usage: UsageLedger;
   /**
    * Declare or update the in-process multi-agent topology this
    * adapter participates in (v0.8).
@@ -188,7 +190,7 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
   let shutdownRegistered = false;
   let topology: AgentTopology | null = null;
   let myRole: AgentRole | null = null;
-  let usage = new UsageLedger();
+  const usage = new UsageLedger();
 
   const registerShutdown = () => {
     if (shutdownRegistered || disabled) return;
@@ -274,7 +276,11 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
       evaluationCount = 0;
       topology = null;
       myRole = null;
-      usage = new UsageLedger();
+      usage.clear();
+    },
+
+    get usage() {
+      return usage;
     },
 
     recordUsage(key, model, tokens, options) {
