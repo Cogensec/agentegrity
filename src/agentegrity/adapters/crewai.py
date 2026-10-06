@@ -14,6 +14,7 @@ Event mapping:
     ToolUsageStartedEvent         -> pre_tool_use
     ToolUsageFinishedEvent        -> post_tool_use
     ToolUsageErrorEvent           -> post_tool_use_failure
+    LLMCallCompletedEvent         -> token usage (per call_id)
     TaskStartedEvent              -> task_started (v0.8+; was
                                      subagent_start pre-v0.8)
     AgentExecutionStartedEvent    -> subagent_start (v0.8+; new)
@@ -52,10 +53,14 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import warnings
 from typing import Any
 
 from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.core.usage import TokenUsage
+
+logger = logging.getLogger("agentegrity.adapters.crewai")
 
 
 class CrewAIAdapter(_BaseAdapter):
@@ -200,6 +205,23 @@ class CrewAIAdapter(_BaseAdapter):
                 {"agent_id": agent_id},
             )
 
+        llm_call_event: Any
+        try:
+            from crewai.events import LLMCallCompletedEvent
+
+            llm_call_event = LLMCallCompletedEvent
+        except ImportError:
+            # Older releases have no per-call LLM event; usage stays unreported.
+            llm_call_event = None
+
+        def _on_llm_call(source_: Any, event: Any) -> None:
+            try:
+                adapter._record_llm_call(event)
+            except Exception as exc:
+                logger.warning("usage capture failed: %s", exc)
+
+        if llm_call_event is not None:
+            crewai_event_bus.on(llm_call_event)(_on_llm_call)
         crewai_event_bus.on(CrewKickoffStartedEvent)(_on_kickoff_start)
         crewai_event_bus.on(CrewKickoffCompletedEvent)(_on_kickoff_end)
         crewai_event_bus.on(ToolUsageStartedEvent)(_on_tool_start)
@@ -216,6 +238,22 @@ class CrewAIAdapter(_BaseAdapter):
         # v0.8: declare the topology when we know the crew.
         if crew is not None:
             self._declare_topology(crew)
+
+    def _record_llm_call(self, event: Any) -> None:
+        """Count one LLM call; CrewAI's normalizer makes the input count include the cache."""
+        from crewai.types.usage_metrics import UsageMetrics
+
+        metrics = UsageMetrics.from_provider_dict(getattr(event, "usage", None))
+        if metrics is None:
+            return
+        call = getattr(event, "call_id", None) or getattr(event, "event_id", None)
+        self.record_usage(f"crewai:{call}", getattr(event, "model", None), TokenUsage(
+            input_tokens=metrics.prompt_tokens,
+            output_tokens=metrics.completion_tokens,
+            cache_read_tokens=metrics.cached_prompt_tokens,
+            cache_write_tokens=metrics.cache_creation_tokens,
+            reasoning_tokens=metrics.reasoning_tokens,
+        ), source="provider_response")
 
     def _declare_topology(self, crew: Any) -> None:
         """Build and declare the AgentTopology from a CrewAI Crew."""

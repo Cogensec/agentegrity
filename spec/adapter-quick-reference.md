@@ -57,7 +57,7 @@ All fourteen framework adapters conform to the same contract:
 
 ## Token usage
 
-Adapters put the session's running token usage on each `stop` event and in the session summary, normalized so `input_tokens` always includes cached tokens. Reported today by Claude Code, Codex and the Python Claude Agent SDK adapter; the other adapters follow. Field meanings, provenance and per-integration sources: [token-usage.md](token-usage.md).
+Adapters put the session's running token usage on each `stop` event and in the session summary, normalized so `input_tokens` always includes cached tokens. Reported by both coding-agent hosts and all eight Python adapters; the TypeScript packages follow. Field meanings, provenance and per-integration sources: [token-usage.md](token-usage.md).
 
 ## Wire format
 

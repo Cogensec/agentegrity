@@ -8,7 +8,7 @@ the six callback hooks ADK exposes on ``Agent``:
     after_agent_callback   -> stop
     before_tool_callback   -> pre_tool_use
     after_tool_callback    -> post_tool_use
-    (before/after_model_callback accumulate reasoning-chain context)
+    after_model_callback   -> token usage (final responses; partial chunks skipped)
 
 Sub-agent handoffs through ``AgentTool`` fire ``before_agent_callback``
 with a non-root invocation context; we map those to ``subagent_start``.
@@ -34,10 +34,12 @@ from __future__ import annotations
 import logging
 import warnings
 from typing import Any
+from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.core.evaluator import IntegrityEvaluator
 from agentegrity.core.profile import AgentProfile
+from agentegrity.core.usage import TokenUsage
 
 logger = logging.getLogger("agentegrity.adapters.google_adk")
 
@@ -112,6 +114,9 @@ class GoogleADKAdapter(_BaseAdapter):
                 {"tool_name": tool_name, "tool_input": dict(args) if args else {}},
             )
 
+        def _after_model(callback_context: Any, llm_response: Any) -> None:
+            adapter._record_model_response(agent, llm_response)
+
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
             tool_name = getattr(tool, "name", str(tool))
             adapter._dispatch(
@@ -132,6 +137,9 @@ class GoogleADKAdapter(_BaseAdapter):
             agent.after_tool_callback = _wrap(
                 getattr(agent, "after_tool_callback", None), _after_tool
             )
+            # Workflow agents have no model callback and reject unknown fields.
+            if hasattr(agent, "after_model_callback"):
+                agent.after_model_callback = _wrap(agent.after_model_callback, _after_model)
         except Exception as exc:
             raise ImportError(
                 "google-adk is required for the Google ADK adapter, or the "
@@ -144,6 +152,28 @@ class GoogleADKAdapter(_BaseAdapter):
         # topology. Plain Agent without sub_agents stays single-agent.
         self._maybe_declare_workflow_topology(agent)
         return agent
+
+    def _record_model_response(self, agent: Any, response: Any) -> None:
+        """Count one model call from its final response; streamed partials are skipped.
+
+        ``prompt_token_count`` already includes cached tokens. Thinking and
+        tool-use prompt tokens are reported beside the prompt and candidate
+        counts, so they are added in.
+        """
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None or getattr(response, "partial", None) is True:
+            return
+        thoughts = _optional(usage, "thoughts_token_count")
+        model = getattr(response, "model_version", None) or getattr(agent, "model", None)
+        self.record_usage(f"google-adk:{uuid4().hex}", model if isinstance(model, str) else None,
+                          TokenUsage(
+            input_tokens=_count(usage, "prompt_token_count")
+            + _count(usage, "tool_use_prompt_token_count"),
+            output_tokens=_count(usage, "candidates_token_count") + (thoughts or 0),
+            cache_read_tokens=_optional(usage, "cached_content_token_count"),
+            cache_write_tokens=_optional(usage, "cache_creation_input_tokens"),
+            reasoning_tokens=thoughts,
+        ), source="provider_response")
 
     def _maybe_declare_workflow_topology(self, agent: Any) -> None:
         """Walk a Google ADK workflow agent's sub_agents and declare a
@@ -187,3 +217,12 @@ class GoogleADKAdapter(_BaseAdapter):
             comm_channels=frozenset(),
         )
         self.set_topology(topology, my_role=AgentRole.SUPERVISOR)
+
+
+def _optional(source: Any, name: str) -> int | None:
+    value = getattr(source, name, None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _count(source: Any, name: str) -> int:
+    return _optional(source, name) or 0

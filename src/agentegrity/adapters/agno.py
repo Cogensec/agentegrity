@@ -20,6 +20,7 @@ Event mapping:
     tool_hook  exception                   ->  post_tool_use_failure
     post_hook  (team member)               ->  subagent_stop
     post_hook  (standalone / team leader)  ->  stop
+    post_hook  (any)                       ->  token usage (run_output.metrics)
 
 Notes on Agno 2.x specifics:
 
@@ -58,6 +59,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.core.usage import TokenUsage
 
 if TYPE_CHECKING:
     from agno.agent import Agent
@@ -65,11 +67,53 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("agentegrity.adapters.agno")
 
+# Agno passes each provider's counts through. These report input without
+# the cache (Anthropic's convention, and Bedrock Converse's), so it is
+# added back; Gemini reports thinking outside the output count.
+_CACHE_EXCLUSIVE_PROVIDERS = frozenset({"Anthropic", "AwsBedrock", "VertexAI"})
+_REASONING_EXCLUSIVE_PROVIDERS = frozenset({"Google"})
+
 
 class AgnoAdapter(_BaseAdapter):
     """Instruments Agno agents and teams with agentegrity evaluation."""
 
     _name = "agno"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Agno merges memory and summary model calls into a run's metrics
+        # after post-hooks run, so each run's metrics object is read again
+        # at every stop and at close.
+        self._run_metrics: dict[str, tuple[Any, str | None, str | None]] = {}
+
+    def _record_run(self, run_output: Any) -> None:
+        """Remember a finished run's metrics and record them."""
+        metrics = getattr(run_output, "metrics", None)
+        if metrics is None:
+            return
+        run_id = str(getattr(run_output, "run_id", None) or id(run_output))
+        model = getattr(run_output, "model", None)
+        self._run_metrics[run_id] = (metrics, model, getattr(run_output, "model_provider", None))
+        self._record_metrics(run_id)
+
+    def _refresh_usage(self) -> None:
+        super()._refresh_usage()
+        for run_id in self._run_metrics:
+            self._record_metrics(run_id)
+
+    def _record_metrics(self, run_id: str) -> None:
+        metrics, model, provider = self._run_metrics[run_id]
+        details = getattr(metrics, "details", None)
+        if isinstance(details, dict) and details:
+            for model_type, entries in details.items():
+                for index, entry in enumerate(entries or []):
+                    self.record_usage(
+                        f"agno:{run_id}:{model_type}:{index}", getattr(entry, "id", None),
+                        _agno_usage(entry, getattr(entry, "provider", None)), source=SOURCE,
+                    )
+        else:
+            self.record_usage(f"agno:{run_id}", model, _agno_usage(metrics, provider),
+                              source=SOURCE)
 
     def instrument(self, agent: Agent) -> Agent:
         """Attach agentegrity hooks to a single Agno agent.
@@ -170,6 +214,10 @@ class AgnoAdapter(_BaseAdapter):
                 adapter._dispatch("user_prompt_submit", {"prompt": prompt})
 
         def _post(run_output: Any) -> None:
+            try:
+                adapter._record_run(run_output)
+            except Exception as exc:
+                logger.warning("usage capture failed: %s", exc)
             if is_team_member:
                 adapter._dispatch(
                     "subagent_stop",
@@ -233,3 +281,23 @@ def _append_hook(target: Any, attr: str, hook: Any) -> None:
         setattr(target, attr, [hook])
     else:
         existing.append(hook)
+
+
+SOURCE = "provider_response"
+
+
+def _agno_usage(metrics: Any, provider: str | None) -> TokenUsage:
+    """Normalize Agno metrics for one model (or a run) given its provider."""
+    def count(name: str) -> int:
+        value = getattr(metrics, name, 0)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    cache_read, cache_write = count("cache_read_tokens"), count("cache_write_tokens")
+    reasoning = count("reasoning_tokens")
+    inputs, output = count("input_tokens"), count("output_tokens")
+    if provider in _CACHE_EXCLUSIVE_PROVIDERS:
+        inputs += cache_read + cache_write
+    if provider in _REASONING_EXCLUSIVE_PROVIDERS:
+        output += reasoning
+    return TokenUsage(input_tokens=inputs, output_tokens=output, cache_read_tokens=cache_read,
+                      cache_write_tokens=cache_write, reasoning_tokens=reasoning, requests=None)
