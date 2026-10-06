@@ -94,7 +94,7 @@ Each re-exports `registerExporter()`, `report()`, and `reset()` for the same fan
 Coding agents run commands through one generic shell tool, so they are instrumented through their hook systems instead of a library call. Install the library for the `python3` on your PATH, then the plugin for your host:
 
 ```bash
-pip install "agentegrity>=0.11.0"
+pip install "agentegrity>=0.12.0"
 codex plugin marketplace add cogensec/agentegrity      # Codex: then trust the hooks once with /hooks
 # Claude Code: /plugin marketplace add cogensec/agentegrity
 #              /plugin install agentegrity@agentegrity

@@ -10,6 +10,15 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-06
+
+Token usage and TypeScript packages that attach to their frameworks. Every adapter reports the
+LLM tokens a session spends, and the TypeScript packages are rebuilt against their frameworks'
+real lifecycle APIs; four of them received no events before this release.
+
+Read **Breaking** before you upgrade: two TypeScript entry points changed, and two Python
+extras require newer framework releases.
+
 ### Added
 
 - **Token usage.** Adapters now report the LLM tokens a session spends: each `stop` event carries the running total in `data.usage` and the session summary carries the final one in `usage` (`SessionUsage` in `schemas/exporter/common.json`). Counts are normalized because frameworks disagree about cache: `input_tokens` includes cached tokens, and cache and reasoning counts are parts of input and output. Totals are kept per model, entries are keyed per model call so repeated lines and running totals count once, and `complete` is false when calls are known to be missing. Claude Code reads its session and subagent transcripts, Codex reads `token_usage_record` lines from its rollout, and the Python Claude Agent SDK adapter reads the transcript its hooks name, or takes `ResultMessage.model_usage` through the new `ClaudeAdapter.observe()`. Readers keep only usage counts and model names. The hook runtime saves where each transcript was read to (`<session>.usage.json`, mode 0600), so a daemon restart reports only new tokens instead of counting the transcript again. `_BaseAdapter.record_usage()` is the entry point for the remaining adapters. See `spec/token-usage.md`.
@@ -20,9 +29,14 @@ in beta until the v1.0 stability criteria documented in
 
 ### Changed
 
-- **Framework extras require the releases the usage code needs.** `agentegrity[crewai]` now requires `crewai>=1.15.0`, the first release with `UsageMetrics.from_provider_dict`, and `agentegrity[google-adk]` requires `google-adk>=1.18.0`, the first with `LlmResponse.model_version`. With the old floors, installing every extra resolved to crewai 1.6.1 and google-adk 1.10.0. An older crewai installed outside the extra still runs the adapter; it reports lifecycle events and no usage.
-- **TypeScript package entry points follow their frameworks.** `@agentegrity/openai-agents`: `instrument(runner)` replaces `runHooks()`, which the SDK has no option for. `@agentegrity/crewai`: `instrument(crewaiEventBus, { crew })` returns a function that unsubscribes and ends the session, replacing the `attach` / `onEvent` / `handlers` bridge. `@agentegrity/vercel-ai` adds `telemetry()` for AI SDK 7's `registerTelemetry`. The other packages keep their call shape.
+- `@agentegrity/vercel-ai` adds `telemetry()` for AI SDK 7, which removed the tracer option: `registerTelemetry(telemetry())`.
 - **Drift above twice the tolerance alerts instead of blocking.** `CorticalLayer(block_on_drift=True)` restores blocking. With drift now live (below), keeping the block would deny calls whenever a session's tool mix departed from history, on every enforcing adapter and both coding-agent hosts.
+
+### Breaking
+
+- **`@agentegrity/openai-agents`:** `runHooks()` is removed; the SDK has no `hooks` run option, so it never received events. Instrument the runner instead: `const runner = instrument(new Runner()); await runner.run(agent, input)`.
+- **`@agentegrity/crewai`:** `instrument()` and its `attach` / `onEvent` / `handlers` bridge are replaced by `instrument(crewaiEventBus, { crew })` from `@crewai-ts/core`, which returns a function that unsubscribes and ends the session. The old bridge listened for event names no CrewAI release emits.
+- **Framework extras require the releases the usage code needs.** `agentegrity[crewai]` now requires `crewai>=1.15.0`, the first release with `UsageMetrics.from_provider_dict`, and `agentegrity[google-adk]` requires `google-adk>=1.18.0`, the first with `LlmResponse.model_version`. With the old floors, installing every extra resolved to crewai 1.6.1 and google-adk 1.10.0. An older crewai installed outside the extra still runs the adapter; it reports lifecycle events and no usage.
 
 ### Fixed
 

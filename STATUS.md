@@ -136,7 +136,7 @@ framework itself, with an offline model.
 | `GET_STARTED_AI_GUIDE.md`            |   ✅   | Self-install guide for coding agents with mandatory human-review checkpoints and hard rules (no enforcement, no network exporters without explicit approval). |
 | Lint (`ruff`)                        |   ✅   | Clean. |
 | Type check (`mypy --strict`)         |   ✅   | 57 source files, zero issues. Run it with the project's interpreter (`python -m mypy`); a standalone mypy without `cryptography` reports 3 spurious `import-not-found` errors. |
-| Python tests                         |   ✅   | 988 passing; 44 skip when optional extras (`llm`, `kms`, `otel`, framework SDKs) are not installed. |
+| Python tests                         |   ✅   | 1078 passing; 78 skip when optional extras (`llm`, `kms`, `otel`, framework SDKs) are not installed. |
 | TypeScript build / typecheck / test  |   ✅   | All 7 packages green via `bun run`. |
 | CI matrix (Python 3.10/3.12, Node 18/20/22) | ✅ | `.github/workflows/ci.yml`. |
 | Version-parity gate                  |   ✅   | `scripts/check_versions.py` (Python) + `scripts/check-versions.ts` (TS) wired into CI. |
