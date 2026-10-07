@@ -1,0 +1,92 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Agentegrity",
+  "description": "Integrity verification, signed decision provenance and token usage for AI agents.",
+  "colors": {
+    "primary": "#0B5F80",
+    "light": "#3FA3C9",
+    "dark": "#0B5F80"
+  },
+  "logo": {
+    "light": "/logo/light.png",
+    "dark": "/logo/dark.png",
+    "href": "https://docs.cogensec.com"
+  },
+  "favicon": "/favicon.png",
+  "navbar": {
+    "links": [
+      {
+        "label": "Console",
+        "href": "https://app.cogensec.com"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Cogensec/agentegrity"
+    }
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "index",
+          "quickstart",
+          "installation"
+        ]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "concepts/how-it-works",
+          "concepts/scoring-and-actions",
+          "concepts/attestation",
+          "concepts/multi-agent",
+          "concepts/token-usage"
+        ]
+      },
+      {
+        "group": "Integrations",
+        "pages": [
+          "integrations/overview",
+          "integrations/python",
+          "integrations/typescript",
+          "integrations/claude-code",
+          "integrations/codex"
+        ]
+      },
+      {
+        "group": "Sending data",
+        "pages": [
+          "exporters/overview",
+          "exporters/agentegrity-pro",
+          "exporters/opentelemetry",
+          "exporters/alerts"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/configuration",
+          "reference/cli",
+          "reference/events",
+          "reference/specification"
+        ]
+      },
+      {
+        "group": "Security and privacy",
+        "pages": [
+          "security/data-flows",
+          "telemetry",
+          "security/threat-model"
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Cogensec/agentegrity"
+    }
+  }
+}

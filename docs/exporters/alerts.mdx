@@ -1,0 +1,98 @@
+---
+title: "Webhook and Slack alerts"
+description: "Post a short alert to a webhook or Slack channel when an evaluation returns block or escalate."
+---
+
+`WebhookAlertExporter` posts a small JSON alert whenever an evaluated event's action is one you choose, by default `block` and `escalate`. `SlackAlertExporter` is the same exporter with the body shaped for Slack incoming webhooks. Both use only the standard library and are importable from `agentegrity` or `agentegrity.exporters.alerts`.
+
+<Warning>
+In 0.12.0, alerts are not delivered when the exporter is registered on an adapter. The adapter passes each event to `on_event` as a dict, while the alert exporters read it as a `FrameworkEvent` object, so every call fails with an `AttributeError` that the adapter catches and logs as `exporter WebhookAlertExporter.on_event raised synchronously`. The alert exporters also define their callbacks as plain functions, which the adapter tries to await and logs as a failure. The agent is unaffected. Until this is fixed, calling `on_event` directly with a `FrameworkEvent`, as in the example under [Using the exporter directly](#using-the-exporter-directly), is the path that delivers alerts.
+</Warning>
+
+## Constructor
+
+```python
+import os
+
+from agentegrity import SlackAlertExporter, WebhookAlertExporter
+
+webhook = WebhookAlertExporter("https://hooks.example.com/agentegrity")
+slack = SlackAlertExporter(os.environ["SLACK_WEBHOOK_URL"])
+```
+
+<ParamField path="url" type="str" required>
+Webhook endpoint. Each alert is POSTed with `Content-Type: application/json`.
+</ParamField>
+<ParamField path="alert_on" type="set[str] | None" default="{'block', 'escalate'}">
+Actions that trigger an alert. Possible actions are `pass`, `alert`, `escalate` and `block`. Keyword-only.
+</ParamField>
+<ParamField path="timeout" type="float" default="5.0">
+Per-request timeout in seconds. Keyword-only.
+</ParamField>
+
+## What triggers an alert
+
+`on_event` looks at the event's evaluation result. Events without one (for example `post_tool_use_failure` or `subagent_start`) never alert. For evaluated events, the exporter alerts when the overall action (the most severe action across the layers) is in `alert_on`. `on_session_start` does nothing.
+
+## Payload
+
+`WebhookAlertExporter` sends this body:
+
+```json
+{
+  "source": "agentegrity",
+  "session_id": "bec05cee54364057b2d17ac59426d2ac",
+  "adapter": "langchain",
+  "event_type": "pre_tool_use",
+  "action": "block",
+  "composite": 0.42,
+  "failing_layers": ["adversarial"],
+  "tool_name": "payment_execute",
+  "timestamp": "2026-10-07T05:46:29.457721+00:00"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `source` | Always `agentegrity` |
+| `session_id` | The adapter's session id |
+| `adapter` | Adapter name |
+| `event_type` | Event that was evaluated |
+| `action` | The action that triggered the alert |
+| `composite` | Composite integrity score, rounded to 4 decimals |
+| `failing_layers` | Names of the layers that did not pass |
+| `tool_name` | The event's `tool_name`, or `null` |
+| `timestamp` | Event timestamp, ISO 8601 |
+
+`SlackAlertExporter` sends a body with a single `text` field: one line that names the action (in bold), the adapter, the event type, the tool when there is one, the composite score, the failing layers and the session id.
+
+The `{"text": ...}` shape is also accepted by Discord- and Teams-compatible endpoints that take Slack-style payloads. To post a different shape, subclass `WebhookAlertExporter` and override `_format(alert)` to return the body you want.
+
+Alerts carry the verdict and nothing else. Prompts, tool arguments, tool output and layer details are never included.
+
+## Delivery
+
+Alerts go on a queue of up to 200 and are posted in order by one background daemon thread. A full queue drops the alert and logs `alert queue full; dropping <action> alert`. A failed POST is logged as `alert delivery failed (...); dropping` on the `agentegrity.exporters.alerts` logger, with no retry. `on_session_end` calls `flush()`, which waits up to 5 seconds for queued alerts to go out; you can call `flush(timeout=...)` yourself.
+
+`describe()` returns the exporter type and the URL with its query string removed, so a token passed as a query parameter does not appear in the session summary.
+
+## Using the exporter directly
+
+`on_event` accepts a `FrameworkEvent`. Calling it yourself delivers alerts in 0.12.0:
+
+```python
+import os
+
+from agentegrity import SlackAlertExporter
+from agentegrity.langchain import adapter
+
+slack = SlackAlertExporter(os.environ["SLACK_WEBHOOK_URL"])
+
+# After a run, forward the events the default LangChain adapter recorded.
+ad = adapter()
+for event in ad.events:
+    slack.on_event(ad.session_id, event)
+slack.flush()
+```
+
+`events` returns the `FrameworkEvent` objects the adapter has emitted, and `session_id` is the id registered exporters see. This runs after the fact, so it suits batch jobs and tests more than live alerting.

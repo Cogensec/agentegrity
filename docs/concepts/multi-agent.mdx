@@ -1,0 +1,147 @@
+---
+title: "Multi-agent systems"
+description: "How adapters declare the topology of a team, crew or graph, which events and checks that enables, and how to verify links between agents' chains."
+---
+
+When an agent runs as part of a team, crew, graph or handoff chain, the adapter declares an `AgentTopology` describing who participates and in which role. The topology changes what the layers check, and every attestation commits to it by hash, so a verifier can prove which structure the agent was part of at each evaluation.
+
+## Topology types
+
+All of these are exported from `agentegrity`.
+
+| Type | What it is |
+|---|---|
+| `AgentTopology` | A frozen snapshot: `kind`, `members`, `comm_channels`, a `topology_id` that stays the same across changes, and `created_at` |
+| `AgentMember` | One participant: `agent_id`, `name`, `role`, `parent_id` (`None` for a root or peer), `capabilities` |
+| `AgentRole` | `LEADER`, `MEMBER`, `SUPERVISOR`, `WORKER`, `PEER` |
+| `TopologyKind` | `HUB_SPOKE`, `HIERARCHICAL_DAG`, `PEER_TO_PEER`, `GROUP_CHAT` |
+| `TopologyChange` | A diff between two snapshots: previous and new ids and hashes, `added_members`, `removed_member_ids` |
+
+A snapshot never changes. `with_member()`, `without_member()` and `with_channels()` return a new snapshot with the same `topology_id` and a new `content_hash()`. The hash is a SHA-256 over the kind, members and channels only, so the same structure hashes the same in any process, and the TypeScript client produces the same digest for the same structure. `leader()` returns the `LEADER` or `SUPERVISOR` member, `children_of(agent_id)` the members under a parent, and `member(agent_id)` a lookup.
+
+| Kind | Shape | Roles used |
+|---|---|---|
+| `HUB_SPOKE` | One orchestrator, several workers | `LEADER`, `MEMBER` |
+| `HIERARCHICAL_DAG` | A parent-child tree | `SUPERVISOR`, `WORKER` |
+| `PEER_TO_PEER` | Handoffs between equals | `PEER` |
+| `GROUP_CHAT` | Dynamic membership with broadcast | `PEER` |
+
+## How each framework declares topology
+
+Each adapter declares the topology at the point its framework exposes the structure, and grows it when new members appear at runtime.
+
+| Framework | Entry point | Kind | Members and growth |
+|---|---|---|---|
+| Agno | `agentegrity.agno.instrument_team(team)` | `HUB_SPOKE` | The team (by `team.name`) is `LEADER`; each of `team.members` is a `MEMBER` under it. A callable members provider cannot be listed up front, so only the leader is declared |
+| CrewAI | `agentegrity.crewai.instrument(crew)` | `HUB_SPOKE` for a sequential crew, `HIERARCHICAL_DAG` for a hierarchical one | Agents are identified by `agent.role`. Sequential: the first agent is `LEADER` and the rest are `MEMBER`s under it. Hierarchical: every agent is a `WORKER` with no parent |
+| AWS Bedrock Agents | `agentegrity.bedrock_agents.instrument_strands(agent)` or `wrap_client(client)` | `HUB_SPOKE` | Seeded with the supervisor as `LEADER` (the Strands agent, or the `agentId` of each `invoke_agent` call). On the boto3 path each collaborator seen in the trace is added as a `MEMBER` |
+| AutoGen | `agentegrity.autogen.instrument()` | `GROUP_CHAT` | The root `invoke_agent` span seeds the first `PEER`; each nested agent span adds one. If sampling drops the root, the first span seen seeds it |
+| Google ADK | `agentegrity.google_adk.instrument(workflow_agent)` | `HIERARCHICAL_DAG` | A `SequentialAgent`, `ParallelAgent` or `LoopAgent` is the `SUPERVISOR`; each of its direct `sub_agents` is a `WORKER`. A plain `Agent` declares nothing |
+| LangGraph | `agentegrity.langchain.instrument_graph(graph)` | `HIERARCHICAL_DAG` or `PEER_TO_PEER` | Reads `graph.get_graph().nodes`. A node named `supervisor`, `supervisor_agent` or `orchestrator` becomes the `SUPERVISOR` with every other node a `WORKER`. Otherwise every node is a `PEER` |
+| OpenAI Agents SDK | `agentegrity.openai_agents.run_hooks()` | `PEER_TO_PEER` | The first agent to start is a `PEER`; each handoff adds the target as a `PEER` and emits `subagent_start` |
+| Claude Agent SDK | `agentegrity.claude.hooks()` | None | Single-agent by framework design. Subagents are reported as `subagent_start` / `subagent_stop` events, without a topology |
+
+<Note>
+LangGraph declares a topology for any compiled graph with nodes, including a single-agent workflow graph, because node names are the only structure the adapter can read. Without a supervisor node, every node is treated as a peer.
+</Note>
+
+The TypeScript packages for LangChain, OpenAI Agents, CrewAI and Google ADK declare topology the same way through `DefaultAdapter.setTopology()`; see [TypeScript](/integrations/typescript).
+
+You can also declare a topology yourself on any adapter:
+
+```python
+from agentegrity import AgentMember, AgentRole, AgentTopology, TopologyKind
+
+topology = AgentTopology(
+    kind=TopologyKind.HUB_SPOKE,
+    members=(
+        AgentMember(agent_id="planner", name="planner", role=AgentRole.LEADER),
+        AgentMember(agent_id="coder", name="coder", role=AgentRole.MEMBER, parent_id="planner"),
+    ),
+    comm_channels=frozenset({"peer_messages"}),
+)
+adapter.set_topology(topology, my_role=AgentRole.LEADER)
+```
+
+The first `set_topology()` emits `topology_declared`. A later call with a different structure emits `topology_change` with the diff. A call with the same structure does nothing.
+
+## Multi-agent events
+
+| Event | Data | Evaluated |
+|---|---|---|
+| `topology_declared` | `topology` | Yes, so the chain commits to the topology right away |
+| `topology_change` | `change` (a `TopologyChange`), `topology` | Yes; that attestation carries both `topology` and `topology_change` Evidence |
+| `peer_message` | `sender_agent_id`, `content`, `channel` | No; buffered and scanned at the next evaluation |
+| `shared_memory_write` | `writer_agent_id`, `key`, `content`, `content_hash`, `summary` | No; buffered and scanned at the next evaluation |
+| `broadcast` | `sender_agent_id`, `channel`, `content` | No; buffered and scanned at the next evaluation |
+| `task_started` | `task_id`, `description`, `agent_id` | No; CrewAI tasks, kept separate from subagents |
+| `subagent_start`, `subagent_stop` | `agent_id` | No; the start writes a lifecycle decision record |
+| `subagent_orphan` | `agent_id`, `reason: stop_without_start` | Emitted when a stop arrives without a start, for example after a dropped span |
+
+The shipped adapters emit the topology, subagent and task events. None of them emit `peer_message`, `shared_memory_write` or `broadcast`: the frameworks do not expose those messages at a hook. If your system passes messages between agents, feed them in yourself:
+
+```python
+await adapter.on_event("peer_message", {
+    "sender_agent_id": "researcher",
+    "content": message_text,
+    "channel": "peer_messages",
+})
+```
+
+Each buffer holds at most 1,000 entries per session, so a flooding peer cannot exhaust memory; the first overflow emits a `<channel>_overflow` event.
+
+## What the layers check
+
+Once a topology is declared, the adapter adds a `topology_context` to every evaluation context (the topology, this agent's role, and the buffered peer messages, shared memory and broadcasts), and the layers use it.
+
+**Peer authority (adversarial).** A peer message or broadcast whose `sender_agent_id` is not a member of the declared topology raises a `peer_authority` threat (severity 0.70, confidence 0.85), which alerts. Without a topology the check is silent, so single-agent deployments see no false positives from it.
+
+**Peer content scanning (adversarial).** Peer messages, shared-memory writes and broadcasts are scanned with the full pattern set, including the three-pattern `peer_coercion` family (instruction override, direct command, user impersonation). Shared-memory threats are recorded on the `shared_memory` channel, and the `shared_memory_write` event keeps the `writer_agent_id`, so a poisoned entry can be traced to the agent that wrote it rather than the one that read it.
+
+**Per-role baselines (cortical).** Drift is measured against a baseline keyed by `(agent_id, role)`. A member that starts behaving like a different role is compared against its own role's history. When no role-specific baseline exists yet, the store falls back to the agent's role-less baseline.
+
+**GOV-004 (governance).** A topology with more than three members makes every evaluation escalate with `REQUIRE_APPROVAL`. Under `enforce=True`, configure an `approval_handler` or every tool call in such a team is denied; see [Scores and actions](/concepts/scoring-and-actions#escalation-and-approval).
+
+**Cascade detection (recovery).** The recovery layer reads `topology_context["peer_score_history"]`, a map of peer agent id to that peer's recent composites. A peer is degrading when, over the last `degradation_window` scores, its range is at least `degradation_threshold` and its second-half minimum is below its first-half maximum by more than the threshold. Two or more degrading peers set `cascade_compromise_suspected` and the layer alerts. No shipped adapter collects peer scores, so this check runs only when you call the evaluator with a context that includes them:
+
+```python
+score = evaluator.evaluate(profile, {
+    "topology_context": {
+        "topology": topology.to_dict(),
+        "peer_score_history": {"coder": coder_scores, "reviewer": reviewer_scores},
+    },
+})
+```
+
+A profile that lists `peer_quarantine` in its capabilities reports `quarantine_capable: true` in the recovery details. The library does not quarantine anything itself.
+
+## Topology on the chain
+
+Every attestation made while a topology is declared carries `Evidence(evidence_type="topology")` with the `topology_id` as source and the snapshot's `content_hash()`. The attestation right after a change also carries `Evidence(evidence_type="topology_change")`. Walking the chain's topology Evidence reconstructs which structure was live at each evaluation without any outside state. See [Attestation](/concepts/attestation#evidence).
+
+## Cross-agent verification
+
+`AttestationChain.verify_cross_agent_links()` checks that `peer_message` and `handoff` Evidence entries in one agent's chain point at real records in its peers' chains:
+
+```python
+from agentegrity import StaticKeyProvider
+
+ok = planner.attestation_chain.verify_cross_agent_links(
+    {"coder": coder.attestation_chain, "reviewer": reviewer.attestation_chain},
+    key_provider=StaticKeyProvider({"coder": coder_pub, "reviewer": reviewer_pub}),
+)
+```
+
+- Each cross-agent Evidence entry must have `source` in the form `<peer_agent_id>:<record_id>`, the peer's chain must contain that record, and its `content_hash` must match the Evidence.
+- A chain that carries cross-agent Evidence fails when no peer chains are supplied, because an unverifiable link is not a verified one. A chain without any cross-agent Evidence passes.
+- With a `key_provider`, each referenced peer record must embed exactly the pinned key for that peer and its signature must verify. Without one, a forged peer chain signed with an attacker's key would check out.
+
+The shipped adapters do not write `peer_message` or `handoff` Evidence yet, so for adapter-built chains this check passes trivially. `agentegrity verify-decisions` checks a single chain and does not run it.
+
+## Limits
+
+- Topology is in-process: one adapter observes one team. Cross-process and federated verification are not built.
+- Topology declarations are not signed separately; they are covered by the attestation's signature when the adapter signs.
+- `GROUP_CHAT` broadcasts in AutoGen arrive as one span per recipient, and messages relayed through the group chat manager are not visible to the span processor.
+
+The normative description is [multi-agent-extensions.md](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/multi-agent-extensions.md).

@@ -1,0 +1,125 @@
+---
+title: "Stream to Agentegrity Pro"
+description: "The library side of streaming sessions to Agentegrity Pro: HTTPExporter, the agentegrity pro command, the TypeScript client and what gets sent."
+---
+
+Agentegrity Pro is the hosted console at [app.cogensec.com](https://app.cogensec.com). This page covers only what the open-source library does to send it data: the `HTTPExporter`, the `agentegrity pro` command and the TypeScript client. Any backend that implements the [exporter HTTP API](/reference/events#http-api) receives the same requests.
+
+<Note>
+Guides for the console itself (workspaces, ingest tokens, what the screens show) are coming in a separate section.
+</Note>
+
+## Turn on streaming with environment variables
+
+Set two variables in the agent's environment and every Python adapter attaches an `HTTPExporter` when it is constructed. Your code does not change.
+
+```bash
+export AGENTEGRITY_TOKEN=agk_live_...
+export AGENTEGRITY_EXPORTER_URL=https://your-backend.example.com
+python my_agent.py
+```
+
+| Variable | Meaning |
+|---|---|
+| `AGENTEGRITY_TOKEN` | Ingest token, sent as `Authorization: Bearer <token>`. Pro tokens start with `agk_live_`. |
+| `AGENTEGRITY_EXPORTER_URL` | Backend origin. The exporter appends `/sessions`, `/sessions/{id}/events` and `/sessions/{id}/end`. |
+| `AGENTEGRITY_URL` | Alias for `AGENTEGRITY_EXPORTER_URL`, read only when that variable is unset. |
+
+Both a token and a URL must be present. With either missing, nothing is attached and the adapter stays local. Attachment is never silent: the adapter logs `agentegrity: streaming session data to <origin>` at INFO on the `agentegrity.adapters` logger, and the session summary lists the sink under `exporters` (see [Checking which sinks are attached](/exporters/overview#checking-which-sinks-are-attached)). Neither shows the token.
+
+The coding-agent hook runtime builds its adapters the same way, so setting these variables where Claude Code or Codex runs streams those sessions too. When the hook falls back to in-process evaluation (no Unix sockets, or a runtime directory that is not private), it does not stream.
+
+## Attach it in code
+
+`HTTPExporter` is importable from `agentegrity` and `agentegrity.exporters`.
+
+```python
+from agentegrity import HTTPExporter
+from agentegrity.openai_agents import register_exporter
+
+register_exporter(HTTPExporter("https://your-backend.example.com", "agk_live_..."))
+```
+
+<ParamField path="base_url" type="str" required>
+Backend origin. A trailing slash is removed.
+</ParamField>
+<ParamField path="token" type="str" required>
+Ingest token, sent as a Bearer credential on every request.
+</ParamField>
+<ParamField path="timeout" type="float" default="5.0">
+Per-request timeout in seconds. Keyword-only.
+</ParamField>
+
+Use one method or the other. If `AGENTEGRITY_TOKEN` and a URL are also set, the adapter attaches its own instance as well, and the backend receives every request twice.
+
+## How delivery works
+
+The exporter never sends from the agent's thread. Each callback puts a request on a FIFO queue, and one background daemon thread per exporter POSTs them in order with the standard library's `urllib`.
+
+**Ordering.** The adapter schedules exporter callbacks without awaiting them, so `on_session_start` and the first `on_event` can complete in either order. The ingest API rejects an event for a session it has not seen (`404`), so a single ordered worker is what guarantees the session exists before its events arrive.
+
+**Queue limit.** The queue holds 1,000 requests. When it is full, new requests are dropped and each drop logs a warning with a running count (`agentegrity exporter: queue full, dropped ...`). Nothing retries a dropped or failed request.
+
+**Fail-open.** HTTP errors, timeouts and connection failures are logged as warnings and the request is discarded. The agent never sees them.
+
+**Process exit.** When the worker starts, the exporter registers an `atexit` handler that waits up to 5 seconds for the queue to drain. You can call `flush(timeout=5.0)` yourself; after a flush, the exporter stops accepting new requests.
+
+**Framework label.** If the profile's `framework` field is empty, `on_session_start` fills it with the adapter name (for example `langchain`) in the copy it sends, so the backend can group agents by framework. Your profile object is not modified.
+
+<Warning>
+The Python exporter sends the Bearer token to whatever URL you configure, including plain `http://` URLs. Use HTTPS for any backend that is not on the same machine.
+</Warning>
+
+## The agentegrity pro command
+
+`agentegrity pro` checks a token against a backend and can then run your agent with streaming turned on.
+
+```bash
+# Check the token and print the workspace it belongs to
+agentegrity pro --ingest-token agk_live_... --url https://your-backend.example.com --push
+
+# Run an agent with streaming enabled
+agentegrity pro --ingest-token agk_live_... --url https://your-backend.example.com -- python my_agent.py
+```
+
+| Option | Meaning |
+|---|---|
+| `--ingest-token <TOKEN>`, `--token <TOKEN>` | Ingest token. Defaults to `AGENTEGRITY_TOKEN`. |
+| `--url <URL>` | Backend origin. Defaults to `AGENTEGRITY_EXPORTER_URL`, then `AGENTEGRITY_URL`. |
+| `--push` | After a successful check, print the variables to set and a reminder to pass a command. It does not stream anything by itself. |
+| `-- <command> ...` | Everything after `--` is the command to run. |
+
+The command first sends `GET <url>/ingest/verify` with the token and prints `connected to <url> (workspace: <name>)`. A `401` means the token was rejected; a `404` means the URL does not serve `/ingest/verify`. Either error, or an unreachable URL, exits with status 1 before anything runs. Missing token or URL exits with status 2.
+
+With a command, it sets `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` and replaces itself with your command (`execvp`). Adapters constructed inside that process attach the `HTTPExporter` from the environment. A command that cannot be found exits with status 127.
+
+See the [CLI reference](/reference/cli#pro) for all commands.
+
+## TypeScript client
+
+The `@agentegrity/<framework>` packages send every session through the `AgentegrityReporter` in `@agentegrity/client`, which speaks the same HTTP API. They read different variables from the Python library:
+
+| Variable | Effect |
+|---|---|
+| `AGENTEGRITY_URL` | Backend origin. Default `http://localhost:8787`. `AGENTEGRITY_EXPORTER_URL` is not read. |
+| `AGENTEGRITY_TOKEN` | Bearer token. Sent only when the URL is HTTPS or a loopback host (`localhost`, `*.localhost`, `127.0.0.1`, `::1`); otherwise it is withheld and a configuration error is reported once. |
+| `AGENTEGRITY_DISABLED` | `1`, `true` or `TRUE` turns the adapter off: no events, no requests, no exporter callbacks. |
+| `AGENTEGRITY_OFFLINE` | `1`, `true` or `TRUE` skips the HTTP requests while still calling registered exporters. |
+
+<Warning>
+The TypeScript reporter is always on. With no variables set, each package POSTs every payload to `http://localhost:8787`. Set `AGENTEGRITY_OFFLINE=1` or `AGENTEGRITY_DISABLED=1` if nothing should be sent.
+</Warning>
+
+The adapter awaits each request before it calls registered exporters and returns. A failed request is passed to `onError` (by default `console.warn`) and dropped. There is no queue and no retry. You can pass `baseUrl`, `apiKey`, `fetchImpl` and `onError` through `reporterOptions` when you build an adapter with `createDefaultAdapter` from `@agentegrity/client`.
+
+The TypeScript packages do not evaluate events. Their events carry `evaluation_result: null`, and their session summaries report zero attestation records.
+
+## What is sent
+
+Streaming sends the full session. The three request bodies are the [exporter payloads](/reference/events):
+
+- `POST /sessions` carries the session id, adapter name and agent profile.
+- `POST /sessions/{id}/events` carries one event per request, including its `data` field. For tool calls that is the tool name and its arguments; for tool results, the tool output; for prompts, the prompt text; for `pre_compact`, the archived reasoning chain and tool outputs. Evaluated events include the full integrity score with per-layer details.
+- `POST /sessions/{id}/end` carries the session summary: counts, chain status, `exporters`, credential fingerprints and token usage.
+
+Credentials are never sent as values. Declared credentials travel only as HMAC fingerprints (see [Configuration](/reference/configuration#credential-fingerprints)). Everything else the framework passed to the adapter, including any secrets that appear in prompts or tool output, is sent as is. Scrub sensitive fields before they reach the framework if the backend should not see them.

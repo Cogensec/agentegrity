@@ -1,0 +1,102 @@
+---
+title: "What leaves your process"
+description: "Every outbound path in the Agentegrity library, what each one carries and how to turn it on or off."
+---
+
+The Python library evaluates in your process and needs no network. Telemetry is the one path on by default. Every other path on this page runs only when you configure it, and each is configured separately. The TypeScript client behaves differently; see [TypeScript client](#typescript-client).
+
+## Summary
+
+| Path | Default | Destination | Carries |
+|---|---|---|---|
+| [Telemetry](#telemetry) | On | PostHog, `us.i.posthog.com` | Shape only: enum values, counts, rounded scores |
+| [HTTP exporter](#exporters-you-attach) | Off | The URL you set | Full session content |
+| [OpenTelemetry exporter](#exporters-you-attach) | Off | Your OpenTelemetry pipeline | Scores and content hashes; raw content only if you ask |
+| [Custom exporters](#exporters-you-attach) | Off | Wherever your code sends it | Full session content is passed to them |
+| [Alert sinks](#alert-sinks) | Off | The webhook URL you set | Verdict shape only |
+| [`[llm]` layers](#model-backed-layers) | Off | Anthropic's API | The content they classify |
+| [`AdversarialSLMLayer`](#model-backed-layers) | Off | `AGENTEGRITY_SLM_BASE_URL` (local Ollama by default) | The content it classifies |
+| [`KMSCheckpoint`](#kms-checkpoints) | Off | AWS KMS | Data-key requests only |
+| [`agentegrity pro`](#the-agentegrity-pro-command) | Off | The URL you pass | Your ingest token |
+| [TypeScript reporter](#typescript-client) | On | `AGENTEGRITY_URL`, default `http://localhost:8787` | Full session content |
+
+## Telemetry
+
+Anonymous usage analytics: adapter names, enum values (risk tier, agent type, action), counts, durations, rounded scores and coarse environment tags such as the Python version and whether the process runs in CI. Never prompts, model inputs or outputs, tool arguments, file paths, agent names or exception messages. Every event and property is listed on the [Telemetry](/telemetry) page, and every payload is built in one file, [`_telemetry_props.py`](https://github.com/Cogensec/agentegrity/blob/main/src/agentegrity/core/_telemetry_props.py).
+
+A random UUID stored at `~/.agentegrity/id` is the only identifier. Nothing is sent on import.
+
+**Turn off:** set `DO_NOT_TRACK=1` or `AGENTEGRITY_TELEMETRY_DISABLED=1`, or call `agentegrity.disable_telemetry()`. When disabled, no ID file is created, no thread starts and no network is used. `AGENTEGRITY_TELEMETRY_DISABLE_GEOIP=1` keeps telemetry but asks PostHog to skip geographic enrichment.
+
+The TypeScript packages send no telemetry.
+
+## Exporters you attach
+
+Exporters receive everything the adapter sees. Event `data` is the payload the framework handed the adapter, so it includes prompts, tool arguments, tool output and, on `pre_compact`, the reasoning and tool output being compacted away. See [Events and wire format](/reference/events).
+
+**`HTTPExporter`** posts every payload to a backend such as [Agentegrity Pro](/exporters/agentegrity-pro). It attaches in two ways:
+
+- In code, with `register_exporter(HTTPExporter(url, token))`.
+- From the environment: when `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` (or its alias `AGENTEGRITY_URL`) are both set, every Python adapter attaches one at construction. This includes adapters built by the coding-agent hook daemon.
+
+Unset either variable, or pass `stream_from_env=False` to an adapter class, to keep the environment from attaching one. The token is sent as a Bearer header to whatever URL you set, including `http://` URLs.
+
+**`OTelSessionExporter`** writes spans and metrics through your OpenTelemetry providers; where they go is set by your OpenTelemetry configuration. Span attributes carry scores, actions, layer names, tool names and 16-character SHA-256 prefixes of content. Raw content is added only with `capture_content=True`, as span events truncated to 512 characters. See [OpenTelemetry](/exporters/opentelemetry).
+
+**Custom exporters** receive the same full payloads and send them wherever their code does.
+
+## Alert sinks
+
+`WebhookAlertExporter` and `SlackAlertExporter` post to the URL you give them, only for verdicts in their `alert_on` set (`block` and `escalate` by default). The body carries the session id, adapter, event type, action, composite score, failing layer names, tool name and timestamp. Prompts, tool arguments and tool output are never included. See [Webhook and Slack alerts](/exporters/alerts), including the 0.12.0 limitation on registering them with an adapter.
+
+## Model-backed layers
+
+These layers send content to a model to classify it. You turn them on by constructing them; the default layers never call a model.
+
+| Layer | Destination | Sends |
+|---|---|---|
+| `AdversarialLLMLayer` | Anthropic's API, with `api_key` or `ANTHROPIC_API_KEY` | The text of each scanned channel: the latest prompt, reasoning steps, memory reads, tool outputs, retrieved documents, peer messages, shared memory and broadcasts, up to `max_targets_per_evaluation` per evaluation. With `include_session_context=True`, the recent tool names are added. |
+| `CorticalLLMLayer` | Anthropic's API | The reasoning chain with goals and instructions, memory reads, and baseline and current behavior descriptions for drift |
+| `AdversarialSLMLayer` | `<base_url>/chat/completions`, from `base_url=` or `AGENTEGRITY_SLM_BASE_URL`, default `http://localhost:11434/v1` | The same content as `AdversarialLLMLayer` |
+
+All three call their model only on the async path: `await layer.aevaluate(...)`, or an `AsyncIntegrityEvaluator`. Synchronous `evaluate()` runs only the pattern checks, and the framework adapters evaluate synchronously, so these layers make no calls when used inside an adapter. The SLM layer makes no calls when no model name is configured.
+
+## KMS checkpoints
+
+`KMSCheckpoint` (`pip install "agentegrity[kms]"`) encrypts recovery checkpoints with a data key from AWS KMS. It calls `GenerateDataKey` on save and `Decrypt` on load. Snapshot content is encrypted locally with AES-GCM and stored through the inner checkpoint backend; KMS receives the key id, the optional encryption context and the wrapped data key, never the snapshot.
+
+## The agentegrity pro command
+
+`agentegrity pro` sends `GET <url>/ingest/verify` with your token to check it, then, if you pass a command, runs it with streaming turned on. See [CLI](/reference/cli#pro).
+
+## TypeScript client
+
+Every `@agentegrity/<framework>` package sends each session through the built-in reporter to `AGENTEGRITY_URL`. With nothing set, that is `http://localhost:8787`, so payloads stay on the machine but requests are still made (and fail with a warning if nothing listens). The payloads are the same full-content exporter payloads, without integrity scores, because the TypeScript packages do not evaluate.
+
+**Turn off:** `AGENTEGRITY_OFFLINE=1` skips the requests and keeps exporters you registered; `AGENTEGRITY_DISABLED=1` turns the adapter off. The token in `AGENTEGRITY_TOKEN` is sent only to HTTPS or loopback URLs.
+
+## Checking a session
+
+The session summary names every exporter attached to the adapter:
+
+```python
+from agentegrity.langchain import report
+
+report()["exporters"]
+# []                                                       nothing attached
+# [{'type': 'HTTPExporter', 'target': 'https://...'}]      streaming to that origin
+```
+
+Each entry has a `type` and, for sinks with a nameable destination, a `target` origin. Alert sink targets have their query string removed. Neither the summary nor the INFO log line written when the HTTP exporter attaches contains a token.
+
+An empty `exporters` list means no exporter was attached to that adapter. It does not cover telemetry, model-backed layers or `KMSCheckpoint`, which are configured separately, and the TypeScript summary has no `exporters` field.
+
+## Written to local disk
+
+These stay on the machine but outlive the process:
+
+- `~/.agentegrity/id`, the telemetry ID (only while telemetry is on).
+- `~/.agentegrity/<host>/` (or `AGENTEGRITY_HOOK_DIR`), the coding-agent hook runtime's decision chains (written with mode `0600`), token-usage state and behavioral baselines.
+- Any `FileCheckpoint`, `FileBaselineStore` or SQLite store you configure.
+
+The rest of the library keeps chains and summaries in memory. Persist them yourself with `AttestationChain.to_json()` if you need them.

@@ -1,0 +1,154 @@
+---
+title: "Claude Code"
+description: "The Claude Code hook plugin: what it checks, how to install and configure it, how it fails, and how to stream sessions to a console."
+---
+
+The Claude Code plugin evaluates every tool call in a session and writes a hash-linked decision chain you can verify afterwards. Everything runs on your machine. Sessions stream to a console only when you set `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL`.
+
+## What it does
+
+The plugin registers `python3 -m agentegrity hook --host claude-code` on nine Claude Code hook events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop`, `PreCompact` and `SessionEnd`. Claude Code starts a new process for every hook, so the first hook of a session starts a small daemon that holds the session's state. Every later hook forwards its payload to that daemon, and the layers see the whole conversation in order instead of one call at a time.
+
+A `PreToolUse` verdict maps to Claude Code's permission decision: `block` becomes `deny`, `escalate` becomes `ask` (an approval prompt), and everything else stays silent so Claude Code's normal permission flow decides. What the runtime checks:
+
+- **Argument classification.** Shell commands are tokenized the way the shell reads them. A downloaded or decoded payload piped into an interpreter, or deleting logs and shell history, is denied. Commands computed at runtime (`$IFS` splicing, computed executables) ask.
+- **Sensitive-data egress (GOV-005).** An external send after a secret was read anywhere in the session, or in the same command, asks. Reading a secret alone is allowed and recorded.
+- **Output scanning.** Injection found in anything a tool returns lowers the score until the context is compacted.
+- **Written content.** Text written into files by `Write`, `Edit` and multi-edit `edits` is scanned for instructions, since a file is how an injection persists across sessions. A strong finding asks; a finding that blocks denies.
+- **Governance.** Sensitive tool names are gated and the match is MCP-aware: an entry for `file_delete` also gates `mcp__filesystem__file_delete`.
+- **Behavioral drift.** Each session that ends without a `block` or `escalate` teaches a per-agent baseline in `<hook dir>/claude-code/baselines/`. Later sessions whose tool mix departs from it lower the score and alert. Drift never blocks here.
+- **Token usage.** Read from the session transcript and each subagent's transcript at every `Stop` and at session end, normalized and totalled per model, and sent on `stop` events and in the session summary. Only usage counts and model names are kept from the transcript.
+- **Decision chain.** Every evaluation and a `hook_verdict` decision for every non-allow verdict are appended to `<hook dir>/claude-code/<session>.chain.json`, written atomically with mode 0600 and resumed if the daemon restarts.
+
+Verify a chain with:
+
+```bash
+agentegrity verify-decisions ~/.agentegrity/claude-code/<session>.chain.json
+```
+
+The chain is unsigned, so verification proves the records are intact and linked, not who wrote them. See [Attestation](/concepts/attestation).
+
+## Install
+
+Install the library so that the `python3` on your `PATH` can import it:
+
+```bash
+pip install "agentegrity>=0.12.0"
+```
+
+Then, inside Claude Code:
+
+```
+/plugin marketplace add cogensec/agentegrity
+/plugin install agentegrity@agentegrity
+```
+
+Run `/agentegrity-status` to check the wiring. It reports whether the library is importable, the mode, whether console streaming is on, the chain directory, and record and decision counts for up to five chain files in that directory. It also warns about legacy `AGENTEGRITY_CC_*` variables, which are ignored.
+
+The plugin version (0.12.0) matches the library version it needs. If the hook command fails because the library is missing or older than 0.11.0, the plugin prints a system message saying the action was not checked, and the action goes through.
+
+### Wiring the hook without the plugin
+
+The plugin's [`hooks/hooks.json`](https://github.com/Cogensec/agentegrity/blob/main/integrations/claude-code/hooks/hooks.json) uses the standard hook format, so you can register the same command in a Claude Code settings file (for example `~/.claude/settings.json`) instead. Register it on all nine events; a partial set loses failures, subagent boundaries or the session end. Two of the entries:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -m agentegrity hook --host claude-code",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -m agentegrity hook --host claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The plugin uses `"matcher": "*"` on `PreToolUse`, `PostToolUse` and `PostToolUseFailure`, no matcher on the other events, a 20 second timeout everywhere except `SessionEnd` (5 seconds), and appends `|| echo '{"systemMessage": ...}'` to each command so a missing library produces a warning. Copy those details from the plugin's file.
+
+## Configuration
+
+All variables are optional and shared with the [Codex plugin](/integrations/codex). The runtime reads them from the hook's environment, which is the environment Claude Code runs in.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts in the chain but never denies or asks. Any other value means `enforce`. |
+| `AGENTEGRITY_HOOK_DISABLED` | unset | `1` disables the hook entirely. |
+| `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating: `low`, `medium`, `high` or `critical`. An invalid value falls back to `high`. |
+| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `<host>/<session>.chain.json`, `<session>.usage.json` and `<host>/baselines/`. |
+| `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | The daemon exits after this many seconds without a hook. |
+| `AGENTEGRITY_HOOK_TIMEOUT` | `10` | Seconds the hook waits for the daemon's reply before staying silent. |
+| `AGENTEGRITY_AGENT_ID` | `claude-code` | Agent id the console groups this host's sessions under. |
+| `AGENTEGRITY_AGENT_NAME` | `claude-code` | Display name for that agent. |
+| `AGENTEGRITY_MODEL_ID` | unset | Model reported on the agent profile. This is the configured model; a mid-session model switch is not tracked. |
+| `AGENTEGRITY_TOKEN` | unset | Ingest token. Streaming starts when this and a URL are both set. |
+| `AGENTEGRITY_EXPORTER_URL` | unset | Console origin to stream to. `AGENTEGRITY_URL` is accepted as an alias. |
+
+An agent id that is not safe as a file name keeps its drift baseline in memory for that session only.
+
+## Stream sessions to a console
+
+Set the token and URL in the environment Claude Code starts from. The daemon inherits that environment and attaches the built-in `HTTPExporter`, which sends the session start, every event, and the session summary when the session ends (`SessionEnd`, or the idle timeout):
+
+```bash
+export AGENTEGRITY_TOKEN=agk_live_...
+export AGENTEGRITY_EXPORTER_URL=https://your-console.example.com
+export AGENTEGRITY_AGENT_ID=payments-repo
+export AGENTEGRITY_AGENT_NAME="Payments repo agent"
+export AGENTEGRITY_MODEL_ID=claude-sonnet-4-5
+claude
+```
+
+`agentegrity pro` does the same for one command after checking the token against the console:
+
+```bash
+agentegrity pro --ingest-token agk_live_... --url https://your-console.example.com -- claude
+```
+
+Events carry full content, including prompts and tool arguments. The session summary lists every attached sink under `exporters`. Only the daemon streams: when the runtime falls back to in-process evaluation (below), nothing is sent. See [Agentegrity Pro](/exporters/agentegrity-pro) and [Data flows](/security/data-flows).
+
+## Failure semantics
+
+The hook never breaks a session. When it cannot reach a verdict it prints nothing, which leaves the decision to Claude Code's permission flow.
+
+| Situation | What happens |
+|---|---|
+| The daemon cannot run: no Unix sockets (Windows), the runtime directory (`agentegrity-<uid>` under `$XDG_RUNTIME_DIR` or the temp directory) is not private to your user, or the daemon does not come up within 5 seconds | Each call is evaluated in-process from the persisted chain. Single-call rules still enforce; cross-call rules (GOV-005 across calls) and streaming are lost. |
+| The daemon is up but does not answer within `AGENTEGRITY_HOOK_TIMEOUT` | The hook prints nothing and Claude Code's permission flow decides. |
+| `python3` cannot import `agentegrity`, or it is older than 0.11.0 | The plugin's fallback prints a system message that the action was not checked, and the action goes through. |
+| `alert` mode | Every verdict is recorded in the chain; nothing is denied or asked. |
+| A chain file is corrupt | It is moved aside to `<session>.chain.json.corrupt` and a new chain starts. |
+
+## Migrating from 0.1
+
+The per-call `hooks/pretooluse.py` is replaced by the shared runtime.
+
+- Environment variables were renamed: `AGENTEGRITY_CC_MODE` is now `AGENTEGRITY_HOOK_MODE`, `AGENTEGRITY_CC_DISABLED` is `AGENTEGRITY_HOOK_DISABLED`, `AGENTEGRITY_CC_RISK_TIER` is `AGENTEGRITY_RISK_TIER`, and `AGENTEGRITY_CC_CHAIN_DIR` is replaced by `AGENTEGRITY_HOOK_DIR` (chains now live under `<dir>/claude-code`).
+
+<Warning>
+The old names are ignored. A hook you disabled with `AGENTEGRITY_CC_DISABLED=1` is active again until you rename the variable. `/agentegrity-status` lists any `AGENTEGRITY_CC_*` variables it finds.
+</Warning>
+
+- Commands are no longer text-scanned. A bare `cat ~/.aws/credentials` used to be denied; it is now allowed and recorded, and sending the data out afterwards asks.
+- Existing chain files are resumed, not replaced.
+
+## Limits
+
+The hook evaluates tool calls, not the model's reasoning. Static command analysis is a floor: anything the shell computes at runtime is flagged as obfuscated, not resolved. Coding-agent hooks do not declare credentials, so credential fingerprints never appear in these chains. The runtime is marked experimental in [STATUS.md](https://github.com/Cogensec/agentegrity/blob/main/STATUS.md). Treat it as a measurement and enforcement point with verifiable records, not a guarantee. The threats it addresses and the ones it does not are in the [threat model](/security/threat-model).

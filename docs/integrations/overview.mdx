@@ -1,0 +1,118 @@
+---
+title: "Integrations"
+description: "The fourteen framework adapters and two coding-agent hook plugins, what each one can enforce, and the contract they share."
+---
+
+Agentegrity ships fourteen framework adapters (eight Python modules and six TypeScript packages) and two hook plugins for coding agents. Five frameworks have both a Python and a TypeScript adapter, so the adapters cover nine frameworks in total.
+
+The two languages do different work. A Python adapter runs the four evaluation layers in your process, keeps an attestation chain, and can deny tool calls on frameworks that give it a blocking hook. A TypeScript package does not evaluate anything locally: it maps the framework's lifecycle to the same event stream and sends it to a backend and to any exporters you register. The hook plugins run the Python runtime as a command on every Claude Code or Codex hook event.
+
+## All integrations
+
+| Integration | Language | Package or module | Enable call | Enforcement |
+|---|---|---|---|---|
+| Claude Agent SDK | Python | `agentegrity.claude` | `ClaudeAgentOptions(hooks=hooks())` | Denies through the `PreToolUse` hook return |
+| LangChain / LangGraph | Python | `agentegrity.langchain` | `chain = instrument_chain(chain)` / `graph = instrument_graph(graph)` | Observation only |
+| OpenAI Agents SDK | Python | `agentegrity.openai_agents` | `Runner.run(agent, input=..., hooks=run_hooks())` | Observation only |
+| CrewAI | Python | `agentegrity.crewai` | `instrument(crew)` | Observation only |
+| Google ADK | Python | `agentegrity.google_adk` | `instrument(agent)` | Observation only (warns on `enforce=True`) |
+| AutoGen | Python | `agentegrity.autogen` | `instrument()` | Observation only (warns on `enforce=True`) |
+| Agno | Python | `agentegrity.agno` | `agent = instrument(agent)` / `team = instrument_team(team)` | Raises `StopAgentRun` before the tool runs |
+| AWS Bedrock Agents | Python | `agentegrity.bedrock_agents` | `agent = instrument_strands(agent)` / `client = wrap_client(client)` | Strands: sets `event.cancel_tool`. boto3: observation only (warns) |
+| Claude Agent SDK | TypeScript | `@agentegrity/claude-sdk` | `query({ prompt, options: { hooks: hooks() } })` | None (no local evaluation) |
+| LangChain JS / LangGraph JS | TypeScript | `@agentegrity/langchain` | `callbacks: [instrument()]` | None (no local evaluation) |
+| OpenAI Agents JS | TypeScript | `@agentegrity/openai-agents` | `const runner = instrument(new Runner())` | None (no local evaluation) |
+| CrewAI TypeScript | TypeScript | `@agentegrity/crewai` | `const close = instrument(crewaiEventBus, { crew })` | None (no local evaluation) |
+| Google ADK | TypeScript | `@agentegrity/google-adk` | `const close = instrument(agent)` | None (no local evaluation) |
+| Vercel AI SDK | TypeScript | `@agentegrity/vercel-ai` | `experimental_telemetry: instrument()`, or `registerTelemetry(telemetry())` on AI SDK 7 | None (no local evaluation) |
+| Claude Code | Hook plugin | `integrations/claude-code` | `/plugin install agentegrity@agentegrity` | `block` denies, `escalate` asks for approval |
+| Codex | Hook plugin | `integrations/codex` | `codex plugin marketplace add cogensec/agentegrity`, then trust the hooks with `/hooks` | `block` and `escalate` both deny |
+
+"Observation only" means the adapter evaluates every event and records the decision in the attestation chain, but the framework surface it hooks has no way to stop a tool call, so `enforce=True` does not prevent anything. The LangChain, OpenAI Agents and CrewAI adapters evaluate each tool call and discard the decision without raising. Google ADK, AutoGen and the Bedrock boto3 path also emit a `UserWarning` when you pass `enforce=True`.
+
+For enforcement in Python, use the Claude Agent SDK, Agno, or the Strands path of the Bedrock adapter. Under enforcement a `block` verdict always denies, and an `escalate` verdict denies unless an approval handler approves it (see [Scoring and actions](/concepts/scoring-and-actions)).
+
+<CardGroup cols={2}>
+  <Card title="Python frameworks" href="/integrations/python">
+    Extras, `agentegrity.init()`, and one section per framework.
+  </Card>
+  <Card title="TypeScript frameworks" href="/integrations/typescript">
+    The seven npm packages, peer dependencies and environment variables.
+  </Card>
+  <Card title="Claude Code" href="/integrations/claude-code">
+    The hook plugin, its configuration and failure semantics.
+  </Card>
+  <Card title="Codex" href="/integrations/codex">
+    The same runtime on Codex hooks, and the limits of Codex hook coverage.
+  </Card>
+</CardGroup>
+
+## Shared contract
+
+### Zero configuration
+
+Every adapter works with no arguments. What "no arguments" means differs by language.
+
+A Python adapter builds a default `AgentProfile` and a local four-layer evaluator, and sends nothing over the network. It attaches the built-in `HTTPExporter` only when both `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` are set (`AGENTEGRITY_URL` is accepted as an alias for the URL). The hook runtime behind both coding-agent plugins uses the same rule.
+
+A TypeScript package reads `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` when its adapter is created. If `AGENTEGRITY_URL` is unset, it posts to `http://localhost:8787`. It does not read `AGENTEGRITY_EXPORTER_URL`.
+
+<Warning>
+The TypeScript packages send every event over HTTP by default, to `http://localhost:8787` when nothing is configured. Failures are caught and logged as warnings. Set `AGENTEGRITY_URL` to your backend, or set `AGENTEGRITY_DISABLED=1` to turn a package off.
+</Warning>
+
+### Kill switch
+
+Only the TypeScript packages have a library-wide kill switch: `AGENTEGRITY_DISABLED` set to `1`, `true` or `TRUE` makes every hook a no-op, including exporter fan-out ([`default.ts`](https://github.com/Cogensec/agentegrity/blob/main/clients/typescript/packages/client/src/default.ts)). The Python adapters read no disable variable. The coding-agent hook runtime has its own, `AGENTEGRITY_HOOK_DISABLED=1`. `AGENTEGRITY_DISABLE` (without the trailing D) is not read anywhere.
+
+To stop a Python adapter, do not call its entry point. To stop anonymous usage analytics, see [Telemetry](/telemetry).
+
+### Fail-open
+
+An instrumented agent does not fail because of Agentegrity. In Python, exporter exceptions are caught and logged, and each adapter's framework callbacks catch their own errors (the Google ADK adapter, for example, wraps every callback so it never raises into the run). In TypeScript, every exporter call and every HTTP request is wrapped, and errors go to `console.warn`. The deliberate exception is enforcement: a Python adapter with `enforce=True` on a blocking surface denies the call.
+
+### Idempotency
+
+`register_exporter()` (Python) and `registerExporter()` (TypeScript) ignore an exporter instance that is already registered, and closing or ending a session twice sends `on_session_end` once. Both hold on every adapter. The Python conformance suite tests both; the TypeScript suite tests exporter registration.
+
+Repeated instrumentation is guarded on some adapters only:
+
+| Adapter | Instrumenting the same object twice |
+|---|---|
+| Python Google ADK | No-op per agent |
+| `@agentegrity/openai-agents` | No-op per `Runner` |
+| `@agentegrity/crewai` | Returns the existing subscription for that bus and adapter |
+| `@agentegrity/google-adk` | No-op per agent |
+| Every other adapter | Not guarded: the handlers attach again, so call the entry point once per object |
+
+### Event vocabulary
+
+Every adapter maps its framework onto the same canonical event types: `user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `subagent_orphan`, `pre_compact`, `stop`, `task_started`, the multi-agent events (`topology_declared`, `topology_change`, `peer_message`, `shared_memory_write`, `broadcast`), `credential_declared`, `capture_failure`, and one `<channel>_overflow` per capped buffer. [`schemas/exporter/common.json`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter/common.json) accepts any snake_case name and lists the known ones as examples, so a consumer should handle the types it knows and accept the rest. See [Events](/reference/events) for payloads.
+
+### Argument classification
+
+In Python, every `pre_tool_use` is tagged by `classify_tool_call()` with the categories its arguments show: `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper`, `obfuscated_command`. A generic shell tool is judged by the command it runs, not by its name.
+
+The classifier reads command keys (`command`, `cmd`, `script`, `commands`) and path keys (`file_path`, `path`, `filename`, `notebook_path`) in the argument dict, so it only sees what the adapter receives:
+
+| Adapter | Arguments the classifier sees |
+|---|---|
+| Claude Agent SDK, Google ADK, Agno, Bedrock (Strands), both hook plugins | The tool's real argument dict |
+| LangChain / LangGraph | The tool input as one string under `input`, so no command or path key matches |
+| CrewAI | The tool arguments as one string under `args`, so no command or path key matches |
+| OpenAI Agents SDK | An empty dict: `RunHooks.on_tool_start` does not receive arguments |
+| AutoGen | Only the tool call id: AutoGen's `execute_tool` spans carry no arguments |
+
+The TypeScript packages do not classify. They forward the tool arguments they receive in the event payload.
+
+### Version parity
+
+`pyproject.toml` and every `@agentegrity/*` package publish with the same version string (0.12.0 for this release). CI enforces it with [`clients/typescript/scripts/check-versions.ts`](https://github.com/Cogensec/agentegrity/blob/main/clients/typescript/scripts/check-versions.ts). The two plugin manifests carry the same version, which is the library version they need.
+
+## Token usage
+
+Every adapter and both hook plugins put the session's running token usage on each `stop` event and in the session summary, normalized so `input_tokens` always includes cached tokens. Where each integration reads its counts is listed on the Python and TypeScript pages and in [Token usage](/concepts/token-usage).
+
+## Wire format
+
+All adapters send the same JSON payloads. The contract is [`schemas/exporter/`](https://github.com/Cogensec/agentegrity/tree/main/schemas/exporter) (JSON Schema) and [`schemas/openapi.yaml`](https://github.com/Cogensec/agentegrity/blob/main/schemas/openapi.yaml) (OpenAPI 3.1). `tests/test_schemas.py` catches Python drift, and the TypeScript packages share the `EmittableEvent` type from `@agentegrity/client`. See [Exporters](/exporters/overview) for the sinks.

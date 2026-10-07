@@ -1,0 +1,91 @@
+---
+title: "Installation"
+description: "Install the Python library, the TypeScript packages, or the coding-agent plugins."
+---
+
+## Python
+
+Agentegrity needs Python 3.10 or later. The core library has no required dependencies; each framework adapter and optional layer is an extra.
+
+```bash
+pip install "agentegrity>=0.12.0"
+```
+
+Add the extra for your framework so the adapter's dependency is installed at a version the adapter supports:
+
+| Extra | Installs | Use it for |
+|---|---|---|
+| `claude` | `claude-agent-sdk>=0.1.0` | Claude Agent SDK |
+| `langchain` | `langchain-core>=0.3.0` | LangChain and LangGraph |
+| `openai-agents` | `openai-agents>=0.1.0` | OpenAI Agents SDK |
+| `crewai` | `crewai>=1.15.0` | CrewAI |
+| `google-adk` | `google-adk>=1.18.0` | Google ADK |
+| `autogen` | `autogen-agentchat`, `autogen-core` 0.7+, `opentelemetry-sdk` | AutoGen |
+| `agno` | `agno>=2.0` | Agno |
+| `bedrock-agents` | `boto3>=1.34`, `strands-agents>=1.0` | AWS Bedrock Agents and Strands |
+| `crypto` | `cryptography>=41.0` | Ed25519 signing of attestation records |
+| `llm` | `anthropic>=0.40.0` | Model-backed cortical and adversarial checks |
+| `otel` | OpenTelemetry API, SDK and OTLP exporter | The OpenTelemetry exporter |
+| `stats` | `scipy>=1.10` | The `wasserstein` drift metric in `CorticalLayer` (the default is Jensen-Shannon) |
+| `kms` | `boto3>=1.34` | KMS-backed recovery checkpoints |
+| `all` | every extra above | Development and evaluation |
+
+```bash
+pip install "agentegrity[langchain,crypto]"
+```
+
+<Note>
+The CrewAI and Google ADK extras require the first framework releases with the APIs the token-usage code reads. With an older CrewAI installed outside the extra, the adapter still reports lifecycle events but no token usage.
+</Note>
+
+Check the install from the terminal. `info` lists the version and which adapters can import their framework; `doctor` runs an end-to-end evaluation and prints a composite score.
+
+```bash
+python -m agentegrity
+python -m agentegrity doctor
+```
+
+## TypeScript
+
+Each framework has its own package, and all of them depend on `@agentegrity/client`. Install the package for your framework next to the framework itself:
+
+```bash
+npm i @agentegrity/langchain @langchain/core
+```
+
+| Package | Framework |
+|---|---|
+| `@agentegrity/claude-sdk` | Claude Agent SDK |
+| `@agentegrity/langchain` | LangChain JS and LangGraph JS |
+| `@agentegrity/openai-agents` | OpenAI Agents SDK |
+| `@agentegrity/crewai` | CrewAI TypeScript (`@crewai-ts/core`, Node 22+) |
+| `@agentegrity/google-adk` | Google ADK for TypeScript (`@google/adk`) |
+| `@agentegrity/vercel-ai` | Vercel AI SDK |
+| `@agentegrity/client` | Shared adapter, reporter and types for custom integrations |
+
+The packages are tested on Node 18, 20 and 22. A framework can require more: CrewAI TypeScript needs Node 22, and LangChain 1.x needs Node 20. See [TypeScript frameworks](/integrations/typescript) for each entry point.
+
+## Coding agents
+
+Claude Code and Codex are instrumented through their hook systems. Install the library for the `python3` on your `PATH`, then the plugin for your host:
+
+<CodeGroup>
+```bash Claude Code
+pip install "agentegrity>=0.12.0"
+# then, inside Claude Code:
+# /plugin marketplace add cogensec/agentegrity
+# /plugin install agentegrity@agentegrity
+```
+
+```bash Codex
+pip install "agentegrity>=0.12.0"
+codex plugin marketplace add cogensec/agentegrity
+# then trust the hooks once with /hooks
+```
+</CodeGroup>
+
+See [Claude Code](/integrations/claude-code) and [Codex](/integrations/codex) for configuration.
+
+## Telemetry
+
+The library sends anonymous, shape-only usage telemetry by default. Set `DO_NOT_TRACK=1` to turn it off. [Telemetry](/telemetry) lists every event and property.

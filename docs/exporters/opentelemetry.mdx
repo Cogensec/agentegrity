@@ -1,0 +1,141 @@
+---
+title: "OpenTelemetry"
+description: "Emit agentegrity sessions as OpenTelemetry traces and metrics with OTelSessionExporter."
+---
+
+`OTelSessionExporter` turns the exporter callbacks into OpenTelemetry spans and metrics, so any backend your OpenTelemetry SDK already ships to can show integrity scores next to the rest of your traces. It writes through the OpenTelemetry providers in your process and has no destination of its own.
+
+## Install
+
+```bash
+pip install "agentegrity[otel]"
+```
+
+The extra installs `opentelemetry-api`, `opentelemetry-sdk` and `opentelemetry-exporter-otlp` (1.20 or later). The module imports without them; constructing the exporter raises `ImportError` with the install hint.
+
+## Register it
+
+```python
+from agentegrity.exporters.otel import OTelSessionExporter
+from agentegrity.langchain import instrument_graph, register_exporter
+
+register_exporter(OTelSessionExporter())
+graph = instrument_graph(my_graph)
+```
+
+By default the exporter uses the global tracer and meter providers, so configure the service name, OTLP endpoint and exporters the standard way, for example with `OTEL_SERVICE_NAME` and `OTEL_EXPORTER_OTLP_ENDPOINT`. Group telemetry by agent with the `service.name` resource attribute; the exporter keeps its own metric attributes low-cardinality.
+
+### Constructor
+
+All arguments are keyword-only.
+
+<ParamField path="tracer_provider" type="TracerProvider | None" default="None">
+Tracer provider to use instead of the global one.
+</ParamField>
+<ParamField path="meter_provider" type="MeterProvider | None" default="None">
+Meter provider to use instead of the global one.
+</ParamField>
+<ParamField path="capture_content" type="bool" default="False">
+Also attach raw content, truncated to 512 characters, as span events. See [Content and privacy](#content-and-privacy).
+</ParamField>
+<ParamField path="chain_provider" type="Callable[[], AttestationChain] | None" default="None">
+Returns the adapter's attestation chain. When set, the exporter verifies chain signatures at session end and records the result on the session span.
+</ParamField>
+<ParamField path="trusted_keys" type="set[bytes] | None" default="None">
+Raw Ed25519 public keys that signatures must verify against. Used with `chain_provider`.
+</ParamField>
+
+To report signature verification:
+
+```python
+from agentegrity.exporters.otel import OTelSessionExporter
+from agentegrity.langchain import adapter, register_exporter
+
+register_exporter(OTelSessionExporter(
+    chain_provider=lambda: adapter().attestation_chain,
+    trusted_keys={pinned_public_key_bytes},
+))
+```
+
+Without `trusted_keys`, a chain signed with any key verifies against the public keys embedded in its own records, so a forged chain passes. Pin the keys wherever the chain crosses a trust boundary.
+
+An unsigned record counts as a verification failure. Adapters sign records only when constructed with a `signing_key`, so on an adapter without one, `chain_provider` marks every session span as `ERROR`.
+
+## Traces
+
+Each session is one trace.
+
+- **`agentegrity.session`** is the root span. It opens at `on_session_start` and closes at `on_session_end`.
+- **`agentegrity.<event_type>`** is a child span for every event, for example `agentegrity.pre_tool_use`. It starts and ends inside `on_event`.
+
+If the exporter receives an event for a session it never saw start (it was registered late, or `on_session_start` failed), it opens a parentless `agentegrity.session` span with `agentegrity.session.lazy = true` so the event is not lost.
+
+### Session span attributes
+
+Set at start:
+
+| Attribute | Value |
+|---|---|
+| `agentegrity.session.id` | Session id |
+| `agentegrity.adapter` | Adapter name |
+| `agentegrity.agent.id`, `agentegrity.agent.name`, `agentegrity.agent.risk_tier` | From the agent profile |
+| `gen_ai.operation.name` | `invoke_agent` |
+| `gen_ai.agent.name` | Profile name |
+
+Set at end, from the session summary:
+
+| Attribute | Value |
+|---|---|
+| `agentegrity.chain.hash_linked` | `chain_hash_linked` from the summary |
+| `agentegrity.evaluations`, `agentegrity.attestation_records`, `agentegrity.decision_records` | Counts from the summary |
+| `agentegrity.enforce_mode` | Whether enforcement was on |
+| `agentegrity.chain.signatures_verified` | Only with `chain_provider`: whether every record is signed and verifies |
+| `agentegrity.chain.trust_anchored` | Only with `chain_provider`: whether `trusted_keys` was set |
+| `agentegrity.chain.first_bad_record` | Only when verification fails: index of the first failing record |
+
+`hash_linked` shows only that records are linked by unkeyed SHA-256 hashes, which anyone holding the chain can recompute, so a `false` value does not mark the span as an error. A failed signature verification sets the session span status to `ERROR`. When `chain_provider` is not set, the signature attributes are absent, which keeps "not checked" distinct from "failed".
+
+### Event span attributes
+
+| Attribute | When |
+|---|---|
+| `agentegrity.event.type`, `agentegrity.adapter`, `agentegrity.agent.id` | Always |
+| `agentegrity.topology.kind`, `agentegrity.topology.member_count`, `agentegrity.topology.multi_agent` | After an event that carried a topology |
+| `agentegrity.score.composite`, `.action`, `.passed`, `.confidence` | Evaluated events |
+| `agentegrity.score.property.<property>` | Evaluated events, one per integrity property |
+| `agentegrity.layer.<layer>.score`, `agentegrity.layer.<layer>.action` | Evaluated events, one pair per layer |
+| `gen_ai.tool.name` | Events with a `tool_name` |
+| `agentegrity.content.<key>_hash` | For each of `prompt`, `tool_input`, `tool_response`, `output`, `content` present in the event data |
+
+`agentegrity.topology.multi_agent` is `true` only for topologies with two or more members.
+
+### Span events
+
+- **`agentegrity.enforcement.denial`** is added when the verdict is `block` or `escalate`, with the action and composite score.
+- **`agentegrity.health.<event_type>`** is added for instrumentation-health events, and the span status is set to `ERROR`. Health events are `capture_failure`, `subagent_orphan` and every `<channel>_overflow` event; see [Events and wire format](/reference/events#event-types).
+
+## Metrics
+
+| Instrument | Type | Unit | Attributes |
+|---|---|---|---|
+| `agentegrity.evaluations` | Counter | `{evaluation}` | `agentegrity.adapter`, `agentegrity.action`, `agentegrity.multi_agent` |
+| `agentegrity.enforcement.denials` | Counter | `{denial}` | `agentegrity.adapter`, `agentegrity.action` |
+| `agentegrity.health_events` | Counter | `{event}` | `agentegrity.adapter`, `agentegrity.health.type` |
+| `agentegrity.score.composite` | Histogram | `1` | `agentegrity.adapter` |
+| `agentegrity.score.layer` | Histogram | `1` | `agentegrity.adapter`, `agentegrity.layer` |
+| `agentegrity.evaluation.latency` | Histogram | `ms` | `agentegrity.adapter` |
+| `agentegrity.sessions.active` | UpDownCounter | `{session}` | `agentegrity.adapter` |
+
+`agentegrity.enforcement.denials` counts every `block` and `escalate` verdict. It does not check whether enforcement was on or whether an approval handler later approved the action, so treat it as a count of denying verdicts.
+
+The exporter does not emit OpenTelemetry log records. Enforcement and health signals appear as span events plus the counters above.
+
+## Content and privacy
+
+Raw prompts, tool arguments and tool output never go into span attributes. For the five content keys listed above, the exporter writes a 16-character prefix of the value's SHA-256 hash, so you can correlate identical content without seeing it.
+
+With `capture_content=True`, each present content value is also attached as a span event named `agentegrity.content.<key>` with the first 512 characters of the value. Span events can be dropped at the collector if you turn this on and later need to strip it.
+
+## Failure behavior
+
+Every callback catches its own exceptions and logs a warning on the `agentegrity.exporters.otel` logger. A broken OpenTelemetry setup cannot reach the agent. `describe()` returns only `{"type": "OTelSessionExporter"}`, because the destination is set by your OpenTelemetry configuration.

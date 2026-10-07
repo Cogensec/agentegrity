@@ -1,0 +1,301 @@
+---
+title: "Python frameworks"
+description: "Install extras, the init() entry point, and the zero-config module for each of the eight Python framework adapters."
+---
+
+Each Python adapter runs the four evaluation layers in your process, appends to a hash-linked attestation chain, and reports a session summary. Nothing leaves the process unless you register an exporter or set the streaming environment variables (see [Agentegrity Pro](/exporters/agentegrity-pro)).
+
+## Install
+
+The base package has no dependencies. Each framework has an extra that installs it:
+
+```bash
+pip install "agentegrity[claude]"
+```
+
+| Extra | Installs |
+|---|---|
+| `claude` | `claude-agent-sdk>=0.1.0` |
+| `langchain` | `langchain-core>=0.3.0` |
+| `openai-agents` | `openai-agents>=0.1.0` |
+| `crewai` | `crewai>=1.15.0` |
+| `google-adk` | `google-adk>=1.18.0` |
+| `autogen` | `autogen-agentchat>=0.7.0`, `autogen-core>=0.7.0`, `opentelemetry-sdk>=1.20` |
+| `agno` | `agno>=2.0` |
+| `bedrock-agents` | `boto3>=1.34`, `strands-agents>=1.0` |
+
+The `crewai` and `google-adk` floors are the first releases with the APIs the token usage code reads (`UsageMetrics.from_provider_dict` and `LlmResponse.model_version`). An older CrewAI installed outside the extra still runs the adapter; it reports lifecycle events and no usage. The `langchain` extra installs `langchain-core` only; install LangGraph yourself if you use it.
+
+Other extras: `crypto` (Ed25519 signing), `llm` (LLM-backed checks through the Anthropic API), `stats` (Wasserstein drift metric), `kms` (KMS-encrypted checkpoints), `otel` (the OpenTelemetry exporter), and `all`. See [Installation](/installation).
+
+## Two-line start: `init()`
+
+`agentegrity.init()` checks which frameworks are importable, builds one adapter per framework on a shared `AgentegrityClient` and profile, and subscribes CrewAI to its global event bus. It returns an `AgentegrityRuntime`.
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+graph = runtime.instrument(my_graph)   # LangChain / LangGraph / Agno / Strands / Google ADK
+graph.invoke(state)
+print(runtime.report())                # {adapter name: session summary}
+agentegrity.shutdown()                 # ends every session, sends on_session_end
+```
+
+`init()` takes keyword arguments only:
+
+<ParamField path="name" type="str" default="agent">
+  Name for the default `AgentProfile`. Ignored when `profile` is passed.
+</ParamField>
+<ParamField path="frameworks" type="list[str] | None" default="None">
+  Adapter names to build instead of detecting them: `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno`, `bedrock_agents`. An unknown name raises `ValueError`.
+</ParamField>
+<ParamField path="enforce" type="bool" default="False">
+  Forwarded to every adapter. Observation-only adapters warn.
+</ParamField>
+<ParamField path="policy_set" type="str" default="enterprise-default">
+  Governance policy set for the shared client.
+</ParamField>
+<ParamField path="profile" type="AgentProfile | None" default="None">
+  Profile to use instead of a default one.
+</ParamField>
+
+Detection is by import: `claude_agent_sdk`, `langchain_core`, `agents`, `crewai`, `google.adk`, `autogen_agentchat` or `autogen_core`, `agno`, and `strands`. The Bedrock adapter is detected by `strands` only, so a boto3-only project passes `frameworks=["bedrock_agents"]`. When a framework is importable but its adapter's own dependencies are missing, the adapter is skipped and the reason is kept in `runtime.skipped`.
+
+`runtime.instrument(obj)` dispatches on the module of the object's class: LangGraph graphs go to `instrument_graph`, other LangChain runnables to `instrument_chain`, Agno teams to `instrument_team`, Agno agents to `instrument`, Strands agents to `instrument_strands`, and Google ADK agents to `instrument`. It raises `TypeError` for an object it cannot place, and `RuntimeError` when the object's adapter was not built. CrewAI needs no call: `init()` already subscribed it.
+
+Hook-style frameworks and AutoGen are wired from the adapter itself:
+
+```python
+options = ClaudeAgentOptions(hooks=runtime.adapters["claude"].create_hooks())
+await Runner.run(agent, input="...", hooks=runtime.adapters["openai_agents"].create_run_hooks())
+runtime.adapters["autogen"].instrument()   # installs a global OTel TracerProvider
+```
+
+AutoGen is not wired by `init()` because its `instrument()` replaces the global OpenTelemetry tracer provider, which should be your choice.
+
+A second `init()` returns the existing runtime with a `RuntimeWarning`. Call `agentegrity.shutdown()` first to reconfigure. `shutdown()` is safe to call when `init()` never ran. `agentegrity.detect_frameworks()` returns the detected adapter names without building anything.
+
+## Per-framework modules
+
+Each framework also has a zero-config module, imported as `agentegrity.<framework>`. On first use the module builds a process-global adapter with `AgentProfile.default()` and the default client, and every later call reuses it. Each module exports the same four helpers:
+
+| Function | What it does |
+|---|---|
+| `report()` | The module-global adapter's session summary. Returns a well-formed empty summary if the adapter was never built. |
+| `register_exporter(exporter)` | Registers a [`SessionExporter`](/exporters/overview) on the module-global adapter, building it if needed. |
+| `adapter()` | The module-global adapter itself, built on first call. |
+| `reset()` | Discards the module-global adapter. It does not end the session. |
+
+<Warning>
+A module-global adapter does not end its session on its own. Call `adapter().close()` when the run finishes so exporters receive `on_session_end` and the cortical layer learns the session. `close()` is safe to call twice. Call it before `reset()`, because `reset()` drops the adapter without closing it.
+</Warning>
+
+### Claude Agent SDK
+
+```python
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+from agentegrity.claude import adapter, hooks, report
+
+async with ClaudeSDKClient(options=ClaudeAgentOptions(hooks=hooks())) as sdk:
+    await sdk.query("Summarize the latest LLM safety papers")
+    async for message in sdk.receive_response():
+        adapter().observe(message)   # optional: exact token totals
+adapter().close()
+print(report())
+```
+
+**Hooks into:** `hooks()` returns `HookMatcher` lists for eight SDK hook events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop` and `PreCompact`. Each maps to the canonical event of the same name.
+
+**Enforcement:** with `enforce=True`, the `PreToolUse` hook returns a `permissionDecision: "deny"` payload when the score's action is `block`, or `escalate` without an approving handler. The SDK refuses the tool call.
+
+**Topology:** none. The Claude Agent SDK has no multi-agent primitive, so the adapter never declares one; subagents appear as `subagent_start` and `subagent_stop` events.
+
+**Token usage:** read from the session transcript the hooks name, with no code change. Passing each message to `adapter().observe(message)` replaces that estimate with `ResultMessage.model_usage`, the SDK's per-model totals, subagents included.
+
+### LangChain and LangGraph
+
+```python
+from agentegrity.langchain import instrument_chain, instrument_graph, report
+
+chain = instrument_chain(my_chain)
+chain.invoke({"input": "..."})
+
+graph = instrument_graph(my_compiled_graph)
+graph.invoke(state)
+print(report())
+```
+
+Use the returned object. `instrument_chain()` wraps the runnable with `with_config(callbacks=[handler])` and leaves the original unchanged; a legacy chain without `with_config` gets the handler appended to its `callbacks` attribute instead. `callback_handler()` returns the raw `BaseCallbackHandler` if you register callbacks yourself.
+
+**Hooks into:** a LangChain callback handler. A top-level `on_chain_start` becomes `user_prompt_submit`, a nested chain start (a graph node) becomes `subagent_start`, a top-level `on_chain_end` becomes `stop`, and `on_tool_start`, `on_tool_end` and `on_tool_error` become the three tool events.
+
+**Enforcement:** observation only. The handler evaluates each event and discards the decision without raising, so `enforce=True` records block decisions but does not stop the tool.
+
+**Topology:** `instrument_graph()` reads `graph.get_graph().nodes`. A node named `supervisor`, `supervisor_agent` or `orchestrator` gives a `HIERARCHICAL_DAG` with that node as supervisor and the rest as workers; otherwise every node is a peer in a `PEER_TO_PEER` topology. If introspection fails, the graph is instrumented as a single agent. `instrument_chain()` declares no topology.
+
+**Token usage:** `on_llm_end` reads each generation's `usage_metadata`, keyed by run id so a handler attached twice counts a call once. The model comes from `response_metadata`, or from the chat model's start metadata.
+
+### OpenAI Agents SDK
+
+```python
+from agents import Agent, Runner
+from agentegrity.openai_agents import run_hooks, report
+
+await Runner.run(Agent(...), input="...", hooks=run_hooks())
+print(report())
+```
+
+**Hooks into:** a `RunHooks` subclass. `on_agent_start` becomes `user_prompt_submit`, `on_tool_start` becomes `pre_tool_use`, `on_tool_end` becomes `post_tool_use`, `on_handoff` becomes `subagent_start`, and `on_agent_end` becomes `stop`. `on_tool_start` receives no tool arguments, so `pre_tool_use` carries an empty `tool_input`.
+
+**Enforcement:** observation only. `on_tool_start` evaluates the call but discards the decision; the SDK does not act on a `RunHooks` return value.
+
+**Topology:** `PEER_TO_PEER`, built incrementally. The starting agent seeds a one-member topology and each handoff target is added as a peer, emitting `topology_change`.
+
+**Token usage:** `on_llm_end` counts each `response.usage`, keyed by `response_id`, with the agent's model. An agent run as a tool shares its parent's `Usage` object but fires no hooks, so whatever the shared total holds beyond the counted calls is recorded with model `unknown`.
+
+### CrewAI
+
+```python
+from agentegrity.crewai import adapter, instrument, report
+
+instrument(crew)        # or instrument() with no crew
+crew.kickoff(inputs={"topic": "llms"})
+adapter().close()
+print(report())
+```
+
+**Hooks into:** the global `crewai_event_bus`. `CrewKickoffStartedEvent` becomes `user_prompt_submit`, `CrewKickoffCompletedEvent` becomes `stop`, the three `ToolUsage*` events become the tool events, `TaskStartedEvent` becomes `task_started`, and `AgentExecutionStartedEvent` / `AgentExecutionCompletedEvent` become `subagent_start` / `subagent_stop`. The handlers are registered on the global bus whether or not you pass a crew, so they see every crew in the process. `instrument()` returns the adapter.
+
+**Enforcement:** observation only. The bus handlers evaluate each event and discard the decision without raising.
+
+**Topology:** only when you pass the crew. A sequential process gives `HUB_SPOKE`, with the first agent as leader by convention; a hierarchical process gives `HIERARCHICAL_DAG`. Members are identified by agent role.
+
+**Token usage:** `LLMCallCompletedEvent`, one entry per `call_id`, normalized with CrewAI's `UsageMetrics.from_provider_dict` (crewai 1.15 and later).
+
+<Note>
+Call `instrument()` once per process. A second call registers the handlers on the bus again and every event is evaluated twice. After `agentegrity.init()`, CrewAI is already subscribed.
+</Note>
+
+### Google ADK
+
+```python
+from google.adk.agents import LlmAgent
+from agentegrity.google_adk import instrument, report
+
+agent = LlmAgent(name="my-agent", ...)
+instrument(agent)
+# run with google.adk.runners.Runner
+print(report())
+```
+
+**Hooks into:** ADK agent callbacks, placed ahead of any callbacks already set, on the agent and on every agent reachable through `sub_agents` or an `AgentTool`. `before_agent_callback` becomes `user_prompt_submit` on the instrumented agent and `subagent_start` on any other; `after_agent_callback` becomes `stop` or `subagent_stop`; `before_tool_callback` and `after_tool_callback` become the tool events. These callbacks return nothing, so your own callbacks still run and decide. Instrumenting an agent again is a no-op. ADK does not run after-agent callbacks once it has transferred to another agent, so a run that ends in a transfer reports no `stop`.
+
+**Enforcement:** observation only. The adapter's callbacks always return nothing, so they never stop a call; `enforce=True` records block decisions in the chain, and the adapter warns at construction.
+
+**Topology:** an agent with `sub_agents` (`SequentialAgent`, `ParallelAgent`, `LoopAgent`) gives a `HIERARCHICAL_DAG` with the workflow agent as supervisor. A plain agent stays single-agent.
+
+**Token usage:** `after_model_callback`, final responses only, since streamed partials repeat the usage. Thinking tokens are added to output and tool-use prompt tokens to input.
+
+### AutoGen
+
+```python
+from autogen_agentchat.teams import RoundRobinGroupChat
+from agentegrity.autogen import instrument, report
+
+instrument()
+team = RoundRobinGroupChat([agent1, agent2])
+await team.run(task="...")
+print(report())
+```
+
+**Hooks into:** OpenTelemetry. AutoGen has no callback API; its `invoke_agent` and `execute_tool` spans go through the global tracer. `instrument()` builds a `TracerProvider` with an Agentegrity `SpanProcessor` and installs it globally, logging a warning if it replaces a provider you set. Pass `set_global=False` to skip the install, or, if you manage your own provider, skip `instrument()` and call `provider.add_span_processor(adapter().span_processor())`. A root `invoke_agent` span becomes `user_prompt_submit` / `stop`, a nested one `subagent_start` / `subagent_stop`, and `execute_tool` becomes `pre_tool_use` and then `post_tool_use` or `post_tool_use_failure` by span status. `instrument()` returns the adapter.
+
+**Enforcement:** observation only. A span processor cannot deny a call. The adapter warns at construction when `enforce=True`. `execute_tool` spans carry the tool name and call id but not the arguments or result.
+
+**Topology:** `GROUP_CHAT`, seeded from the root `invoke_agent` span and grown by nested spans through `topology_change`.
+
+**Token usage:** AutoGen logs `LLMCallEvent` and `LLMStreamEndEvent` to the `autogen_core.events` logger. The adapter lowers that logger to INFO behind one shared filter that records usage and passes on only the records the logger emitted before, so your log output does not change. The level is restored when the last adapter closes.
+
+### Agno
+
+```python
+from agno.agent import Agent
+from agentegrity.agno import instrument, instrument_team, report
+
+agent = instrument(Agent(...))
+agent.run("...")
+
+team = instrument_team(team)
+team.run("...")
+print(report())
+```
+
+**Hooks into:** Agno 2.x `pre_hooks`, `post_hooks` and `tool_hooks`, appended to any hooks already set. The pre-hook becomes `user_prompt_submit` (or `subagent_start` on a team member), the post-hook becomes `stop` (or `subagent_stop`), and the tool hook wraps every tool call. Agno re-applies `tool_hooks` to every tool at run setup, so tools added after `instrument()` are covered.
+
+**Enforcement:** under `enforce=True` the tool hook evaluates `pre_tool_use` before the tool runs and, on a deny decision, raises `agno.exceptions.StopAgentRun`, the exception family Agno re-raises to halt the run.
+
+**Topology:** `instrument_team()` declares `HUB_SPOKE` with the team as leader and each member from `team.members` as a member. When `members` is a callable, only the leader is declared and members' `subagent_*` events are not attached; their tool calls are still captured by the leader's tool hook.
+
+**Token usage:** `run_output.metrics` in the post-hook, per model from `metrics.details`, re-read at every stop and at close because Agno merges memory and summary model calls into the metrics after post-hooks run.
+
+### AWS Bedrock Agents
+
+```python
+from agentegrity.bedrock_agents import instrument_strands, report, wrap_client
+
+# Strands SDK
+agent = instrument_strands(agent)
+agent("...")
+
+# boto3 bedrock-agent-runtime
+import boto3
+client = wrap_client(boto3.client("bedrock-agent-runtime"))
+response = client.invoke_agent(agentId="...", agentAliasId="...", sessionId="...", inputText="...")
+for event in response["completion"]:
+    ...
+print(report())
+```
+
+**Hooks into:** two surfaces on one adapter. `instrument_strands()` registers a hook provider for `BeforeInvocationEvent`, `AfterInvocationEvent`, `BeforeToolCallEvent` and `AfterToolCallEvent`. `wrap_client()` replaces the client's `invoke_agent` with a version that sets `enableTrace=True` (unless you pass `force_trace=False`) and maps trace parts onto canonical events as you consume the stream. `chunk` and other events pass through unchanged.
+
+**Enforcement:** on Strands, a deny decision sets `event.cancel_tool` so Strands does not run the tool. The boto3 path is observation only, because traces arrive after the tool ran; `wrap_client()` warns when the adapter has `enforce=True`.
+
+**Topology:** `HUB_SPOKE`, seeded with the Strands agent or the `agentId` as supervisor. On the boto3 path, collaborators found in `agentCollaboratorInvocationInput` traces are added through `topology_change`.
+
+**Token usage:** on Strands, the invocation's usage from `AfterInvocationEvent`. On boto3, `modelInvocationOutput.metadata.usage` from orchestration, pre- and post-processing and routing traces, keyed by trace id; most traces do not name the model, so it falls back to the profile's `model_id`.
+
+## Explicit configuration
+
+Every entry point (`hooks()`, `instrument_chain()`, `instrument_graph()`, `callback_handler()`, `run_hooks()`, `instrument()`, `instrument_team()`, `instrument_strands()`, `wrap_client()`) accepts four keyword arguments:
+
+<ParamField path="profile" type="AgentProfile">
+  The profile to evaluate against instead of `AgentProfile.default()`.
+</ParamField>
+<ParamField path="client" type="AgentegrityClient">
+  A client with custom thresholds, weights or policy set.
+</ParamField>
+<ParamField path="enforce" type="bool" default="False">
+  Deny tool calls on adapters with a blocking surface.
+</ParamField>
+<ParamField path="api_key" type="str">
+  Anthropic API key for LLM-backed checks.
+</ParamField>
+
+Passing any of them builds a new adapter instead of using the module global, so the module's `report()`, `register_exporter()` and `adapter()` do not see it. To keep a handle on that adapter, create it through the client:
+
+```python
+from agentegrity import AgentegrityClient
+from claude_agent_sdk import ClaudeAgentOptions
+
+client = AgentegrityClient(policy_set="enterprise-default", coherence_threshold=0.70)
+profile = client.create_profile(name="research-agent", risk_tier="high")
+adapter = client.create_adapter("claude", profile=profile, enforce=True)
+
+options = ClaudeAgentOptions(hooks=adapter.create_hooks())
+# ... run the agent ...
+adapter.close()
+print(adapter.get_summary())
+```
+
+`create_adapter()` takes the adapter names listed under `init()`. Approval handlers and signing keys are constructor arguments on the adapter classes in `agentegrity.adapters` (for example `ClaudeAdapter(profile=..., enforce=True, approval_handler=...)`); see [Scoring and actions](/concepts/scoring-and-actions) and [Attestation](/concepts/attestation). Runnable versions of these flows are in [`examples/`](https://github.com/Cogensec/agentegrity/tree/main/examples).

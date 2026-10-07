@@ -1,0 +1,128 @@
+---
+title: "Exporters"
+description: "How session data leaves an instrumented agent: the SessionExporter protocol, registration, payloads and the exporters list in the session summary."
+---
+
+An exporter is an object that receives a session's data as the adapter produces it. Python adapters evaluate locally and keep the session in memory; registering an exporter, or setting the two streaming variables that register one for you, is what sends it anywhere. The library ships three kinds:
+
+| Exporter | Sends | Page |
+|---|---|---|
+| `HTTPExporter` | Every payload, full content, to an HTTP backend such as Agentegrity Pro | [Stream to Agentegrity Pro](/exporters/agentegrity-pro) |
+| `OTelSessionExporter` | Spans and metrics through your OpenTelemetry providers | [OpenTelemetry](/exporters/opentelemetry) |
+| `WebhookAlertExporter`, `SlackAlertExporter` | A short alert for block and escalate verdicts | [Webhook and Slack alerts](/exporters/alerts) |
+
+You can also write your own.
+
+## The SessionExporter protocol
+
+`SessionExporter` (importable from `agentegrity`) is a `typing.Protocol` with three async methods:
+
+```python
+class SessionExporter(Protocol):
+    async def on_session_start(self, session_id: str, adapter_name: str, profile: dict) -> None: ...
+    async def on_event(self, session_id: str, event: dict) -> None: ...
+    async def on_session_end(self, session_id: str, summary: dict) -> None: ...
+```
+
+The adapter calls them at three points in a session:
+
+- **`on_session_start`** fires once, when the adapter emits its first event while at least one exporter is registered. It receives the adapter's session id (32 hex characters), the adapter name (`langchain`, `claude`, `openai_agents` and so on) and the agent profile as a JSON-ready dict.
+- **`on_event`** fires for every event the adapter emits, with `FrameworkEvent.to_dict()`.
+- **`on_session_end`** fires when the adapter is closed, with the session summary from `get_summary()`.
+
+Register exporters before the agent runs. An exporter added after the session has started never receives `on_session_start`, and events emitted before it was added are not replayed. The one exception is `credential_declared`: credentials declared while no exporter existed are delivered right after `on_session_start`.
+
+`on_session_end` only fires when the session is closed. Call `close()` on the adapter, use it as an `async with` block, or call `agentegrity.shutdown()` if you started with `agentegrity.init()`. For the module-level adapters, close the default adapter with `adapter().close()`, for example `agentegrity.langchain.adapter().close()`.
+
+### Fail-open delivery
+
+An exporter cannot break the agent. The adapter wraps every callback: an exception raised while creating or awaiting the coroutine is caught and logged as a warning on the `agentegrity.adapters` logger, and the agent continues. When an event loop is running, each callback is scheduled with `asyncio.ensure_future` and not awaited, so callbacks can complete out of order; without a running loop, each one runs to completion with `asyncio.run` before the adapter continues. A slow exporter therefore blocks the agent only when there is no running loop. The built-in HTTP and alert exporters avoid this by handing work to a background thread.
+
+### Describing a sink
+
+An exporter may also implement `describe() -> dict[str, str]`. This is a convention, outside the protocol, so older exporters keep working without it. Return at least a `type` key and, when the exporter streams to a nameable destination, a `target`. The result is copied into the session summary, so it must never contain credentials. Exporters without `describe()` are reported by class name.
+
+## Registering an exporter
+
+<Tabs>
+  <Tab title="Python">
+Every Python framework module exposes `register_exporter`, which attaches the exporter to that module's default adapter: `agentegrity.claude`, `agentegrity.langchain`, `agentegrity.openai_agents`, `agentegrity.crewai`, `agentegrity.google_adk`, `agentegrity.autogen`, `agentegrity.agno` and `agentegrity.bedrock_agents`. Adapter instances have the same method.
+
+```python
+from agentegrity.langchain import adapter, instrument_graph, register_exporter
+
+class PrintExporter:
+    async def on_session_start(self, session_id, adapter_name, profile):
+        print("start", session_id, adapter_name)
+
+    async def on_event(self, session_id, event):
+        result = event["evaluation_result"]
+        print(event["event_type"], result["action"] if result else None)
+
+    async def on_session_end(self, session_id, summary):
+        print("end", summary["evaluations"])
+
+register_exporter(PrintExporter())
+graph = instrument_graph(my_graph)
+graph.invoke(state)
+adapter().close()  # fires on_session_end
+```
+
+With `agentegrity.init()`, register on each adapter the runtime built:
+
+```python
+import agentegrity
+
+runtime = agentegrity.init()
+for adapter in runtime.adapters.values():
+    adapter.register_exporter(PrintExporter())
+```
+
+Registration is idempotent: registering the same instance twice has no effect. Each registered exporter receives every callback.
+  </Tab>
+  <Tab title="TypeScript">
+Every `@agentegrity/<framework>` package exports `registerExporter`. The TypeScript `SessionExporter` interface has the same three methods, all optional; a missing method is skipped.
+
+```ts
+import { instrument, registerExporter } from "@agentegrity/langchain";
+import type { SessionExporter } from "@agentegrity/client";
+
+const printer: SessionExporter = {
+  on_event(sessionId, event) {
+    console.log(event.event_type);
+  },
+};
+
+registerExporter(printer);
+```
+
+Methods may be sync or async. The adapter awaits each one in turn and catches any error, logging it through the reporter's `onError` (by default `console.warn`). Because each call is awaited, a slow TypeScript exporter delays the event that triggered it. `session_end` fires on the process `beforeExit` event, or when you call `await adapter().end()`.
+
+The TypeScript packages also send every payload to an HTTP backend through their built-in reporter. See [Stream to Agentegrity Pro](/exporters/agentegrity-pro#typescript-client).
+  </Tab>
+</Tabs>
+
+## What each payload contains
+
+| Callback | Arguments | Contents |
+|---|---|---|
+| `on_session_start` | `session_id`, `adapter_name`, `profile` | The `AgentProfile`: `agent_id`, `name`, `agent_type`, `capabilities`, `deployment_context`, `risk_tier`, `framework`, `model_provider`, `model_id`, `metadata`, `created_at` |
+| `on_event` | `session_id`, `event` | `event_type`, `timestamp`, `adapter_name`, `data` (the raw hook payload, including prompts, tool arguments and tool output) and `evaluation_result` (the integrity score, or `null` for events that are not evaluated) |
+| `on_session_end` | `session_id`, `summary` | Counts of evaluations, events and chain records, `chain_hash_linked`, `enforce_mode`, `exporters`, credential fingerprints and token `usage` |
+
+`data` carries the full content the framework handed to the adapter. Anything you register receives prompts, tool arguments and tool outputs. Field-by-field definitions, every event type and JSON examples are in [Events and wire format](/reference/events).
+
+## Checking which sinks are attached
+
+The session summary lists every attached exporter under `exporters`. In Python, read it from `report()` on a framework module, `runtime.report()` after `agentegrity.init()`, or `get_summary()` on an adapter:
+
+```python
+from agentegrity.langchain import report
+
+print(report()["exporters"])
+# [{'type': 'HTTPExporter', 'target': 'https://ingest.example.com'}]
+```
+
+An empty list means no exporter is attached to that adapter, so the session's events went nowhere. Telemetry and opt-in model-backed layers are separate paths that this list does not cover; see [What leaves your process](/security/data-flows).
+
+The TypeScript `report()` summary has no `exporters` field.

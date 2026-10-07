@@ -1,0 +1,148 @@
+---
+title: "CLI"
+description: "Every agentegrity command: info, doctor, pro, hook, hook-daemon, verify-decisions and report."
+---
+
+Installing the package adds an `agentegrity` command. `python -m agentegrity` runs the same program, so every example below works either way.
+
+```bash
+agentegrity <command> [options]
+python -m agentegrity <command> [options]
+```
+
+| Command | Purpose |
+|---|---|
+| (none) | Print the version, which framework adapters are installed and whether the `[llm]` extra is present |
+| `doctor` | Run one evaluation end to end and print the score |
+| `pro` | Check an ingest token and optionally run an agent with streaming on |
+| `hook` | Handle one Claude Code or Codex hook event |
+| `hook-daemon` | Serve one coding-agent session (started by `hook`) |
+| `verify-decisions` | Verify a serialized attestation chain |
+| `report` | Render an audit report from a serialized chain |
+| `help`, `-h`, `--help` | Print usage |
+
+An unknown command prints an error and exits with status 2.
+
+## Info
+
+```bash
+agentegrity
+```
+
+Prints `agentegrity 0.12.0`, then one line per Python adapter (`claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno`, `bedrock_agents`) marked `installed` or `not installed` with the `pip install` extra that provides it, the four shipped layers, and whether the `anthropic` package for the `[llm]` extra is installed. It looks up each framework's package without importing it.
+
+## doctor
+
+```bash
+agentegrity doctor
+```
+
+Builds an `AgentegrityClient`, evaluates `AgentProfile.default(name="doctor-agent")` once and prints the profile, composite score, action and the layers that ran, followed by `OK`. Exits 0 when the composite score is above zero and 1 otherwise. Use it to confirm an install works; it makes no network calls apart from telemetry.
+
+## pro
+
+```bash
+agentegrity pro --ingest-token <TOKEN> --url <URL> [--push]
+agentegrity pro --ingest-token <TOKEN> --url <URL> -- <command> [args...]
+```
+
+<ParamField path="--ingest-token, --token" type="string">
+Ingest token. Defaults to `AGENTEGRITY_TOKEN`.
+</ParamField>
+<ParamField path="--url" type="string">
+Backend origin. Defaults to `AGENTEGRITY_EXPORTER_URL`, then `AGENTEGRITY_URL`. A trailing slash is removed.
+</ParamField>
+<ParamField path="--push" type="flag">
+Without a command, print the environment variables to set and a reminder to pass `-- <command>`. It does not send any session data.
+</ParamField>
+<ParamField path="-- command" type="string">
+Everything after `--` is run with `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` set.
+</ParamField>
+
+The command always checks the token first, with `GET <url>/ingest/verify` and the token as a Bearer credential, and prints `connected to <url> (workspace: <name>)`. With a command, it then replaces its own process with that command, and every Python adapter created inside it attaches an `HTTPExporter`.
+
+| Exit status | Meaning |
+|---|---|
+| 0 | Token accepted (no command given) |
+| 1 | Token rejected (`401`), no `/ingest/verify` at that URL (`404`), another HTTP error, or the URL is unreachable |
+| 2 | Missing token, missing URL, a flag without its value, or an unknown option |
+| 127 | The command was not found |
+
+When a command runs, its own exit status is returned. More on what streaming sends in [Stream to Agentegrity Pro](/exporters/agentegrity-pro).
+
+## hook
+
+```bash
+agentegrity hook --host claude-code
+agentegrity hook --host codex
+```
+
+Reads one hook payload from standard input and prints the host's response, if any, on standard output. The Claude Code and Codex plugins call this on every hook event; you do not run it by hand. On the first call in a session it starts a `hook-daemon` for that session under a file lock and forwards the payload to it.
+
+It always exits 0 and prints nothing when it cannot decide, so a failure never breaks the host session: the host's own permission flow applies. An invalid `--host` prints usage to standard error and exits 0. `AGENTEGRITY_HOOK_DISABLED=1` turns it into a no-op. The variables that control it are in [Configuration](/reference/configuration#hook-runtime), and the plugins are covered in [Claude Code](/integrations/claude-code) and [Codex](/integrations/codex).
+
+## hook-daemon
+
+```bash
+agentegrity hook-daemon --host <claude-code|codex> --session <id>
+```
+
+Serves one session over a Unix socket until the host sends `SessionEnd` or no hook arrives for `AGENTEGRITY_HOOK_IDLE_SECONDS` (default 1800). `hook` starts it; it is not listed in `help`. Missing or invalid arguments print usage and exit 2. The daemon persists the session's decision chain to `~/.agentegrity/<host>/<session>.chain.json` (or under `AGENTEGRITY_HOOK_DIR`).
+
+## verify-decisions
+
+```bash
+agentegrity verify-decisions [--trusted-key <pub.hex>]... <chain.json>
+```
+
+Loads a chain written by `AttestationChain.to_json()` and runs three checks: hash linkage between records; decision links, meaning every decision an attestation cites exists earlier in the chain with an unchanged hash; and an Ed25519 signature on every record. It prints the result of each check and a table with one row per record (index, kind, decision point, capture tier, signed, verified).
+
+<ParamField path="--trusted-key" type="path">
+File containing one raw Ed25519 public key as hex. Repeat to pin several keys. Records signed by any other key fail. Without this option, each record is checked against the public key embedded in it, which a forger controls, and the output marks signatures as `UNPINNED (self-vouched)`.
+</ParamField>
+
+| Exit status | Meaning |
+|---|---|
+| 0 | Linkage, decision links and signatures all verify |
+| 1 | Any check fails, including any unsigned record |
+| 2 | The file cannot be read or parsed, a key file cannot be read, or no path was given |
+
+Hash linkage alone does not prove a chain was not edited: the hashes are unkeyed SHA-256, so whoever edits a record can recompute them. That is why a clean exit requires signatures. Records are signed only when the adapter has a `signing_key`, and the coding-agent hook runtime does not sign its chains in 0.12.0, so this command exits 1 on hook chains. Use `report` to inspect those.
+
+```bash
+agentegrity verify-decisions --trusted-key agent.pub.hex chain.json
+```
+
+## report
+
+```bash
+agentegrity report [--format markdown|json] [--trusted-key <pub.hex>]... [-o <path>] <chain.json>
+```
+
+Renders a session audit report from a serialized chain: source and final chain hash, the three verification results, a timeline of every record, a table of human approvals taken from approval decision records, and a mapping of the report's evidence to EU AI Act articles 12 and 14 and NIST AI RMF GOVERN 1.2, MEASURE 2.7 and MANAGE 4.1. The report states that the mapping is supporting evidence and does not determine compliance.
+
+<ParamField path="--format" type="markdown | json" default="markdown">
+Output format.
+</ParamField>
+<ParamField path="--trusted-key" type="path">
+Pin signing keys, as for `verify-decisions`. Repeatable.
+</ParamField>
+<ParamField path="-o, --output" type="path">
+Write the report to a file instead of standard output.
+</ParamField>
+
+| Exit status | Meaning |
+|---|---|
+| 0 | Hash linkage and decision links verify, and, when `--trusted-key` is given, signatures verify too |
+| 1 | Linkage or decision links fail, or pinned signatures fail |
+| 2 | Unreadable or unparseable chain or key file, a bad `--format` value, or no path |
+
+Without `--trusted-key`, unsigned or self-signed chains still exit 0; the report discloses that signatures are unanchored.
+
+```bash
+agentegrity report ~/.agentegrity/claude-code/<session>.chain.json --format json -o report.json
+```
+
+## Telemetry
+
+`info`, `pro`, `doctor`, `verify-decisions` and `report` each send one anonymous `cli_run` event naming the command, unless telemetry is disabled. `hook` and `hook-daemon` send none. See [Telemetry](/telemetry).
