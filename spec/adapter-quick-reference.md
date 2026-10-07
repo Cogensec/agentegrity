@@ -50,7 +50,7 @@ All fourteen framework adapters conform to the same contract:
 - **Zero-config**: reads `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` from the environment. No explicit client wiring required.
 - **Kill switch**: `AGENTEGRITY_DISABLED=1` (or `AGENTEGRITY_DISABLE=1`) bypasses the adapter entirely.
 - **Fail-open**: exporter exceptions are caught and logged; the instrumented agent never breaks because of the adapter.
-- **Event vocabulary**: every adapter maps framework-specific hooks onto the canonical event types defined in `schemas/exporter/` (`user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `pre_compact`, `stop`, plus the v0.8 multi-agent events).
+- **Event vocabulary**: every adapter maps framework-specific hooks onto the canonical event types (`user_prompt_submit`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`, `subagent_start`, `subagent_stop`, `pre_compact`, `stop`, plus the v0.8 multi-agent events). `schemas/exporter/common.json` lists every type the SDK sends in `event_type.examples` and accepts any snake_case type, so a consumer validating against an older copy does not reject a newer event; handle the types you know and accept the rest.
 - **Argument classification**: every `pre_tool_use` is tagged by `classify_tool_call()` (`reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper`, `obfuscated_command`), so generic shell tools are judged by what they run, not by their name.
 - **Idempotent**: instrumenting the same agent / graph / runner / event bus twice is a no-op.
 - **Version parity**: Python `pyproject.toml` and every `@agentegrity/*` package publish with the same version string (enforced in CI by `clients/typescript/scripts/check-versions.ts`).

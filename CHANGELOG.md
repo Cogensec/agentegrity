@@ -10,6 +10,10 @@ in beta until the v1.0 stability criteria documented in
 
 ## [Unreleased]
 
+### Fixed
+
+- **The exporter schema rejected ten event types the SDK sends.** `FrameworkEvent.event_type` was an enum of the eight original types, so a backend validating against `schemas/exporter/` rejected `credential_declared`, `task_started`, the five multi-agent events, `capture_failure`, `subagent_orphan` and `<channel>_overflow`, and the summary's event count no longer matched what arrived. `event_type` now accepts any snake_case name and lists the known types in `examples`; a test keeps that list equal to every `_emit_event` call in the SDK, and `KNOWN_EVENT_TYPES` in `@agentegrity/client` equal to the list. `TokenUsage` and `SessionUsage` allow fields added by later releases, and `sources` accepts new values, so a consumer on an older copy of the schema does not reject a whole session end. The schemas do not ship in the packages, so no library release is needed to pick this up.
+
 ## [0.12.0] - 2026-10-06
 
 Token usage and TypeScript packages that attach to their frameworks. Every adapter reports the

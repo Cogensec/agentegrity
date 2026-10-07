@@ -139,7 +139,9 @@
       "properties": {
         "event_type": {
           "type": "string",
-          "enum": [
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Snake-case event name. New releases add types, so consumers should accept any value matching the pattern and act only on the types they handle. Known types are listed in examples; <channel>_overflow stands for one event per capped buffer channel (for example tool_outputs_overflow), sent once when that buffer fills.",
+          "examples": [
             "pre_tool_use",
             "post_tool_use",
             "post_tool_use_failure",
@@ -147,7 +149,17 @@
             "stop",
             "subagent_start",
             "subagent_stop",
-            "pre_compact"
+            "subagent_orphan",
+            "pre_compact",
+            "task_started",
+            "topology_declared",
+            "topology_change",
+            "peer_message",
+            "shared_memory_write",
+            "broadcast",
+            "credential_declared",
+            "capture_failure",
+            "<channel>_overflow"
           ]
         },
         "timestamp": {
@@ -270,7 +282,7 @@
     },
     "TokenUsage": {
       "type": "object",
-      "description": "Token counts normalized across frameworks: cache and reasoning counts are parts of input and output, never added to them.",
+      "description": "Token counts normalized across frameworks: cache and reasoning counts are parts of input and output, never added to them. Later releases may add fields; consumers should ignore the ones they do not know.",
       "required": [
         "input_tokens",
         "output_tokens",
@@ -313,11 +325,11 @@
           "description": "Model calls counted. Absent when the source reports running totals without a call count."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "SessionUsage": {
       "type": "object",
-      "description": "Running token usage for a session: overall, per model, and how it was measured.",
+      "description": "Running token usage for a session: overall, per model, and how it was measured. Later releases may add fields; consumers should ignore the ones they do not know.",
       "required": [
         "input_tokens",
         "output_tokens",
@@ -370,13 +382,14 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": [
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "examples": [
               "transcript",
               "provider_response",
               "trace"
             ]
           },
-          "description": "Where the counts came from: a host transcript, the framework's model response, or a framework trace."
+          "description": "Where the counts came from: a host transcript, the framework's model response, or a framework trace. Later releases may add sources."
         },
         "by_model": {
           "type": "object",
@@ -385,7 +398,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     }
   }
 }

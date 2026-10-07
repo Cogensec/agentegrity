@@ -4,25 +4,34 @@
  * the SessionExporter protocol and the `@agentegrity/client` HTTP API.
  */
 
-export type EventType =
-  | "pre_tool_use"
-  | "post_tool_use"
-  | "post_tool_use_failure"
-  | "user_prompt_submit"
-  | "stop"
-  | "subagent_start"
-  | "subagent_stop"
-  | "pre_compact"
-  // v0.8: multi-agent canonical events
-  | "topology_declared"
-  | "topology_change"
-  | "peer_message"
-  | "shared_memory_write"
-  | "broadcast"
-  | "task_started"
-  // emitted by `_BaseAdapter._handle_subagent_stop` when a stop fires
-  // without a matching start (T-ORPHAN-LIFECYCLE mitigation).
-  | "subagent_orphan";
+/**
+ * Event types the SDKs send, as listed in the schema's `event_type.examples`.
+ * The schema accepts any snake_case type, so consumers should handle the
+ * ones they know and accept the rest.
+ */
+export const KNOWN_EVENT_TYPES = [
+  "pre_tool_use",
+  "post_tool_use",
+  "post_tool_use_failure",
+  "user_prompt_submit",
+  "stop",
+  "subagent_start",
+  "subagent_stop",
+  // A stop without a matching start (T-ORPHAN-LIFECYCLE mitigation).
+  "subagent_orphan",
+  "pre_compact",
+  "task_started",
+  "topology_declared",
+  "topology_change",
+  "peer_message",
+  "shared_memory_write",
+  "broadcast",
+  "credential_declared",
+  "capture_failure",
+] as const;
+
+/** A known type, or `<channel>_overflow`, sent once when a capped buffer fills. */
+export type EventType = (typeof KNOWN_EVENT_TYPES)[number] | `${string}_overflow`;
 
 export interface AgentProfile {
   agent_id: string;
