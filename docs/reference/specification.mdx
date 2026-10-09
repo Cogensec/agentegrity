@@ -1,0 +1,54 @@
+---
+title: "Specification"
+description: "The open Agentegrity specification and the project documents that sit next to it, with a link to each."
+---
+
+The library implements an open specification that lives in the same repository. The specification defines what the integrity properties mean, what each layer must check and what an attestation record contains, independently of this Python and TypeScript code, so another implementation can follow it. The documents below are on GitHub; each line says what the file covers.
+
+## Core specification
+
+[`spec/SPECIFICATION.md`](https://github.com/Cogensec/agentegrity/blob/main/spec/SPECIFICATION.md) is the entry point: properties, layer architecture, controls, scoring, the attestation record format, the evaluation flow and a four-level conformance and maturity model (Aware, Managed, Verified, Autonomous). It is marked as a draft.
+
+<Note>
+`SPECIFICATION.md` was written before the recovery layer and the fourth property were added. Its scoring section still describes three properties and the default weights from that time. The library uses four properties; the current defaults are listed in [Configuration](/reference/configuration#integrityevaluator). The layer documents below cover all four layers.
+</Note>
+
+## Layers
+
+| Document | Covers |
+|---|---|
+| [Adversarial layer](https://github.com/Cogensec/agentegrity/blob/main/spec/layers/adversarial-layer.md) | The outermost layer: tests the agent's resilience to attack across every input channel ("can this agent be broken right now?") |
+| [Cortical layer](https://github.com/Cogensec/agentegrity/blob/main/spec/layers/cortical-layer.md) | Reasoning, memory and behavioral consistency ("is this agent still itself?") |
+| [Governance layer](https://github.com/Cogensec/agentegrity/blob/main/spec/layers/governance-layer.md) | Organizational policy, human oversight and compliance ("is this agent operating within authorized boundaries?") |
+| [Recovery layer](https://github.com/Cogensec/agentegrity/blob/main/spec/layers/recovery-layer.md) | Self-recovery: tracks integrity over time, checks the audit trail is intact and confirms the agent declares the mechanisms it needs to return to a known-good state |
+
+## Properties
+
+| Document | Covers |
+|---|---|
+| [Adversarial coherence](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/adversarial-coherence.md) | Consistent reasoning and decisions under adversarial pressure on every input channel |
+| [Environmental portability](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/environmental-portability.md) | Integrity guarantees that hold across deployment contexts |
+| [Verifiable assurance](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/verifiable-assurance.md) | Integrity state that can be proven with attestation records that are complete, tamper-evident, non-repudiable and chained |
+| [Decision provenance](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/decision-provenance.md) | A signed, hash-chained record for every decision boundary that binds the candidate action to its inputs and reasoning before the action runs |
+| [Multi-agent extensions](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/multi-agent-extensions.md) | How the four properties extend to in-process multi-agent systems, based on the `AgentTopology` type |
+
+Recovery integrity, the fourth scored property, has no standalone document; it is defined through the recovery layer document and the multi-agent extensions.
+
+## Other specification documents
+
+| Document | Covers |
+|---|---|
+| [Threat model](https://github.com/Cogensec/agentegrity/blob/main/spec/threat-model.md) | STRIDE analysis of the framework itself, summarized in [Threat model](/security/threat-model) |
+| [Token usage](https://github.com/Cogensec/agentegrity/blob/main/spec/token-usage.md) | How adapters report token counts in one shape across frameworks |
+| [Adapter quick reference](https://github.com/Cogensec/agentegrity/blob/main/spec/adapter-quick-reference.md) | Every first-party adapter, its entry point and how it enforces |
+
+## Project documents
+
+| Document | Covers |
+|---|---|
+| [Glossary](https://github.com/Cogensec/agentegrity/blob/main/agentegrity-glossary.md) | The vocabulary of agent structural integrity: core concepts, threat model, measurement, architecture, domain-specific and organizational terms |
+| [Manifesto](https://github.com/Cogensec/agentegrity/blob/main/MANIFESTO.md) | Why the term *agentegrity* exists, its definition, the properties and the layers, and what it is not |
+| [STATUS.md](https://github.com/Cogensec/agentegrity/blob/main/STATUS.md) | A maturity matrix for every component (hardened, reference or experimental), plus published detection benchmark numbers |
+| [CHANGELOG.md](https://github.com/Cogensec/agentegrity/blob/main/CHANGELOG.md) | Every notable change by release, in Keep a Changelog format |
+
+The schemas that define the exporter wire format are documented in [Events and wire format](/reference/events).

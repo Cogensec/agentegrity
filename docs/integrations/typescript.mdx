@@ -1,0 +1,210 @@
+---
+title: "TypeScript frameworks"
+description: "The seven @agentegrity npm packages: install commands, each package's entry point, runtime requirements and environment variables."
+---
+
+The TypeScript packages map a framework's lifecycle onto Agentegrity's canonical events and send them to a backend over the [Exporter HTTP API](https://github.com/Cogensec/agentegrity/blob/main/schemas/openapi.yaml), and to any exporters you register. They do not run the evaluation layers, keep an attestation chain, or enforce anything: events carry `evaluation_result: null`, and the session summary reports `evaluations: 0`, `attestation_records: 0` and `enforce_mode: false`. Scoring happens in whatever backend receives the events. For in-process evaluation and enforcement, use a [Python adapter](/integrations/python).
+
+## Packages
+
+All seven packages are ES modules, require Node 18 or later, and publish at version 0.12.0. Each framework package depends on `@agentegrity/client` and declares its framework as an optional peer dependency, so install both:
+
+| Package | Framework | Install | Peer dependency |
+|---|---|---|---|
+| `@agentegrity/client` | Shared core | `npm i @agentegrity/client` | none |
+| `@agentegrity/claude-sdk` | Claude Agent SDK | `npm i @agentegrity/claude-sdk @anthropic-ai/claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk >=0.1.0` |
+| `@agentegrity/langchain` | LangChain JS, LangGraph JS | `npm i @agentegrity/langchain @langchain/core` | `@langchain/core >=0.3.0` |
+| `@agentegrity/openai-agents` | OpenAI Agents JS | `npm i @agentegrity/openai-agents @openai/agents` | `@openai/agents >=0.0.1` |
+| `@agentegrity/crewai` | CrewAI TypeScript | `npm i @agentegrity/crewai @crewai-ts/core` | `@crewai-ts/core >=0.1.0` |
+| `@agentegrity/google-adk` | Google ADK for TypeScript | `npm i @agentegrity/google-adk @google/adk` | none declared |
+| `@agentegrity/vercel-ai` | Vercel AI SDK | `npm i @agentegrity/vercel-ai ai` | `ai >=3.4.10` |
+
+The framework packages are versioned with the Python library and published from the same release.
+
+### Runtime requirements
+
+Some frameworks need a newer Node than the packages themselves:
+
+- **CrewAI TypeScript:** `@crewai-ts/core` stores state in `node:sqlite`, which needs Node 22 or later.
+- **LangChain JS 1.x:** `@langchain/core` 1.x uses the global Web Crypto API and needs Node 20 or later.
+- **Vercel AI SDK 7:** AI SDK 7 removed the per-call tracer option, so the package registers a telemetry integration instead (below). The package's AI SDK 7 tests run on Node 22.
+
+## Configuration
+
+Every framework package creates its adapter through `createDefaultAdapter()` in [`@agentegrity/client`](https://github.com/Cogensec/agentegrity/blob/main/clients/typescript/packages/client/src/default.ts). The environment is read once, when the adapter is created, which is the first call to that package's entry point, `adapter()` or `registerExporter()`. Set the variables before that.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_URL` | `http://localhost:8787` | Backend origin. The package posts to `/sessions`, `/sessions/{id}/events` and `/sessions/{id}/end`. |
+| `AGENTEGRITY_TOKEN` | unset | Sent as `Authorization: Bearer`, only when the URL is HTTPS or a loopback host. Over plain HTTP to another host the token is withheld and a warning is logged. |
+| `AGENTEGRITY_DISABLED` | unset | `1`, `true` or `TRUE` turns the adapter into a no-op: no requests, no exporter calls. |
+| `AGENTEGRITY_OFFLINE` | unset | `1`, `true` or `TRUE` skips every HTTP request but still calls registered exporters. The test suites use it. |
+
+<Warning>
+With nothing configured, a package posts every event to `http://localhost:8787`. Network failures and non-2xx responses are caught and logged with `console.warn`, so the agent keeps running, but you see a warning per request. Set `AGENTEGRITY_URL`, `AGENTEGRITY_OFFLINE=1`, or `AGENTEGRITY_DISABLED=1`.
+</Warning>
+
+`AGENTEGRITY_EXPORTER_URL`, which the Python library reads, is not read by the TypeScript packages.
+
+## Shared API
+
+Every framework package exports these functions, each acting on that package's module-global adapter:
+
+| Function | Returns |
+|---|---|
+| `report()` | `Promise<SessionSummary>`. The packages with an event queue (`openai-agents`, `crewai`, `vercel-ai`) wait for queued events first. |
+| `reset()` | Discards the module-global adapter. The next call starts a new session. |
+| `registerExporter(exporter)` | Adds a `SessionExporter`. Registering the same instance twice has no effect. |
+| `adapter()` | The underlying `DefaultAdapter`, for `end()`, `setTopology()`, `recordUsage()` and the `reporter`. |
+
+`@agentegrity/openai-agents`, `@agentegrity/crewai` and `@agentegrity/vercel-ai` also export `flush()`, which resolves once every event received so far has been sent. These three frameworks call listeners without awaiting them, so the packages queue events to keep them in order.
+
+Each entry point accepts `{ profile }`, a partial `AgentProfile` merged over the defaults (`agent_id` is `<adapter>-agent`, `framework` is the adapter name, `risk_tier` is `medium`). Passing a profile creates a separate adapter that the module's `report()`, `registerExporter()` and `adapter()` do not see, so you cannot register an exporter on it through those helpers. Leave `profile` unset if you need those helpers.
+
+A session starts with the first event and ends on `adapter().end()`, on the close function some packages return, or on the process's `beforeExit` event, which every adapter registers. `beforeExit` does not fire on `process.exit()` or an uncaught exception, so call the close function or `adapter().end()` yourself when the process ends that way.
+
+## Claude Agent SDK
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { hooks, observe, report } from "@agentegrity/claude-sdk";
+
+for await (const message of query({ prompt: "...", options: { hooks: hooks() } })) {
+  observe(message); // optional: exact token totals
+}
+console.log(await report());
+```
+
+`hooks()` returns the SDK's `Options["hooks"]` shape: one matcher per event for `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `PreCompact` and `Stop`. Each callback forwards the hook input and returns `{}`, so the SDK always continues.
+
+`observe(message)` records exact usage from the SDK's `result` messages. Without it, usage is read from the session transcript and each subagent's transcript that the hooks name, at every `Stop`; only usage counts, request ids and model names are kept. The first `result` message with `modelUsage` replaces the transcript estimate for the rest of the session, and a `conversation_reset` message keeps the totals counted before it. `observe` takes an optional second argument, the `DefaultAdapter` to record on.
+
+The Claude Agent SDK has no multi-agent primitive, so no topology is declared.
+
+## LangChain JS and LangGraph JS
+
+```ts
+import { ChatAnthropic } from "@langchain/anthropic";
+import { instrument, report } from "@agentegrity/langchain";
+
+const llm = new ChatAnthropic({ callbacks: [instrument()] });
+// run the chain or graph
+console.log(await report());
+```
+
+`instrument()` returns an `AgentegrityLangChainHandler`, a callback handler LangChain propagates to every child runnable. A chain with no parent run id is top level: its start is `user_prompt_submit`, and its end or error is `stop`. Tool start, end and error become the three tool events. Nested chains and graph nodes stay inside their parent's events. The handler has a `close()` method that ends the session.
+
+For a compiled LangGraph, `instrumentGraph(graph)` returns the same handler and also reads `graph.getGraph().nodes` to declare a topology: a node named `supervisor`, `supervisor_agent` or `orchestrator` gives `HIERARCHICAL_DAG`, otherwise `PEER_TO_PEER`. Pass the handler in the graph's callbacks.
+
+Token usage is read in `handleLLMEnd` from each generation's `usage_metadata`, keyed by run id, with `llmOutput.tokenUsage` as a fallback.
+
+## OpenAI Agents JS
+
+```ts
+import { Agent, Runner } from "@openai/agents";
+import { instrument, report } from "@agentegrity/openai-agents";
+
+const runner = instrument(new Runner());
+await runner.run(agent, "hello");
+console.log(await report());
+```
+
+`instrument(runner)` listens on the runner's lifecycle events and returns the runner: `agent_start` becomes `user_prompt_submit`, `agent_tool_start` becomes `pre_tool_use` with the parsed tool arguments, `agent_tool_end` becomes `post_tool_use`, `agent_handoff` becomes `subagent_start`, and `agent_end` becomes `stop`. The SDK's `run()` helper uses an internal runner, so create a `Runner` to instrument. Instrumenting the same runner again is a no-op.
+
+The first agent seeds a `PEER_TO_PEER` topology and each handoff target is added as a peer. Token usage comes from the run context's `usage.requestUsageEntries`, one entry per model request, read at each tool start, handoff and agent end; agents run as tools share that object, so their requests are counted too. SDK versions without per-request entries report the running total under one key.
+
+## CrewAI TypeScript
+
+```ts
+import { Crew, crewaiEventBus } from "@crewai-ts/core";
+import { instrument, report } from "@agentegrity/crewai";
+
+const crew = new Crew({ agents: [agent], tasks: [task] });
+const close = instrument(crewaiEventBus, { crew });
+await crew.kickoff();
+await close();
+console.log(await report());
+```
+
+`instrument(bus, { crew })` subscribes to CrewAI's event bus and returns a function that unsubscribes, waits for queued events and ends the session. Instrumenting the same bus again with the same adapter returns the existing close function.
+
+| CrewAI event | Agentegrity event |
+|---|---|
+| `crew_kickoff_started` | `user_prompt_submit` |
+| `crew_kickoff_completed`, `crew_kickoff_failed` | `stop` |
+| `task_started` | `task_started` |
+| `agent_execution_started` | `subagent_start` |
+| `agent_execution_completed`, `agent_execution_error` | `subagent_stop` |
+| `tool_usage_started` | `pre_tool_use` |
+| `tool_usage_finished` | `post_tool_use` |
+| `tool_usage_error` | `post_tool_use_failure` |
+| `llm_call_completed` | token usage |
+
+Passing `crew` declares its agents as the topology: a sequential process gives `HUB_SPOKE` with the first agent as leader, a hierarchical one `HIERARCHICAL_DAG`. Without it the session stays single-agent. CrewAI reports each call's provider usage and then the client's running total under the same call id; when a call carries no usage of its own (native tool calling), the package counts the running total's growth since that client's previous call.
+
+## Google ADK
+
+```ts
+import { InMemoryRunner, LlmAgent } from "@google/adk";
+import { instrument, report } from "@agentegrity/google-adk";
+
+const agent = new LlmAgent({ name: "my-agent", model: "gemini-2.5-flash" });
+const close = instrument(agent);
+const runner = new InMemoryRunner({ agent, appName: "app" });
+// iterate runner.runAsync({ userId, sessionId, newMessage })
+await close();
+console.log(await report());
+```
+
+`instrument(agent)` adds callbacks to the agent and every agent reachable through `subAgents` or an agent tool, ahead of callbacks already set, and returns a function that ends the session. The callbacks return nothing, so your callbacks still run and decide. `beforeAgentCallback` becomes `user_prompt_submit` on the instrumented agent and `subagent_start` on others, `afterAgentCallback` becomes `stop` or `subagent_stop`, and the tool callbacks become the tool events. Instrumenting an agent again is a no-op.
+
+A workflow agent with sub-agents declares a `HIERARCHICAL_DAG`. Usage comes from `afterModelCallback`, final responses only; live (bidirectional) mode runs no model callbacks, so its usage is not seen.
+
+## Vercel AI SDK
+
+For AI SDK 3.4 through 6, pass a tracer per call:
+
+```ts
+import { streamText } from "ai";
+import { instrument, report } from "@agentegrity/vercel-ai";
+
+const result = streamText({ model, prompt: "...", experimental_telemetry: instrument() });
+for await (const chunk of result.textStream) process.stdout.write(chunk);
+console.log(await report());
+```
+
+For AI SDK 7, register the integration once at startup:
+
+```ts
+import { registerTelemetry } from "ai";
+import { telemetry } from "@agentegrity/vercel-ai";
+
+registerTelemetry(telemetry());
+```
+
+Register it globally: passing it per call through `telemetry.integrations` replaces the globally registered integrations.
+
+`ai.generateText`, `ai.streamText`, `ai.generateObject` and `ai.streamObject` become `user_prompt_submit` at start and `stop` at end, and `ai.toolCall` becomes `pre_tool_use` and then `post_tool_use` or `post_tool_use_failure`. On AI SDK 7 the same events come from `onStart`, `onToolExecutionStart`, `onToolExecutionEnd` and `onEnd`. Pass `instrument({ catchAll: true })` to also emit events for span names the package does not map.
+
+Usage is counted per model call, from `*.doGenerate` and `*.doStream` spans or `onLanguageModelCallEnd`, never from the operation spans, which carry the sum. The AI SDK has no multi-agent primitive, so no topology is declared.
+
+## `@agentegrity/client`
+
+The client package holds the shared core and the low-level pieces for frameworks without a package:
+
+- `createDefaultAdapter({ adapterName, profile, reporterOptions, defaultBaseUrl })`: the lazy session, exporter fan-out and lifecycle every framework package is built on.
+- `AgentegrityReporter`: a bare HTTP client with `start()`, `emit()` and `end()` against the three endpoints.
+- `AgentTopology`, `AgentMember`, `AgentRole`, `TopologyKind`, `TopologyChange`: multi-agent types whose `contentHash()` matches Python's. See [Multi-agent](/concepts/multi-agent).
+- `UsageLedger`: the same normalization and deduplication as the Python ledger, pinned to shared test vectors.
+- `credentialFingerprint()`: the same keyed fingerprint as Python's `fingerprint()`.
+- `KNOWN_EVENT_TYPES`: every event type the SDK sends.
+
+```ts
+import { KNOWN_EVENT_TYPES } from "@agentegrity/client";
+// pre_tool_use, post_tool_use, post_tool_use_failure, user_prompt_submit, stop,
+// subagent_start, subagent_stop, subagent_orphan, pre_compact, task_started,
+// topology_declared, topology_change, peer_message, shared_memory_write,
+// broadcast, credential_declared, capture_failure
+```
+
+The `EventType` type is that list plus `` `${string}_overflow` ``, one event per capped buffer. A consumer should handle the types it knows and accept others; see [Events](/reference/events).

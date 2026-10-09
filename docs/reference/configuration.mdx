@@ -1,0 +1,231 @@
+---
+title: "Configuration"
+description: "Every environment variable the Python library and TypeScript client read, plus the constructor options people most often set."
+---
+
+Nothing needs configuring to get started. The settings below change where data goes, how the coding-agent hook runtime behaves and how strict the layers are.
+
+## Environment variables
+
+The Python library and the TypeScript client read different sets of variables. Unless a row says otherwise, a variable is read by the Python library only.
+
+### Streaming
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_TOKEN` | unset | Ingest token. With a URL also set, every Python adapter attaches an `HTTPExporter` at construction and streams full session content. |
+| `AGENTEGRITY_EXPORTER_URL` | unset | Backend origin for that exporter. |
+| `AGENTEGRITY_URL` | unset | Alias for `AGENTEGRITY_EXPORTER_URL`, used only when that variable is unset. |
+
+Both a token and a URL must be set for anything to attach. Details in [Stream to Agentegrity Pro](/exporters/agentegrity-pro).
+
+### Hook runtime
+
+Read by `agentegrity hook` and the per-session daemon that serve the Claude Code and Codex plugins. Set them where the host runs, since the daemon inherits the environment of the first hook call in a session.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_HOOK_DISABLED` | unset | `1` turns the hook into a no-op that prints nothing, so the host's own permission flow decides. Only the exact value `1` counts. |
+| `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts without blocking. Any other value means `enforce`. |
+| `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier: `low`, `medium`, `high` or `critical`. An invalid value falls back to `high`. |
+| `AGENTEGRITY_AGENT_ID` | the host name | Profile `agent_id` (`claude-code` or `codex` when unset). |
+| `AGENTEGRITY_AGENT_NAME` | the host name | Profile name. |
+| `AGENTEGRITY_MODEL_ID` | unset | Profile `model_id`. Hosts let users switch models mid-session, so this records the configured model. |
+| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Where decision chains are written, as `<dir>/<host>/<session>.chain.json`. |
+| `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | A daemon exits after this many seconds without a hook call. |
+| `AGENTEGRITY_HOOK_TIMEOUT` | `10` | Seconds the hook waits for the daemon's answer before staying silent (fail-open). |
+
+The daemon's Unix socket lives in `$XDG_RUNTIME_DIR/agentegrity-<uid>`, or the system temp directory when `XDG_RUNTIME_DIR` is unset. If that directory is accessible to group or others, the runtime refuses the daemon and evaluates each call in-process instead, which does not stream.
+
+### Telemetry
+
+| Variable | Default | Effect |
+|---|---|---|
+| `DO_NOT_TRACK` | unset | A truthy value disables telemetry before any file or network access. |
+| `AGENTEGRITY_TELEMETRY_DISABLED` | unset | Same effect, agentegrity-specific. |
+| `AGENTEGRITY_TELEMETRY_DISABLE_GEOIP` | unset | Keeps telemetry but asks PostHog to skip geographic enrichment. |
+
+Truthy values are `1`, `true`, `yes`, `on`, `t` and `y`, case-insensitive. `agentegrity.disable_telemetry()` does the same at runtime. See [Telemetry](/telemetry) for every event.
+
+### Local model layer
+
+Read only when you construct the opt-in model-backed layers.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_SLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible API root for `AdversarialSLMLayer`; `/chat/completions` is appended. The default is a local Ollama server. |
+| `AGENTEGRITY_SLM_MODEL` | unset | Model name for `AdversarialSLMLayer`. Required: without it the layer logs one warning and returns neutral verdicts. |
+| `AGENTEGRITY_SLM_API_KEY` | unset | Bearer token for servers that need one. Omitted from requests when unset. |
+| `ANTHROPIC_API_KEY` | unset | Fallback key for `AdversarialLLMLayer` and `CorticalLLMLayer` when no `api_key` argument is given. Without a key, those layers fail open. |
+
+Constructor arguments (`base_url=`, `model=`, `api_key=`) take precedence over these variables.
+
+### Credential fingerprints
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_FINGERPRINT_KEY` | unset | Organization key for the HMAC-SHA256 fingerprints made by `declare_credential` and `declare_from_env`. Without it, nothing is recorded (the library logs this once) rather than falling back to an unkeyed hash. |
+
+Treat this key like the credentials it fingerprints and use a separate key per tenant: two tenants sharing a key can join each other's fingerprints. Rotating it invalidates every earlier fingerprint.
+
+### TypeScript client
+
+Read by `@agentegrity/client` and every `@agentegrity/<framework>` package.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_URL` | `http://localhost:8787` | Backend origin for the built-in reporter. `AGENTEGRITY_EXPORTER_URL` is not read. |
+| `AGENTEGRITY_TOKEN` | unset | Bearer token. Sent only to HTTPS or loopback URLs. |
+| `AGENTEGRITY_DISABLED` | unset | `1`, `true` or `TRUE` turns the adapter off completely. |
+| `AGENTEGRITY_OFFLINE` | unset | `1`, `true` or `TRUE` skips HTTP requests but still calls registered exporters. |
+
+<Warning>
+The TypeScript reporter sends every payload to `AGENTEGRITY_URL` even when you set nothing, which means `http://localhost:8787`. Set `AGENTEGRITY_OFFLINE=1` if no request should be made.
+</Warning>
+
+## Entry point options
+
+Every Python framework entry point accepts the same keyword options: `hooks()` in `agentegrity.claude`, `run_hooks()` in `agentegrity.openai_agents`, `instrument_chain()` and `instrument_graph()` in `agentegrity.langchain`, and `instrument()` in the CrewAI, Google ADK, AutoGen, Agno and Bedrock modules.
+
+<ParamField path="enforce" type="bool" default="False">
+When `True`, a `block` verdict denies the tool call, and an `escalate` verdict denies it unless an approval handler approves. When `False`, verdicts are recorded and nothing is blocked. The AutoGen and Google ADK adapters, and Bedrock's `wrap_client`, observe only; they record the decision but cannot stop the call.
+</ParamField>
+<ParamField path="profile" type="AgentProfile | None" default="None">
+The agent profile to evaluate. Defaults to `AgentProfile.default()`: a tool-using cloud agent at medium risk.
+</ParamField>
+<ParamField path="client" type="AgentegrityClient | None" default="None">
+A client whose evaluator the adapter uses. Build one to change thresholds, weights or the policy set.
+</ParamField>
+<ParamField path="api_key" type="str | None" default="None">
+Stored on the adapter. No shipped adapter or layer reads it in 0.12.0; pass keys to the model-backed layers directly.
+</ParamField>
+
+<Warning>
+Passing any of these options builds a new adapter instead of using the module's default one. The module's `report()`, `register_exporter()` and `adapter()` keep pointing at the default adapter, which then sees no events. To configure an adapter and still register exporters on it, create it from a client:
+
+```python
+from agentegrity import AgentegrityClient, AgentProfile
+
+client = AgentegrityClient(policy_set="strict")
+ad = client.create_adapter("langchain", profile=AgentProfile.default(name="billing"), enforce=True)
+ad.register_exporter(my_exporter)
+graph = ad.instrument_graph(my_graph)
+```
+</Warning>
+
+`agentegrity.init()` accepts `name`, `frameworks`, `enforce`, `policy_set` and `profile`, and passes `enforce` and the profile to every adapter it builds.
+
+### AgentegrityClient
+
+```python
+AgentegrityClient(
+    policy_set="enterprise-default",
+    coherence_threshold=0.70,
+    drift_tolerance=0.15,
+    weights=None,
+)
+```
+
+The client builds the four default layers with these values. `client.create_adapter(name, profile, *, enforce=False, api_key=None)` returns an adapter for one of `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno` or `bedrock_agents`.
+
+### Adapter classes
+
+To set a signing key or an approval handler, construct the adapter class directly. The Claude, LangChain, OpenAI Agents, CrewAI and Agno adapters accept:
+
+| Argument | Default | Effect |
+|---|---|---|
+| `profile` | required | The agent profile. |
+| `evaluator` | four default layers | An `IntegrityEvaluator`. |
+| `enforce` | `False` | As above. |
+| `signing_key` | `None` | Ed25519 private key. Records are signed only when this is set (requires `[crypto]`). |
+| `approval_handler` | `None` | Called as `handler(profile, score, candidate_action)` when enforcement meets an `escalate`. Return `True` or an `ApprovalDecision` to allow. Without a handler, escalations are denied; a handler that raises denies. |
+| `chain` | new chain | An existing `AttestationChain` to continue. |
+| `stream_from_env` | `True` | `False` stops the adapter from attaching an `HTTPExporter` from the environment. |
+
+The AutoGen, Google ADK and Bedrock adapters accept only `profile`, `evaluator`, `enforce` and `api_key`.
+
+## Evaluator and layer options
+
+Build an evaluator when the client's options are not enough:
+
+```python
+from agentegrity import IntegrityEvaluator, PropertyWeights
+from agentegrity.layers import AdversarialLayer, CorticalLayer, GovernanceLayer, RecoveryLayer
+
+evaluator = IntegrityEvaluator(
+    layers=[
+        AdversarialLayer(coherence_threshold=0.85),
+        CorticalLayer(drift_tolerance=0.10, block_on_drift=True),
+        GovernanceLayer(policy_set="strict"),
+        RecoveryLayer(degradation_window=20),
+    ],
+    weights=PropertyWeights(
+        adversarial_coherence=0.40,
+        environmental_portability=0.20,
+        verifiable_assurance=0.25,
+        recovery_integrity=0.15,
+    ),
+)
+```
+
+### IntegrityEvaluator
+
+| Argument | Default | Effect |
+|---|---|---|
+| `layers` | required | Layers to run, in order. `agentegrity.layers.default_layers()` builds the standard four. |
+| `weights` | `PropertyWeights()` | Property weights for the composite score. Defaults: adversarial coherence 0.35, environmental portability 0.20, verifiable assurance 0.30, recovery integrity 0.15. Weights must sum to 1.0 or construction raises `ValueError`. |
+| `fail_fast` | `True` | Stop running layers after the first one that returns `block`. |
+
+### AdversarialLayer
+
+| Argument | Default | Effect |
+|---|---|---|
+| `coherence_threshold` | `0.70` | The layer alerts when its coherence score falls below this. |
+| `block_on_critical` | `True` | Block when any detected threat has severity 0.90 or higher. |
+| `threat_detectors` | `None` | Extra callables taking `(profile, context)` and returning `ThreatAssessment` lists. |
+| `patterns` | built-in taxonomy | Replace the regex taxonomy. |
+| `extra_patterns` | `None` | Add patterns to the built-in taxonomy. |
+| `detect_tool_sequences` | `True` | Flag a sensitive read followed by an external send in the same session. |
+| `tool_categories` | built-in | Tool-name categories for sequence detection. |
+| `detect_tool_arguments` | `True` | Classify tool-call arguments, which blocks remote code execution and log tampering under `block_on_critical`. |
+
+### CorticalLayer
+
+| Argument | Default | Effect |
+|---|---|---|
+| `drift_tolerance` | `0.15` | Drift above this alerts. |
+| `block_on_drift` | `False` | Drift above twice the tolerance blocks instead of alerting. |
+| `memory_integrity_threshold` | `0.80` | Memory integrity below this alerts. |
+| `reasoning_consistency_threshold` | `0.75` | Reasoning consistency below this alerts. |
+| `min_drift_samples` | `20` | Observations required in both baseline and session before drift is computed. |
+| `baseline_store` | `None` | Persists the behavioral baseline across processes (`InMemoryBaselineStore`, `FileBaselineStore`, `SqliteBaselineStore`). |
+| `metric` | `"js"` | `"js"` (Jensen-Shannon) or `"wasserstein"` (needs `[stats]`; falls back to Jensen-Shannon with a warning). |
+
+A reasoning conflict escalates regardless of these settings.
+
+### GovernanceLayer
+
+| Argument | Default | Effect |
+|---|---|---|
+| `policy_set` | `"enterprise-default"` | Built-in rule set: `enterprise-default` (rules GOV-001 to GOV-005), `minimal` (no rules) or `strict` (every tool call requires approval). Any other name loads no built-in rules. |
+| `custom_rules` | `None` | `PolicyRule` objects added to the set. |
+| `sensitive_tools` | built-in set | Tool names that GOV-001 gates for high and critical risk agents. Entries match exactly, as globs with `*` or `?`, or against the bare tool part of MCP-namespaced names. |
+| `escalation_callback` | `None` | Called with `(profile, action, evaluation)` when a rule requires approval. |
+| `enable_audit` | `True` | Keep audit log entries. |
+
+### RecoveryLayer
+
+| Argument | Default | Effect |
+|---|---|---|
+| `degradation_window` | `10` | Number of recent composite scores examined for sustained degradation. |
+| `degradation_threshold` | `0.15` | Score drop over the window that counts as sustained degradation, which alerts. |
+| `checkpoint` | `None` | A `Checkpoint` backend (`InMemoryCheckpoint`, `FileCheckpoint`, `SqliteCheckpoint`) for snapshots and restore. |
+| `chain`, `score_history` | `None` | Initial chain and score history. |
+
+A broken attestation chain escalates.
+
+### Model-backed layers
+
+`AdversarialLLMLayer` (`agentegrity.layers.adversarial_llm`) and `CorticalLLMLayer` (`agentegrity.layers.cortical_llm`) need `pip install "agentegrity[llm]"` and take `api_key` and `model` (default `claude-haiku-4-5-20251001`). `AdversarialSLMLayer` (`agentegrity.layers.adversarial_slm`) takes `base_url`, `model`, `api_key`, `timeout` (8.0) and `max_tokens` (256). All three accept the `AdversarialLayer` or `CorticalLayer` options of the layer they extend, and all fail open on errors.
+
+These layers call their model only on the async path (`await layer.aevaluate(...)` or `AsyncIntegrityEvaluator` from `agentegrity.core.evaluator`). Synchronous `evaluate()` runs only the pattern checks, and the framework adapters evaluate synchronously. `default_layers(prefer_llm=True)` swaps in `CorticalLLMLayer`.

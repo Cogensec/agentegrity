@@ -1,0 +1,88 @@
+---
+title: "Threat model"
+description: "What an attacker can do to Agentegrity itself, which mitigations exist and which risks are left to you."
+---
+
+This page summarizes the project's STRIDE threat model for the framework itself: attacks on the library, its records and its outputs, as opposed to attacks on the agent it measures. The full document, with every threat and the code that mitigates it, is [`spec/threat-model.md`](https://github.com/Cogensec/agentegrity/blob/main/spec/threat-model.md).
+
+Agentegrity is a measurement layer. It does not replace guardrails, runtime monitors or network controls, and the mitigations below assume you run those too.
+
+## Scope
+
+In scope: the `agentegrity` Python package, the `@agentegrity/*` npm packages, the coding-agent hook runtime and everything else in the repository. The model treats these as trust boundaries and asks what each side can do to the library:
+
+| Boundary | Risk |
+|---|---|
+| Framework SDK to adapter | The framework passes arbitrary content into adapter handlers. |
+| LLM output to adapter | Tool responses, retrieved documents and peer, shared-memory and broadcast messages reach the scanned channels. |
+| Layers to persistence | Checkpoints and baselines are written to local files or SQLite. |
+| Adapter to exporter | Session data fans out to every registered exporter. |
+| Process to exporter backend | The backend sees the wire format. |
+| Maintainers to registries | Releases are published to PyPI and npm. |
+
+Out of scope: the agent's own LLM provider, bugs in the framework SDKs being adapted (and Codex's hook coverage gaps), gaps in detection coverage (a pattern the regex taxonomy misses is a feature gap, tracked in STATUS.md) and Agentegrity Pro, which has its own security policy.
+
+## Main threats and mitigations
+
+### Forged or edited records
+
+Records in an attestation chain are linked by SHA-256 hashes, and records are signed with Ed25519 when the adapter has a `signing_key`.
+
+- Hash links detect accidental breakage only. The hashes are unkeyed, so whoever can edit a chain can recompute every link. Signatures are what make edits detectable.
+- Each signed record embeds its public key. A forger who replaces both the record and the key produces a chain that verifies against itself, so verify against keys you pinned: `--trusted-key` on the [CLI](/reference/cli#verify-decisions), `trusted_keys` in code, or a `KeyProvider` for cross-agent verification.
+- The library never generates or stores a signing key for you. If the key lives in the same process as an agent that achieves code execution, the key is reachable. Keep keys in a KMS or HSM, or isolate the process.
+- The coding-agent hook runtime does not sign its chains, so a process running as the same user can rewrite them. Streaming a copy off the host is the mitigation.
+
+### Data leaking through exporters
+
+Every registered exporter receives full event content, including any secrets or personal data that appear in prompts or tool output. The library does not sanitize the wire format.
+
+- Registration is explicit: there is no auto-discovery, so a malicious dependency cannot attach itself unless your code or environment does it. Review `register_exporter` calls and the `AGENTEGRITY_TOKEN` / `AGENTEGRITY_EXPORTER_URL` variables.
+- `report()["exporters"]` lists every attached sink. See [What leaves your process](/security/data-flows).
+- There is no certificate pinning. Use HTTPS (or mTLS or a private network) to the backend. The TypeScript reporter refuses to send its token to a non-HTTPS, non-loopback URL; the Python exporter does not check.
+- Scrub sensitive fields before they reach the framework if the backend should not see them.
+
+### Credential fingerprints
+
+Declared credentials are recorded as HMAC-SHA256 fingerprints under the organization key in `AGENTEGRITY_FINGERPRINT_KEY`, so they can be joined only by someone holding that key. Without a key, nothing is recorded. Labels are names, never samples of the secret; tests check that no part of a declared secret appears in records, events, summaries, exporter payloads or logs. Treat the key like the credentials it fingerprints and use one per tenant.
+
+### Tampered files and rules
+
+- Checkpoint and baseline files are written atomically, but their JSON is not signed. Anyone who can write the directory can roll an agent back to a state they choose. Restrict permissions, or wrap the checkpoint in `KMSCheckpoint` for encryption at rest.
+- File stores reject ids containing `/`, `\` or `..`, so an `agent_id` cannot write outside the store's root.
+- Stores have no access control between agents that share them. Use one store per tenant.
+- Built-in policy sets are constants in code. If you load custom rules from a file, verify them before passing them to `GovernanceLayer`.
+- Custom detectors, policy rules and monkey-patched taxonomies run with full process privileges. Treat registering one as a trust decision and pin your dependencies.
+
+### Denial of service
+
+- The regex taxonomy avoids patterns prone to catastrophic backtracking and is checked against a latency budget in a scheduled CI job. There is no maximum input length, so a 10 MB prompt costs 10 MB of scanning; limit input size at the framework level.
+- Per-session buffers cap at 1,000 entries per channel, and the first overflow on each channel emits one `<channel>_overflow` event, so a flood of peer messages or broadcasts cannot exhaust memory.
+- Exporter errors are caught and logged. The built-in HTTP and alert exporters post from a background thread with bounded queues and per-request timeouts. A custom Python exporter can still slow the agent when no event loop is running, and a slow TypeScript exporter delays each event, because both are run to completion.
+
+### Coding-agent hook runtime
+
+- Daemon sockets live in a per-user directory that must be private to that user; otherwise the runtime evaluates in-process. Sockets and chain files are created with mode `0600`. Any process running as the same user can still connect; the runtime does not defend against code that already has the agent's privileges.
+- Commands built at runtime (variables, command substitution, `$IFS` splicing) cannot be resolved by static analysis. They are tagged `obfuscated_command` and escalate. On Codex, input typed into a running shell, output of commands still running and hosted tools never reach a hook.
+- Deleting or truncating logs and shell history is tagged `log_tamper` and blocked under enforcement.
+- Content written by `Write`, `Edit` and `apply_patch` is scanned for injected instructions. A compaction summary can still carry instructions forward, and hosts do not show it to hooks.
+- The hook waits at most `AGENTEGRITY_HOOK_TIMEOUT` (10 seconds) for its daemon and then stays silent. That is deliberate fail-open: anyone who can wedge the daemon (the same user) turns enforcement off for that session, and the host's own permission flow still applies.
+
+### Multi-agent systems
+
+- Peer messages, shared memory and broadcasts are scanned like other channels. The recovery layer raises an alert when two or more peers degrade together; a single compromised peer without correlated degradation does not trigger it.
+- Shared-memory threats are attributed to the writer through `writer_agent_id`.
+- A `subagent_stop` without a matching start emits `subagent_orphan`. When tracing samples out both events, the adapter cannot see either.
+- Topology declarations are committed to the chain. Verifying peers against a `KeyProvider` rejects records signed by any other key; without one, a topology is only as trustworthy as the code that declared it.
+
+### Supply chain
+
+PyPI releases use GitHub Actions trusted publishing, so CI holds no long-lived tokens, and maintainer accounts require two-factor authentication. Pin exact versions and install with hashes.
+
+## Known limits
+
+- Detection quality is your responsibility to validate. A record with no threats proves only that the layers did not fire. Published numbers, including the weak ones, are in [STATUS.md](https://github.com/Cogensec/agentegrity/blob/main/STATUS.md).
+- Most of the library fails open by design: exporters, model-backed layers and hooks log and continue on error rather than stopping the agent. Enforcement decisions under `enforce=True` are the exception: an `escalate` without an approving handler is denied.
+- Chains live in memory unless you persist them. The hook runtime persists its own.
+
+Report a threat that is not covered, or a bypass of a listed mitigation, through the process in [SECURITY.md](https://github.com/Cogensec/agentegrity/blob/main/SECURITY.md): a private GitHub security advisory, or security@cogensec.com.

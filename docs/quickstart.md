@@ -1,4 +1,7 @@
-# Agentegrity Quickstart
+---
+title: "Quickstart"
+description: "Instrument an agent, score a profile, or check your install in a few lines."
+---
 
 Three copy-paste blocks. Pick the one that matches your setup and run it.
 
@@ -17,7 +20,7 @@ async with ClaudeSDKClient(options=ClaudeAgentOptions(hooks=hooks())) as sdk:
 print(report())
 ```
 
-`hooks()` lazily builds a default adapter with a generic `AgentProfile`, the full four-layer evaluator (adversarial, cortical, governance, recovery), and measure-only semantics. It never blocks tool calls unless you pass `enforce=True`. `report()` returns a session summary — evaluation count, attestation chain length, whether the chain verifies.
+`hooks()` lazily builds a default adapter with a generic `AgentProfile`, the full four-layer evaluator (adversarial, cortical, governance, recovery), and measure-only semantics. It never blocks tool calls unless you pass `enforce=True`. `report()` returns a session summary: evaluation count, attestation chain length, whether the chain verifies.
 
 ## 1b. Instrument LangChain / LangGraph, OpenAI Agents, CrewAI, or Google ADK
 
@@ -57,7 +60,7 @@ Each module exposes the same `report()` / `reset()` / `adapter()` surface as `ag
 
 ## 1c. Export session data to a dashboard or external sink
 
-Every adapter exposes `register_exporter(exporter)` — subscribe anything that implements the `SessionExporter` protocol (`on_session_start`, `on_event`, `on_session_end`) and it receives live session data as JSON-ready dicts:
+Every adapter exposes `register_exporter(exporter)`. Subscribe anything that implements the `SessionExporter` protocol (`on_session_start`, `on_event`, `on_session_end`) and it receives live session data as JSON-ready dicts:
 
 ```python
 from agentegrity.langchain import register_exporter, instrument_graph
@@ -74,17 +77,17 @@ register_exporter(PrintExporter())
 graph = instrument_graph(my_graph)
 ```
 
-Exporter exceptions are caught and logged — the exporter can never break the instrumented agent. For a production dashboard, deploy the commercial [`agentegrity-pro`](https://github.com/cogensec/agentegrity-pro) backend (`docker compose up`) and point the agent at it by setting `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` — the default adapter picks them up automatically and streams every session over the published exporter HTTP API.
+Exporter exceptions are caught and logged, so the exporter can never break the instrumented agent. For a production dashboard, use the [Agentegrity Pro](https://app.cogensec.com) console and point the agent at it by setting `AGENTEGRITY_EXPORTER_URL` and `AGENTEGRITY_TOKEN`. The default adapter picks them up automatically and streams every session over the published exporter HTTP API.
 
 **Non-Python agents** use the same contract via one of the six TypeScript adapters, each shipping a 2–3 line zero-config enable. Pick the one that matches your framework:
 
 ```bash
-npm i @agentegrity/claude-sdk      # Claude Agent SDK — options.hooks = hooks()
-npm i @agentegrity/langchain       # LangChain JS — callbacks: [instrument()]
+npm i @agentegrity/claude-sdk      # Claude Agent SDK: options.hooks = hooks()
+npm i @agentegrity/langchain       # LangChain JS: callbacks: [instrument()]
 npm i @agentegrity/openai-agents   # OpenAI Agents SDK: instrument(new Runner())
 npm i @agentegrity/crewai          # CrewAI TypeScript: instrument(crewaiEventBus, { crew })
-npm i @agentegrity/google-adk      # Google ADK — instrument(agent)
-npm i @agentegrity/vercel-ai       # Vercel AI SDK — experimental_telemetry: instrument()
+npm i @agentegrity/google-adk      # Google ADK: instrument(agent)
+npm i @agentegrity/vercel-ai       # Vercel AI SDK: experimental_telemetry: instrument()
 ```
 
 Each re-exports `registerExporter()`, `report()`, and `reset()` for the same fan-out contract as the Python adapters. The low-level `@agentegrity/client` reporter is still available for custom frameworks. The wire format is published as JSON Schema in `schemas/exporter/` and OpenAPI 3.1 in `schemas/openapi.yaml`, so any language can produce or consume events.
@@ -106,7 +109,7 @@ Each hook runs `python3 -m agentegrity hook --host <host>`, and one daemon per s
 agentegrity verify-decisions ~/.agentegrity/codex/<session>.chain.json
 ```
 
-See [integrations/claude-code](../integrations/claude-code/README.md) and [integrations/codex](../integrations/codex/README.md) for configuration and limits.
+See [Claude Code](/integrations/claude-code) and [Codex](/integrations/codex) for configuration and limits.
 
 ## 2. Score an arbitrary agent profile
 
@@ -137,8 +140,8 @@ If `doctor` prints a composite score and `OK`, your install is wired correctly.
 
 ## Next steps
 
-- **Custom thresholds, layer weights, and threat detectors** — drop down to `IntegrityEvaluator` and the individual layers (see the "Configuring the evaluator" section in the [README](../README.md)).
-- **Cryptographic attestation signing** — `pip install "agentegrity[crypto]"` and call `AttestationRecord.sign(private_key)` to produce verifiable records.
-- **LLM-backed cortical checks** — `pip install "agentegrity[llm]"` and pass `LLMCorticalCheck` instances to `CorticalLayer(llm_checks=[...])` for semantic reasoning-chain validation.
-- **Governance policies** — customize `GovernanceLayer(policy_set=...)` or register custom policy rules. See [`spec/layers/governance-layer.md`](../spec/layers/governance-layer.md).
-- **Full specification** — [`spec/SPECIFICATION.md`](../spec/SPECIFICATION.md) is the source of truth for the property definitions, layer contracts, and scoring methodology.
+- **Custom thresholds, layer weights, and threat detectors**: drop down to `IntegrityEvaluator` and the individual layers (see [Configuration](/reference/configuration)).
+- **Cryptographic attestation signing**: `pip install "agentegrity[crypto]"` and call `AttestationRecord.sign(private_key)` to produce verifiable records.
+- **LLM-backed cortical checks**: `pip install "agentegrity[llm]"` and pass `LLMCorticalCheck` instances to `CorticalLayer(llm_checks=[...])` for semantic reasoning-chain validation.
+- **Governance policies**: customize `GovernanceLayer(policy_set=...)` or register custom policy rules. See the [governance layer spec](https://github.com/Cogensec/agentegrity/blob/main/spec/layers/governance-layer.md).
+- **Full specification**: [`spec/SPECIFICATION.md`](https://github.com/Cogensec/agentegrity/blob/main/spec/SPECIFICATION.md) is the source of truth for the property definitions, layer contracts, and scoring methodology.

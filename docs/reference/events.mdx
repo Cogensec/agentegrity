@@ -1,0 +1,230 @@
+---
+title: "Events and wire format"
+description: "The three exporter payloads, every event type, the session summary and the HTTP API that carries them."
+---
+
+Every exporter receives the same three payloads, and the HTTP exporter and TypeScript reporter send them as JSON request bodies. The payloads are defined as JSON Schema (draft 2020-12) in [`schemas/exporter/`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter), and the HTTP endpoints in [`schemas/openapi.yaml`](https://github.com/Cogensec/agentegrity/blob/main/schemas/openapi.yaml). `tests/test_schemas.py` checks the Python output against the schemas.
+
+## Payloads
+
+| Payload | Schema | Exporter callback | HTTP request |
+|---|---|---|---|
+| Session start | [`session_start.json`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter/session_start.json) | `on_session_start` | `POST /sessions` |
+| Event | [`event.json`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter/event.json) | `on_event` | `POST /sessions/{id}/events` |
+| Session end | [`session_end.json`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter/session_end.json) | `on_session_end` | `POST /sessions/{id}/end` |
+
+Shared definitions (`AgentProfile`, `FrameworkEvent`, `IntegrityScore`, `LayerResult`, `SessionSummary`, `TokenUsage`, `SessionUsage`) live in [`common.json`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter/common.json). The three top-level payloads reject unknown keys; the shared objects inside them accept extra fields.
+
+### Session start
+
+Sent once per session, before its first event.
+
+```json
+{
+  "session_id": "bec05cee54364057b2d17ac59426d2ac",
+  "adapter_name": "langchain",
+  "profile": {
+    "agent_id": "dbdd39a1-1978-4ec9-b91c-452a00472692",
+    "name": "support-bot",
+    "agent_type": "tool_using",
+    "capabilities": ["tool_use"],
+    "deployment_context": "cloud",
+    "risk_tier": "medium",
+    "framework": null,
+    "model_provider": null,
+    "model_id": null,
+    "metadata": {},
+    "created_at": "2026-10-07T05:46:29.457120+00:00"
+  }
+}
+```
+
+`session_id` is 32 lowercase hex characters, generated per adapter instance. `adapter_name` is the adapter's name: `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno`, `bedrock_agents`, `claude_code` or `codex` in Python; `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk` or `vercel_ai` in TypeScript. The profile requires `agent_id`, `name`, `agent_type`, `capabilities`, `deployment_context` and `risk_tier`. The HTTP exporter fills an empty `framework` with the adapter name before sending.
+
+### Event
+
+Sent once per event, wrapping a `FrameworkEvent`.
+
+```json
+{
+  "session_id": "bec05cee54364057b2d17ac59426d2ac",
+  "event": {
+    "event_type": "pre_tool_use",
+    "timestamp": "2026-10-07T05:46:29.457721+00:00",
+    "adapter_name": "langchain",
+    "data": {
+      "tool_name": "search_docs",
+      "tool_input": { "query": "refund policy" }
+    },
+    "evaluation_result": {
+      "composite": 0.9295,
+      "properties": {
+        "adversarial_coherence": 1.0,
+        "environmental_portability": 0.9475,
+        "verifiable_assurance": 1.0,
+        "recovery_integrity": 0.6
+      },
+      "layer_results": [
+        {
+          "layer_name": "adversarial",
+          "score": 1.0,
+          "passed": true,
+          "action": "pass",
+          "details": { "threat_count": 0, "coherence_score": 1.0 },
+          "latency_ms": 0.043
+        }
+      ],
+      "timestamp": "2026-10-07T05:46:29.457600+00:00",
+      "confidence": 1.0,
+      "evaluator_version": "1.0.0",
+      "total_latency_ms": 0.12,
+      "passed": true,
+      "action": "pass"
+    }
+  }
+}
+```
+
+The example shortens `layer_results` to one layer and trims its `details`; a real event lists every layer that ran.
+
+### Session end
+
+Sent once, when the adapter is closed.
+
+```json
+{
+  "session_id": "bec05cee54364057b2d17ac59426d2ac",
+  "summary": {
+    "adapter": "langchain",
+    "agent_id": "dbdd39a1-1978-4ec9-b91c-452a00472692",
+    "evaluations": 1,
+    "events": 1,
+    "attestation_records": 1,
+    "decision_records": 1,
+    "chain_records": 2,
+    "chain_hash_linked": true,
+    "enforce_mode": false,
+    "exporters": [{ "type": "HTTPExporter", "target": "https://ingest.example.com" }],
+    "credentials": []
+  }
+}
+```
+
+## FrameworkEvent
+
+<ResponseField name="event_type" type="string" required>
+Snake-case event name matching `^[a-z][a-z0-9_]*$`. See [Event types](#event-types).
+</ResponseField>
+<ResponseField name="timestamp" type="string" required>
+When the adapter emitted the event, ISO 8601 with UTC offset.
+</ResponseField>
+<ResponseField name="adapter_name" type="string" required>
+Name of the adapter that emitted it.
+</ResponseField>
+<ResponseField name="data" type="object" required>
+The event's payload. For framework events this is the data the framework handed the adapter, so it can include prompts, tool arguments and tool output. On `stop` events it also carries `usage`, the session's token usage so far.
+</ResponseField>
+<ResponseField name="evaluation_result" type="IntegrityScore | null">
+The integrity score for evaluated events, otherwise `null`.
+</ResponseField>
+
+An `IntegrityScore` has `composite` (0 to 1), `properties` (one score per integrity property), `layer_results` and `action` in the schema. The Python library also sends `timestamp`, `confidence`, `evaluator_version`, `total_latency_ms` and `passed`. Each `LayerResult` has `layer_name`, `score`, `passed`, `action`, `details` and `latency_ms`. `action` is one of `pass`, `alert`, `escalate` or `block`; the score's `action` is the most severe across its layers. How the scores are computed is covered in [Scoring and actions](/concepts/scoring-and-actions).
+
+## Event types
+
+The schema lists the known types in its `examples`. Python adapters emit them from `src/agentegrity/adapters/base.py`, and `KNOWN_EVENT_TYPES` in `@agentegrity/client` mirrors the list.
+
+| Event type | Emitted when | Evaluated | `data` |
+|---|---|---|---|
+| `pre_tool_use` | Before a tool call runs | Yes | The hook payload, typically `tool_name` and `tool_input` |
+| `post_tool_use` | After a tool call returns | Yes | The hook payload, including the tool response |
+| `post_tool_use_failure` | A tool call raised or failed | No | The hook payload, including the error |
+| `user_prompt_submit` | A user prompt reaches the agent | Yes | The hook payload, including the prompt |
+| `stop` | The agent finishes a run | Yes | The hook payload plus `usage` when any tokens were recorded |
+| `subagent_start` | A subagent starts | No | The hook payload, including `agent_id` |
+| `subagent_stop` | A subagent stops | No | The hook payload |
+| `subagent_orphan` | A `subagent_stop` arrives for an agent with no matching start, for example when tracing sampled the start out | No | `agent_id`, `reason: "stop_without_start"` |
+| `pre_compact` | Before the host compacts the agent's context | No | `reasoning_chain_length`, `archived_chain`, `archived_tool_outputs` (the content being dropped) |
+| `task_started` | A framework task starts, such as a CrewAI task | No | The task payload |
+| `topology_declared` | A multi-agent adapter first declares its topology | Yes | `topology` |
+| `topology_change` | The declared topology changes structurally | Yes | `change`, `topology` |
+| `peer_message` | Another agent sends a message into this agent's context | No | `sender_agent_id`, `content`, `channel` |
+| `shared_memory_write` | A peer writes shared memory this agent reads | No | `writer_agent_id`, `key`, `content` and related fields |
+| `broadcast` | A message arrives on a broadcast channel the agent subscribes to | No | `sender_agent_id`, `channel`, `content` |
+| `credential_declared` | Code declares a credential the agent uses | No | `credential`: `provider`, `label`, `fingerprint` (never the value) |
+| `capture_failure` | Recording a decision failed | No | `decision_point`, `exception_class` (the class name only) |
+| `<channel>_overflow` | A per-session buffer reached its cap of 1,000 entries | No | `channel`, `limit` |
+
+Overflow events are sent once per channel per session. The channels are `inputs`, `tool_calls`, `tool_outputs`, `subagents`, `peer_message`, `shared_memory_write`, `broadcast` and `task_started`, so the event names are `tool_outputs_overflow`, `broadcast_overflow` and so on. After the cap, new entries for that channel are no longer buffered for evaluation; `broadcast` events also stop being emitted, while the other channels keep emitting their events.
+
+The OpenTelemetry exporter treats `capture_failure`, `subagent_orphan` and every overflow event as instrumentation-health events (see [OpenTelemetry](/exporters/opentelemetry#span-events)). The Bedrock adapter sends `stop` with `reason: "stream_terminated_early"` when a response stream ends before completing. Multi-agent events are explained in [Multi-agent](/concepts/multi-agent).
+
+## Forward compatibility
+
+New releases add event types and fields. The schemas are written so older consumers keep working:
+
+- `event_type` accepts any snake_case name. Handle the types you know and accept the rest; do not reject an event because its type is new.
+- `TokenUsage` and `SessionUsage` allow fields that later releases add, and `usage.sources` accepts new values. Ignore what you do not recognize.
+- `AgentProfile`, `IntegrityScore`, `LayerResult`, `FrameworkEvent`, `data` and `SessionSummary` all allow additional properties.
+
+## Session summary
+
+The `summary` in the session end payload is the adapter's `get_summary()`, the same dict Python `report()` returns.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `adapter` | Yes | Adapter name |
+| `agent_id` | Yes | Profile `agent_id` (`null` in an empty report) |
+| `evaluations` | Yes | Number of evaluations run |
+| `events` | Yes | Number of events emitted |
+| `attestation_records` | Yes | Attestation records in the chain |
+| `chain_hash_linked` | Yes | Whether every record links to the hash of the one before it |
+| `enforce_mode` | Yes | Whether enforcement was on |
+| `decision_records` | No | Decision records in the chain (Python) |
+| `chain_records` | No | All records in the chain (Python) |
+| `exporters` | No | Attached sinks, each with a `type` and optional `target`. Never contains credentials. Python only. |
+| `credentials` | No | Declared credentials as `provider`, `label` and HMAC-SHA256 `fingerprint`. Python only. |
+| `usage` | No | Final token usage, present when any was recorded |
+
+`chain_hash_linked` shows the records are linked, which anyone holding the chain can recompute; it is not a signature check. Use [`agentegrity verify-decisions`](/reference/cli#verify-decisions) for that.
+
+### Usage
+
+`usage` on `stop` events and in the summary follows `SessionUsage`:
+
+```json
+{
+  "input_tokens": 1200,
+  "output_tokens": 340,
+  "cache_read_tokens": 800,
+  "requests": 1,
+  "total_tokens": 1540,
+  "complete": true,
+  "sources": ["provider_response"],
+  "by_model": {
+    "claude-sonnet-4-5": {
+      "input_tokens": 1200,
+      "output_tokens": 340,
+      "cache_read_tokens": 800,
+      "requests": 1,
+      "total_tokens": 1540
+    }
+  }
+}
+```
+
+`input_tokens` always includes cached tokens, `complete: false` marks totals that are a lower bound, and the field is absent when nothing was recorded. The definitions are in [Token usage](/concepts/token-usage).
+
+## HTTP API
+
+[`schemas/openapi.yaml`](https://github.com/Cogensec/agentegrity/blob/main/schemas/openapi.yaml) (OpenAPI 3.1) describes three endpoints, which a backend must implement to receive sessions:
+
+| Method and path | Body | Responses |
+|---|---|---|
+| `POST /sessions` | Session start | `202` |
+| `POST /sessions/{sessionId}/events` | Event | `202`, `404` for an unknown session |
+| `POST /sessions/{sessionId}/end` | Session end | `202`, `404` for an unknown session |
+
+`sessionId` must match `^[0-9a-f]{32}$`. Clients send `Content-Type: application/json` and, when configured with a token, `Authorization: Bearer <token>`. The default server in the file is `http://localhost:8787`.
+
+Because a backend may answer `404` for events on a session it has not seen, the Python `HTTPExporter` sends requests in order from a single worker thread. The `agentegrity pro` command additionally calls `GET /ingest/verify`, which Agentegrity Pro provides and the OpenAPI file does not describe.

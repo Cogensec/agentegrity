@@ -1,0 +1,105 @@
+---
+title: "Codex"
+description: "The Codex hook plugin: the same runtime as Claude Code on Codex's native hooks, how verdicts differ, and what Codex hooks cannot cover."
+---
+
+The Codex plugin evaluates every tool call in a Codex session and writes a hash-linked decision chain you can verify afterwards. It runs the same runtime as the [Claude Code plugin](/integrations/claude-code), so the rules, configuration and chain format are identical. Everything runs on your machine; sessions stream to a console only when you set `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL`.
+
+## What it does
+
+The plugin registers `python3 -m agentegrity hook --host codex` on eight Codex hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop`, `PreCompact` and `SessionEnd`. The first hook of a session starts a daemon that holds the session's state, so the layers see the whole conversation in order.
+
+Two things differ from Claude Code:
+
+- **Verdicts.** Codex parses an `ask` decision but only enforces `deny`, so the runtime maps both `block` and `escalate` to `deny`, with the reason shown. Anything that would ask for approval on Claude Code is denied on Codex.
+- **Failures.** Codex has no separate failure event. A `PostToolUse` whose `tool_response.exit_code` is a non-zero integer is recorded as `post_tool_use_failure`, with the exit code and the last 500 characters of the command's output as the error.
+
+What the runtime checks:
+
+- **Argument classification.** A downloaded or decoded payload piped into an interpreter, or deleting logs and shell history, is denied. Commands computed at runtime (`$IFS` splicing, computed executables) are denied as well, since they escalate. `apply_patch` is read as a file edit, never as shell: its paths come from the `*** Update File:`, `*** Add File:` and `*** Delete File:` headers.
+- **Sensitive-data egress (GOV-005).** An external send after a secret was read in the session, or in the same command, is denied. Reading a secret alone is allowed and recorded.
+- **Output scanning.** Injection found in tool output lowers the score until the context is compacted.
+- **Written content.** Lines added to files by `apply_patch` are scanned for instructions, and a strong finding is denied.
+- **Behavioral drift.** Each session that ends without a `block` or `escalate` teaches a per-agent baseline in `<hook dir>/codex/baselines/`. Later sessions whose tool mix departs from it lower the score and alert. Drift never blocks here.
+- **Token usage.** Read from the rollout's `token_usage_record` lines (one per response), with the model from `turn_context` or the hook's `model` field, totalled per model and sent on `stop` events and in the session summary. Older Codex builds without those lines fall back to `token_count` events, and the usage is marked incomplete. Only usage counts and model names are kept from the rollout.
+- **Decision chain.** Every evaluation and a `hook_verdict` decision for every non-allow verdict are appended to `<hook dir>/codex/<session>.chain.json`, written atomically with mode 0600 and resumed if the daemon restarts.
+
+Verify a chain with:
+
+```bash
+agentegrity verify-decisions ~/.agentegrity/codex/<session>.chain.json
+```
+
+The chain is unsigned, so verification proves the records are intact and linked, not who wrote them. See [Attestation](/concepts/attestation).
+
+## Install
+
+```bash
+pip install "agentegrity>=0.12.0"   # must be importable by the python3 on PATH
+codex plugin marketplace add cogensec/agentegrity
+```
+
+Install `agentegrity` from the marketplace, then run `/hooks` once to review and trust the plugin's hooks. Codex does not run hooks that are not managed until you trust them. Organizations can ship them as managed hooks through `requirements.toml` instead.
+
+The plugin version (0.12.0) matches the library version it needs. If the hook command fails because the library is missing or older than 0.11.0, the plugin prints a system message saying the action was not checked, and the action goes through.
+
+The plugin is a root [`plugin.json`](https://github.com/Cogensec/agentegrity/blob/main/integrations/codex/plugin.json) and [`hooks/hooks.json`](https://github.com/Cogensec/agentegrity/blob/main/integrations/codex/hooks/hooks.json). Every command has a 20 second timeout except `SessionEnd` (5 seconds), and `PreToolUse` and `PostToolUse` use `"matcher": "*"`. If your Python launcher is `python` rather than `python3`, change the command in `hooks/hooks.json`.
+
+## Configuration
+
+Codex reads the same environment variables as Claude Code. `AGENTEGRITY_AGENT_ID` and `AGENTEGRITY_AGENT_NAME` default to `codex`, and chains, usage state and baselines live under `<hook dir>/codex/`.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts in the chain but never denies. Any other value means `enforce`. |
+| `AGENTEGRITY_HOOK_DISABLED` | unset | `1` disables the hook entirely. |
+| `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating: `low`, `medium`, `high` or `critical`. An invalid value falls back to `high`. |
+| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `codex/<session>.chain.json`, `codex/<session>.usage.json` and `codex/baselines/`. |
+| `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | The daemon exits after this many seconds without a hook. |
+| `AGENTEGRITY_HOOK_TIMEOUT` | `10` | Seconds the hook waits for the daemon's reply before staying silent. |
+| `AGENTEGRITY_AGENT_ID` | `codex` | Agent id the console groups this host's sessions under. |
+| `AGENTEGRITY_AGENT_NAME` | `codex` | Display name for that agent. |
+| `AGENTEGRITY_MODEL_ID` | unset | Model reported on the agent profile (the configured model; a mid-session switch is not tracked). |
+| `AGENTEGRITY_TOKEN` | unset | Ingest token. Streaming starts when this and a URL are both set. |
+| `AGENTEGRITY_EXPORTER_URL` | unset | Console origin to stream to. `AGENTEGRITY_URL` is accepted as an alias. |
+
+## Stream sessions to a console
+
+Set the token and URL in the environment Codex starts from; the session daemon inherits it and attaches the built-in `HTTPExporter`:
+
+```bash
+export AGENTEGRITY_TOKEN=agk_live_...
+export AGENTEGRITY_EXPORTER_URL=https://your-console.example.com
+export AGENTEGRITY_AGENT_NAME="Infra repo agent"
+codex
+```
+
+Or let `agentegrity pro` check the token against the console and run Codex with both variables set:
+
+```bash
+agentegrity pro --ingest-token agk_live_... --url https://your-console.example.com -- codex
+```
+
+Events carry full content, including prompts and tool arguments. Only the daemon streams; on Windows, where there is no daemon, nothing is sent. See [Agentegrity Pro](/exporters/agentegrity-pro) and [Data flows](/security/data-flows).
+
+## Failure semantics
+
+The hook never breaks a session. When it cannot reach a verdict it prints nothing, and Codex proceeds as it would without the plugin.
+
+| Situation | What happens |
+|---|---|
+| No daemon: Windows (no Unix sockets), a runtime directory that is not private to your user, or a daemon that does not come up within 5 seconds | Each call is evaluated in-process from the persisted chain. Single-call rules enforce; cross-call rules (GOV-005 across calls) and streaming do not. |
+| The daemon does not answer within `AGENTEGRITY_HOOK_TIMEOUT` | The hook prints nothing. |
+| `python3` cannot import `agentegrity`, or it is older than 0.11.0 | The plugin prints a system message that the action was not checked, and the action goes through. |
+| `alert` mode | Every verdict is recorded in the chain; nothing is denied. |
+| A chain file is corrupt | It is moved aside to `<session>.chain.json.corrupt` and a new chain starts. |
+
+## Limits
+
+These come from Codex's hook coverage and cannot be closed from a hook:
+
+- `write_stdin` has no `PreToolUse`, so input typed into a shell that is already running is not checked.
+- A command still running when its call returns gets no `PostToolUse`, so its output is never scanned.
+- Hosted tools such as web search do not go through hooks.
+
+The plugin has not yet been exercised against a live Codex binary; the runtime is tested in-process and as separate processes for both hosts, and is marked experimental in [STATUS.md](https://github.com/Cogensec/agentegrity/blob/main/STATUS.md). The hook evaluates tool calls, not the model's reasoning, and static command analysis flags runtime-computed commands as obfuscated rather than resolving them.

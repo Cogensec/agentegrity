@@ -1,0 +1,52 @@
+---
+title: "Agentegrity"
+description: "Measure whether an AI agent keeps its integrity under adversarial pressure, and record every decision in a verifiable chain."
+---
+
+Agentegrity evaluates an agent from inside its own decision loop. An adapter hooks into the framework you already use, turns each prompt, tool call, tool result and handoff into an event, and scores it through four layers: adversarial, cortical, governance and recovery. Every evaluation and every decision is appended to a hash-linked attestation chain that you can sign and verify later.
+
+The TypeScript packages report events and token usage without scoring them; the evaluation runs in the Python library and the coding-agent hook runtime.
+
+The library runs locally and blocks nothing unless you turn enforcement on. Guardrails and runtime monitors filter what goes in and out of an agent; Agentegrity measures the assembled agent (model, prompts, tools, memory and peers) and produces evidence of what it did and why it was allowed.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Instrument an agent in three lines and read its session report.
+  </Card>
+  <Card title="How it works" icon="layer-group" href="/concepts/how-it-works">
+    The four layers, the integrity properties and how a score is built.
+  </Card>
+  <Card title="Integrations" icon="plug" href="/integrations/overview">
+    Eight Python adapters, six TypeScript packages and two coding-agent plugins.
+  </Card>
+  <Card title="Stream to Agentegrity Pro" icon="chart-line" href="/exporters/agentegrity-pro">
+    Send sessions, verdicts and token usage to the console.
+  </Card>
+</CardGroup>
+
+## What you get from a session
+
+- **Scores and verdicts.** Each event gets a composite score and an action (allow, log, alert, block or escalate), with the reason recorded. See [Scores and actions](/concepts/scoring-and-actions).
+- **Decision provenance.** Decision records are captured at each decision boundary before the action runs, and can be verified from the command line. See [Attestation](/concepts/attestation).
+- **Token usage.** The tokens a session spends, normalized across providers and totalled per model. See [Token usage](/concepts/token-usage).
+- **Multi-agent structure.** Teams, crews, graphs and handoffs are declared as a topology that the chain commits to. See [Multi-agent systems](/concepts/multi-agent).
+
+## Supported frameworks
+
+| Framework | Python | TypeScript |
+|---|---|---|
+| Claude Agent SDK | `agentegrity.claude` | `@agentegrity/claude-sdk` |
+| LangChain / LangGraph | `agentegrity.langchain` | `@agentegrity/langchain` |
+| OpenAI Agents SDK | `agentegrity.openai_agents` | `@agentegrity/openai-agents` |
+| CrewAI | `agentegrity.crewai` | `@agentegrity/crewai` |
+| Google ADK | `agentegrity.google_adk` | `@agentegrity/google-adk` |
+| AutoGen | `agentegrity.autogen` | |
+| Agno | `agentegrity.agno` | |
+| AWS Bedrock Agents | `agentegrity.bedrock_agents` | |
+| Vercel AI SDK | | `@agentegrity/vercel-ai` |
+
+Claude Code and Codex are covered by hook plugins on a shared runtime. See [Claude Code](/integrations/claude-code) and [Codex](/integrations/codex).
+
+## Open source
+
+The library is Apache 2.0 and the specification is open. The source, specification and changelog are on [GitHub](https://github.com/Cogensec/agentegrity).

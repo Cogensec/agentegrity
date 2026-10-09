@@ -1,0 +1,210 @@
+---
+title: "Attestation and decision provenance"
+description: "What the attestation chain records, how records are hash-linked and signed, how to verify a chain against a pinned key, and how credential fingerprints ride along."
+---
+
+Every evaluation appends an `AttestationRecord` to the adapter's `AttestationChain`, and every decision boundary appends a `DecisionRecord` before the action runs. Both kinds share one chain, each record points at the hash of the one before it, and with the `[crypto]` extra each record is signed with Ed25519. A verifier holding your public key can then check that no record was altered, reordered or forged.
+
+## What a chain holds
+
+### Attestation records
+
+An `AttestationRecord` is the evaluator's verdict at one point in time.
+
+| Field | Content |
+|---|---|
+| `record_kind` | `"attestation"` |
+| `record_id` | UUID |
+| `agent_id` | The profile's agent id |
+| `timestamp` | UTC |
+| `integrity_score` | The full `IntegrityScore` as a dict (composite, properties, layer results, action) |
+| `layer_states` | Each layer's result, keyed by layer name |
+| `evidence` | A list of `Evidence` entries (below) |
+| `chain_previous` | `content_hash` of the previous record, or `null` for the first |
+| `signature`, `public_key` | Hex Ed25519 signature and raw public key, or `null` when unsigned |
+
+### Decision records
+
+A `DecisionRecord` captures what the agent was about to do and what it saw, built before the action executes so the rationale cannot be written after the fact.
+
+| Field | Content |
+|---|---|
+| `record_kind` | `"decision"` |
+| `decision_point` | Where it was captured (below) |
+| `candidate_action` | For a tool call: `type`, `tool_name` and the full `arguments`. For `stop`: a SHA-256 of the final output and its first 120 characters |
+| `decision_inputs` | One entry per input channel: `channel` (`user_prompt` or `tool_output`), a SHA-256 of the content, and a short summary (up to 120 characters of the latest prompt, or the tool name and 80 characters of its latest output) |
+| `reasoning_chain`, `rejected_alternatives`, `goal_state` | Rationale, when the caller provides it |
+| `capture_tier` | `minimal` (candidate action and inputs only), `partial` (with a reasoning chain) or `full` (with rejected alternatives) |
+
+Adapters capture decisions at these points:
+
+| `decision_point` | When |
+|---|---|
+| `pre_tool_use` | After the evaluation and before enforcement, so a blocked call still leaves a record of the attempt |
+| `stop` | Before the final output fans out to exporters |
+| `subagent_start` | When a child agent starts. The parent already decided earlier, so `candidate_action.type` is `subagent_dispatch_observed` with `boundary_category: lifecycle_attestation` |
+| `approval` | Each time an approval handler is consulted under enforcement ([Scores and actions](/concepts/scoring-and-actions#escalation-and-approval)) |
+| `hook_verdict` | Coding-agent hooks only: every non-allow verdict, with the verdict, mode, and the threats and rules behind it |
+
+Framework adapters produce `minimal` records today: frameworks expose the candidate action but not the model's deliberation. `IntegrityMonitor.record_decision()` and the adapters' `record_decision()` accept a reasoning chain and rejected alternatives when you have them.
+
+Capture fails open. If building a decision record raises, the adapter logs a warning, emits a `capture_failure` event carrying the decision point and exception class, and lets the action proceed.
+
+<Note>
+The chain is a record of what the agent did. Decision records carry tool arguments in full and short summaries of prompts and tool output, and the full chain is written wherever you save it. Treat a saved chain with the same care as the session's logs.
+</Note>
+
+### Evidence
+
+Each attestation lists `Evidence` entries (`evidence_type`, `source`, `content_hash`, `summary`, `timestamp`) that commit it to other data by hash:
+
+| `evidence_type` | `source` | Added |
+|---|---|---|
+| `layer_result` | Layer name | One per layer result, hashing its canonical JSON |
+| `decision` | Decision `record_id` | One per decision record appended since the previous attestation |
+| `topology` | `topology_id` | On every attestation while a topology is declared |
+| `topology_change` | Previous `topology_id` | On the one attestation after the topology changed |
+| `credential_use` | Credential provider | On every attestation after a credential is declared |
+
+`AttestationChain.verify_cross_agent_links()` also recognizes `peer_message` and `handoff` entries; see [Multi-agent systems](/concepts/multi-agent#cross-agent-verification).
+
+## Hash linkage
+
+Each record's `content_hash` is a SHA-256 over its canonical payload: deterministic JSON with sorted keys and no whitespace. `chain_previous` is part of that payload, so each record commits to its predecessor. `AttestationChain.append()` sets the link, and raises `ValueError` if a record already carries a different one.
+
+```python
+chain = adapter.attestation_chain
+
+chain.verify_chain()            # True when every record links to the one before it
+chain.verify_chain_detailed()   # (ok, broken_index, broken_record_kind)
+chain.verify_decision_links()   # every decision Evidence points at an earlier, unaltered decision
+```
+
+The session summary reports the first check as `chain_hash_linked`.
+
+<Warning>
+Hash linkage catches corruption and a missing record. It does not stop an attacker who holds the serialized chain: `content_hash` is an unkeyed SHA-256, so anyone who edits a record can recompute every link after it. Tamper evidence needs signatures checked against a key you trust.
+</Warning>
+
+## Signing
+
+Install the extra, generate an Ed25519 key, and give it to the adapter. Every attestation and decision record is then signed over its canonical payload, link included.
+
+```bash
+pip install "agentegrity[crypto]"
+```
+
+```python
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from agentegrity import AgentProfile
+from agentegrity.adapters.claude import ClaudeAdapter
+from agentegrity.core.attestation import generate_signing_key
+
+signing_key = generate_signing_key()   # Ed25519PrivateKey; load yours from a secret store in production
+public_key = signing_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+adapter = ClaudeAdapter(profile=AgentProfile.default(), signing_key=signing_key)
+```
+
+`IntegrityMonitor` and the `ClaudeAdapter`, `LangChainAdapter`, `OpenAIAgentsAdapter`, `CrewAIAdapter` and `AgnoAdapter` classes accept `signing_key=`. The `GoogleADKAdapter`, `AutoGenAdapter` and `BedrockAgentsAdapter` constructors take only `profile`, `evaluator`, `enforce` and `api_key`, so those adapters cannot sign yet. The zero-config `hooks()` and `instrument()` functions do not take a key either, so construct the class when you want signed records. Keep the private key out of the agent's reach: an agent that can read it can sign forged records.
+
+### Verifying signatures
+
+`verify_signatures()` returns `(True, None)` only when every record is signed and its signature verifies, otherwise `(False, index_of_first_bad_record)`.
+
+```python
+ok, bad_index = chain.verify_signatures(trusted_keys={public_key})
+```
+
+Always pass `trusted_keys`. Each record embeds its own public key, so without a pinned set a chain an attacker re-signed with their own key verifies against itself. With `trusted_keys`, a record whose embedded key is not in the set fails.
+
+### Saving and loading a chain
+
+```python
+from pathlib import Path
+from agentegrity import AttestationChain
+
+Path("chain.json").write_text(chain.to_json())
+restored = AttestationChain.from_json(Path("chain.json").read_text())
+```
+
+Loading keeps every stored link and signature. Write the public key as hex for the CLI:
+
+```python
+Path("agent.pub").write_text(public_key.hex())
+```
+
+## Verifying from the command line
+
+`agentegrity verify-decisions` (also `python -m agentegrity verify-decisions`) runs all three checks on a saved chain: hash linkage, decision links, and signatures.
+
+```bash
+agentegrity verify-decisions --trusted-key agent.pub chain.json
+```
+
+```
+  records:        3
+  chain linkage:  yes (hash-linked)
+  decision links: yes
+  signatures:     yes [pinned]
+
+  idx  kind          boundary/score          tier      signed  verified
+    0  attestation   attestation             -         yes     yes
+    1  decision      pre_tool_use            minimal   yes     yes
+    2  attestation   attestation             -         yes     yes
+```
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Linkage, decision links and signatures all verify |
+| 1 | Any check failed. An unsigned chain fails the signature check |
+| 2 | The chain or a key file could not be read or parsed |
+
+`--trusted-key` takes a file holding one hex public key and can be repeated. Without it, signatures are checked against the keys embedded in the records and the output marks them `UNPINNED (self-vouched)`. The command does not check cross-agent links. `agentegrity report` renders the same chain as a Markdown or JSON audit report; see the [CLI reference](/reference/cli).
+
+## Key providers
+
+A `KeyProvider` maps an `agent_id` to the raw 32-byte public key that agent is supposed to sign with. It is the trust anchor for verifying other agents' chains.
+
+```python
+from agentegrity import FileKeyProvider, StaticKeyProvider
+
+provider = StaticKeyProvider({"planner": planner_pub, "executor": executor_pub})
+provider = FileKeyProvider("keys/")   # reads keys/<agent_id>.pub, hex, same format as --trusted-key
+```
+
+Any object with `get_public_key(agent_id) -> bytes | None` works. `verify_cross_agent_links(peer_chains, key_provider=provider)` requires each referenced peer record to carry exactly the pinned key and a valid signature.
+
+## Credential provenance
+
+An agent can declare the credentials it uses so a leaked secret can be traced to the agent and every session that used it. The chain records a keyed fingerprint and a name, never the value.
+
+```bash
+export AGENTEGRITY_FINGERPRINT_KEY="<an org-wide secret>"
+```
+
+```python
+import os
+
+adapter.declare_credential("openai", os.environ["OPENAI_API_KEY"], label="openai/api_key")
+adapter.declare_from_env(["STRIPE_", "GITHUB_"])   # opt-in: env vars with these name prefixes
+```
+
+- The fingerprint is HMAC-SHA256 over the stripped secret, keyed by `AGENTEGRITY_FINGERPRINT_KEY`. A bare SHA-256 of a structured key (`sk-`, `ghp_`, `AKIA`) would be cheap to brute-force and would match across every organization.
+- Without the key, nothing is fingerprinted or recorded and the SDK logs one INFO line. It never falls back to an unkeyed hash.
+- `label` is a name such as `openai/api_key` or the variable name. Do not put any characters of the secret in it. `declare_from_env` uses the variable name as the label.
+- Declaring the same secret twice is a no-op.
+
+After a declaration, every later attestation carries `Evidence(evidence_type="credential_use")` with the fingerprint as its `content_hash`. Because the exporter wire format carries no chain records, the adapter also emits a `credential_declared` event, replayed right after `on_session_start` if no exporter was attached yet, and lists the fingerprints under `credentials` in the session summary. To match a secret a scanner found, compute the same value with `agentegrity.fingerprint(secret, key=...)`; `credentialFingerprint()` in `@agentegrity/client` returns the identical value.
+
+Current limits: the coding-agent hooks do not declare credentials, and a session resumed from a saved chain does not restore the declared set, so redeclare after resuming.
+
+## Limits
+
+- Chains are unsigned unless you pass a signing key. The coding-agent hook chains are unsigned today.
+- A signature proves which key signed a record. It does not prove the key was not stolen; keep it in an HSM, KMS or secret store.
+- Decision provenance shows the rationale was bound at decision time. If upstream content already corrupted the agent's reasoning, the record faithfully attests a corrupt decision.
+- Deleting a record and re-linking the rest is caught only by signature verification together with an independent record of the chain head.
+- Chains serialized before 0.7.0 do not verify with current code.
+
+The normative definitions are in [verifiable-assurance.md](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/verifiable-assurance.md) and [decision-provenance.md](https://github.com/Cogensec/agentegrity/blob/main/spec/properties/decision-provenance.md).

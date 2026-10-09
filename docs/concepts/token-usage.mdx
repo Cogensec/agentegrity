@@ -1,0 +1,155 @@
+---
+title: "Token usage"
+description: "What the token counts mean, where each integration reads them from, how repeats are counted once, and where usage appears in events and the session summary."
+---
+
+Every adapter reports the LLM tokens a session spends, in one shape for every framework. No code change is needed: each integration reads usage from the framework's model responses, traces or transcripts.
+
+## Where usage appears
+
+- Each `stop` event carries the session's running total in `data.usage`.
+- The session summary (`get_summary()`, or `report()` on the zero-config modules) carries the final total in `usage`, and exporters receive it in `on_session_end`.
+
+Both follow `SessionUsage` in [`schemas/exporter/common.json`](https://github.com/Cogensec/agentegrity/blob/main/schemas/exporter/common.json). When no source reported anything, the field is absent rather than zero.
+
+```python
+from agentegrity.claude import report
+
+usage = report().get("usage")
+if usage:
+    print(usage["total_tokens"], usage["complete"])
+```
+
+## What the numbers mean
+
+Frameworks disagree on whether input tokens include cached tokens. Anthropic's API leaves them out; OpenAI, Gemini, LangChain and CrewAI count them in. Agentegrity uses the inclusive definition and converts the others, so cache and reasoning counts are always parts of input and output, never added on top.
+
+| Field | Meaning |
+|---|---|
+| `input_tokens` | Every input token processed, cached or not |
+| `cache_read_tokens` | Part of `input_tokens` read from a prompt cache |
+| `cache_write_tokens` | Part of `input_tokens` written to a prompt cache |
+| `output_tokens` | Every generated token, reasoning included |
+| `reasoning_tokens` | Part of `output_tokens` spent on reasoning |
+| `total_tokens` | `input_tokens + output_tokens` |
+| `requests` | Model calls counted |
+| `complete` | `false` when calls are known to be missing, so the totals are a lower bound |
+| `sources` | Where the counts came from (below) |
+| `by_model` | The same token fields per model |
+
+The cache, reasoning and request fields are absent when no source reported them, so a missing number never shows up as zero. Anthropic does not break out thinking tokens per request, so a Claude session has no `reasoning_tokens` even when the model reasoned; those tokens are inside `output_tokens`. Totals are kept per model in `by_model`, so a session that switches models, or runs subagents on a smaller one, shows each separately.
+
+A `SessionUsage` for a session with two model calls on two models:
+
+```json
+{
+  "input_tokens": 15860,
+  "output_tokens": 1550,
+  "cache_read_tokens": 11200,
+  "cache_write_tokens": 2800,
+  "requests": 2,
+  "total_tokens": 17410,
+  "complete": true,
+  "sources": ["transcript"],
+  "by_model": {
+    "claude-haiku-4-5": {
+      "input_tokens": 3020,
+      "output_tokens": 240,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 2800,
+      "requests": 1,
+      "total_tokens": 3260
+    },
+    "claude-sonnet-4-5": {
+      "input_tokens": 12840,
+      "output_tokens": 1310,
+      "cache_read_tokens": 11200,
+      "cache_write_tokens": 0,
+      "requests": 1,
+      "total_tokens": 14150
+    }
+  }
+}
+```
+
+The schema allows additional fields on `SessionUsage` and on each per-model entry, and later releases may add some. Consumers should ignore fields they do not know.
+
+## Provenance
+
+`sources` lists where the counts came from:
+
+| Source | Meaning |
+|---|---|
+| `transcript` | A coding-agent host's or agent SDK's own session log |
+| `provider_response` | The usage object on the framework's model response |
+| `trace` | A framework trace or telemetry event |
+
+`complete` is `false` when:
+
+- The transcript starts after a compaction that dropped earlier history.
+- A request never got its final usage line. Claude Code sometimes omits it for subagent requests.
+- The counts were reconstructed from running totals. Codex builds without `token_usage_record` lines report usage only as running totals.
+- On AI SDK 5, generate spans drop the cache-read count, so those calls are marked incomplete.
+
+## Deduplication
+
+Every entry is keyed by the model call it counts: a request id, a response id, a run id or a trace id. Recording a key again replaces the earlier entry instead of adding to it. That is how sources that repeat themselves are counted once:
+
+- Claude Code transcripts write one line per content block, each with the request's usage. The last line of a request wins.
+- Running totals are reported again after every call, so each new report replaces the previous one under the same key.
+- A LangChain handler attached twice reports the same `run_id` twice.
+
+When a more exact source arrives, the less exact one is dropped. For example, passing Claude Agent SDK messages to `observe()` replaces the transcript estimate with the SDK's own per-model totals.
+
+A custom adapter records usage with `record_usage()`; a missing model falls back to the profile's `model_id`:
+
+```python
+from agentegrity.core.usage import TokenUsage
+
+adapter.record_usage(
+    response_id,
+    "gpt-4.1",
+    TokenUsage(input_tokens=2048, output_tokens=310, cache_read_tokens=1024),
+    source="provider_response",
+)
+```
+
+In TypeScript the equivalent is `DefaultAdapter.recordUsage()` in `@agentegrity/client`, which shares the Python ledger's test vectors.
+
+## Hook daemon restarts
+
+For Claude Code and Codex, each hook daemon lifetime is its own exporter session. The runtime saves how far each transcript was read in `<hook dir>/<host>/<session>.usage.json` (mode 0600), so a restarted daemon reports only the tokens spent after the previous one stopped, and adding up a conversation's sessions gives its total. The file holds paths, read positions, a hash of each file's first line, and the id of the last call counted. It holds no token counts and no transcript content.
+
+A transcript replaced while no daemon ran (for example, a cloud session resuming from a transcript rebuilt after compaction) is detected by its first line, since a replacement can reuse the inode. Lines up to the last call already counted are skipped; a replacement that does not contain that call is counted whole.
+
+## Sources per integration
+
+| Integration | Source | How |
+|---|---|---|
+| Claude Code | `transcript` | Reads `transcript_path` and each subagent's `agent_transcript_path` at every `Stop` and at session end, only the lines added since the last read. Keyed by `requestId` |
+| Codex | `transcript` | Reads `token_usage_record` lines from the rollout, keyed by `response_id`; model from `turn_context` or the hook's `model`. Older builds fall back to `token_count` events, marked incomplete |
+| Claude Agent SDK (Python) | `transcript`, or `provider_response` with `observe()` | The hooks name the transcript, so usage needs no code change. Passing each message to `adapter.observe(message)` replaces the estimate with `ResultMessage.model_usage`, which includes subagents |
+| OpenAI Agents SDK | `provider_response` | `on_llm_end` counts each `response.usage`, keyed by `response_id`. An agent run as a tool shares its parent's usage object but fires no hooks, so the extra it adds is recorded under model `unknown` |
+| LangChain / LangGraph | `provider_response` | `on_llm_end` reads each generation's `usage_metadata`, keyed by `run_id`. Anthropic's split cache-write keys and OpenAI's tier-prefixed keys are included |
+| CrewAI | `provider_response` | `LLMCallCompletedEvent` per `call_id`. Releases without that event report nothing |
+| AutoGen | `provider_response` | `LLMCallEvent` / `LLMStreamEndEvent` from the `autogen_core.events` logger, read through a filter that leaves your log output unchanged |
+| Agno | `provider_response` | `run_output.metrics` per model, re-read at every stop and at close because Agno merges memory and summary calls in after the post-hooks run |
+| Google ADK | `provider_response` | `after_model_callback`, final responses only, since streamed partials repeat the usage |
+| Bedrock Agents (boto3) | `trace` | `modelInvocationOutput.metadata.usage` from orchestration, pre/post-processing and routing traces, keyed by `traceId`. No cache fields; most traces do not name the model, so it falls back to the profile's `model_id` |
+| Bedrock Agents (Strands) | `provider_response` | The invocation's usage from `AfterInvocationEvent` |
+| `@agentegrity/claude-sdk` | `transcript`, or `provider_response` with `observe()` | Same as the Python adapter, using the result message's `modelUsage` |
+| `@agentegrity/openai-agents` | `provider_response` | The run context's per-request usage entries, read at each tool start, handoff and agent end. Older SDKs report the running total under one key |
+| `@agentegrity/langchain` | `provider_response` | `handleLLMEnd`, keyed by run id, with `llmOutput.tokenUsage` as a fallback |
+| `@agentegrity/crewai` | `provider_response` | `llm_call_completed` per `call_id`. A call without its own usage is counted from the growth of the client's running total |
+| `@agentegrity/google-adk` | `provider_response` | `afterModelCallback`, final responses only |
+| `@agentegrity/vercel-ai` | `provider_response` | AI SDK 3 to 6: the `ai.usage.*` attributes of each model-call span. AI SDK 7: `onLanguageModelCallEnd` through `telemetry()`, keyed by response id |
+
+Each integration converts its provider's cache and reasoning conventions to the inclusive definition above. The per-integration normalization rules are in [spec/token-usage.md](https://github.com/Cogensec/agentegrity/blob/main/spec/token-usage.md).
+
+## What is kept
+
+Transcript readers keep only usage counts, request ids and model names. Nothing else from a transcript is stored or exported. Usage reaches a backend only through an exporter you attach; see [Exporters](/exporters/overview).
+
+<Note>
+`AGENTEGRITY_MODEL_ID` sets the model on a coding-agent profile. It is the configured model, so a mid-session model switch is not reflected in that field; per-call model names in `by_model` come from the transcript.
+</Note>
