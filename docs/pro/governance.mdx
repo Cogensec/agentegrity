@@ -1,0 +1,86 @@
+---
+title: "Governance and audit log"
+description: "Framework controls judged on your workspace's evidence, the policy decisions your agents made, the signed evidence report, and the hash-chained audit log."
+---
+
+**Governance**, under Assure, has four tabs: Controls, Policies, Audit log and Evidence report. Every member can use the first two and the evidence report. The audit log is for admins.
+
+<Note>
+The console shows evidence from your workspace. It does not make a compliance determination or issue a certification. Each control lists what the console observed and, separately, the obligations outside the platform that need their own evidence.
+</Note>
+
+## Controls
+
+The catalog maps 19 controls across four frameworks to checks on your workspace's own data.
+
+| Framework | Version | Controls |
+|---|---|---|
+| SOC 2 | Trust Services Criteria (2017, rev. 2022) | CC7.2, CC7.3, CC7.4, CC8.1 |
+| EU AI Act | Regulation (EU) 2024/1689 | Art. 9, 12, 14, 15, 26 |
+| NIST AI RMF | AI RMF 1.0 (NIST AI 100-1) | GOVERN 1.4, MAP 1.1, MEASURE 2.4, MEASURE 2.7, MANAGE 2.4, MANAGE 4.3 |
+| ISO/IEC 42001 | ISO/IEC 42001:2023, Annex A | A.5.2, A.6.2.6, A.6.2.8, A.8.4 |
+
+Each control is judged from one or more checks, and each check states its criterion. A check passes, fails, or cannot be judged because there is nothing to judge.
+
+| Status | Meaning |
+|---|---|
+| pass | Every check that could be judged passed |
+| needs attention | At least one judged check failed |
+| no evidence | No check could be judged, for example because the window has no sessions |
+
+Each check is labelled with where its evidence came from: **observed** (the console saw it), **computed** (the console derived it) or **agent reported** (the agent's own claim). Expand a control to see what the platform evidences, what lies outside the platform, and how to fix a failing check.
+
+Controls are judged on the last 30, 90 (the default), 180 or 365 days, but never further back than the workspace keeps events. **Re-evaluate** runs them again. The Enforcement card shows each agent's mode (enforce, observe or not reported) as its latest ended session reported it.
+
+## Policies
+
+Policies live in each agent's library: the governance layer's `policy_set`, `enterprise-default` unless you set another. The console reports which policy sets were evaluated and which rules triggered, with each decision (deny, require approval, conditional, allow). It never changes a policy. Built-in sets are labelled with the library version they came from; anything else is labelled custom.
+
+Enforcement belongs to the agent. In enforce mode a deny blocks the tool call, and a require approval holds it for an approval handler. See [Escalation and approval](/concepts/scoring-and-actions#escalation-and-approval).
+
+## Evidence report
+
+The Evidence report tab produces a signed record of the controls for an auditor or reviewer: the same evaluation as the Controls tab, plus the evidence it was judged on, signed with the workspace's attestation key.
+
+- **Download signed evidence (JSON)** saves `agentegrity-evidence-<workspace>-<date>.json`.
+- **Print report** opens a printable version with **Download JSON** and **Print / Save as PDF**. Each time that page loads, a new report is generated and signed.
+- **Verify chains now** walks the attestation chain, and for admins the audit chain too, and shows the latest result for each.
+
+Generating a report walks the audit chain again and is recorded in the audit log as `compliance.report.generate`. The attestation chain is cited from its last verification.
+
+The file holds `report`, `signature` and a `verification` note. Verify it like a certificate (see [Verify a certificate](/pro/attestations#verify-a-certificate)): the fingerprint is the SHA-256 of `report` without `fingerprint_sha256`, and the hex Ed25519 signature in `signature.value` covers the whole `report`. In the certificate script, replace the two lines that read the file with:
+
+```python
+doc = json.load(open(sys.argv[1]))
+payload, signature = doc["report"], bytes.fromhex(doc["signature"]["value"])
+```
+
+The download is saved exactly as the console served it, without re-serializing numbers, so it verifies with the script as is.
+
+## Audit log
+
+The audit log records administrative actions in the workspace. Admins open it from **Audit log** in the sidebar, the Governance tab or the Settings tab of the same name. Other members see "Admins only".
+
+| Area | Recorded actions |
+|---|---|
+| Sign-in and account | sign-in success and failure, lockout, sign-up, sign-out, email verified, password reset and reset link sent, sign-in method linked, workspace switch |
+| Team | invitation created, revoked, accepted and declined; member created and updated |
+| Tokens and settings | token created and revoked, alert rule created, updated, deleted and secret rotated, retention changed, retention pruning |
+| Agents and findings | agents merged, finding status changed, drift finding reviewed, drift baseline reset |
+| Incidents | created, status changed, assigned, updated, note added, findings attached |
+| Billing and notices | checkout started, billing portal opened, trial ending and trial ended notices |
+| Audit and governance | audit log exported, evidence report generated |
+
+Each entry records the time, the actor (a user or the system), the action, its target, details and the IP address.
+
+### The hash chain
+
+Each entry's hash is the SHA-256 of the previous entry's hash, a newline, and the entry serialized canonically. Changing, inserting or deleting an entry breaks the chain from that point. The banner at the top states whether the chain is intact, and **Re-verify** recomputes it. The console also verifies every workspace's audit chain daily.
+
+The chain shows whether entries were changed after they were written. It cannot show that the newest entries were removed, because a chain cut short at the end still verifies. Export the log regularly and keep the head hash elsewhere if you need to detect that.
+
+### Export
+
+**Export full log** downloads the whole chain, oldest first, as JSON Lines (`agentegrity-audit-<timestamp>.jsonl`), whatever filters are set. Each line has the entry's fields plus its `prev_hash` and `hash`. One export holds up to 100,000 entries. Exports are themselves recorded in the log.
+
+The audit log is never deleted by [retention](/pro/plans-and-limits#retention), and it is available on every plan.

@@ -1,0 +1,97 @@
+---
+title: "Issues and incidents"
+description: "The four failure detectors and what triggers each one, how findings are reviewed, and how incidents open, escalate and close."
+---
+
+**Issues** lists what the failure detectors found in your runs. **Incidents** groups those findings into work someone owns and closes.
+
+## The detectors
+
+The detectors run when a library session ends and on each batch of OpenTelemetry spans, reading up to 2,000 events per run. Each run gets at most one finding per detector. A detector that fires again on the same run updates that finding; it never reopens a finding you resolved or dismissed.
+
+### `stuck_loop`
+
+The agent repeats the same tool call. A call counts as the same when the tool name and its normalized arguments match. It fires on any of:
+
+- 3 or more identical calls in a row
+- 5 identical calls within any 10 consecutive calls
+- a cycle of 2 to 4 tool calls repeated 3 times back to back
+
+Severity is high with 5 or more repeats or while the run is still going, otherwise medium.
+
+### `faulty_tool`
+
+A tool returned errors. It fires on any tool error.
+
+| Severity | Condition |
+|---|---|
+| critical | 3 or more errors on one tool, or a tool error rate of 50% or more (tools with at least 4 calls) |
+| high | an error rate of 25% or more, or an error message that points at bad arguments (for example "invalid", "missing required", "validation error") |
+| medium | anything else |
+
+### `context_degradation`
+
+The model's context is filling up or the model is repeating itself. It looks for three signals:
+
+- **growth.** The last model call's input tokens are at least 3 times the first and at least 30,000, or input grows by more than 20,000 tokens in one step.
+- **truncation.** A compaction, an error message that mentions truncation, compaction or a context limit, or 2 or more model calls that stopped for length.
+- **repetition.** 3 or more similar model outputs in a row (85% similar or more).
+
+Severity is high when growth and repetition both fire, otherwise medium.
+
+### `silent_failure`
+
+The run ended without an error but did not do its job. It only looks at runs that ended and did not error, and reports the first condition that matches:
+
+| Condition | Meaning | Severity |
+|---|---|---|
+| `swallowed_error` | The last tool call failed, or an exception was recorded, yet the run finished normally | high |
+| `empty_output` | The final model output is shorter than 10 characters | medium |
+| `empty_run` | An agent span with no model or tool calls | medium |
+| `no_terminal_action` | A library session with no `stop` event | medium |
+| `gave_up` | 3 or more model calls, no tool calls, and a final output saying the agent could not do the task | medium |
+| `loop_then_stop` | The run ended right after a stuck loop | medium |
+
+### Session summary mismatch
+
+One more kind of finding appears on session pages. When a session is sealed, the console compares the event and evaluation counts in the library's summary with what it received. If they differ, it opens a medium finding titled "Session summary disagrees with the events the server received". Requests the exporter dropped (for example when its [queue was full](/exporters/agentegrity-pro#how-delivery-works)) produce this mismatch. These findings are not part of the detector counts and never open incidents, but an alert rule set to any detector does send them.
+
+## Issues
+
+The four tiles at the top show open findings per detector; click one to filter. The window defaults to 7 days, and the status filter to **Open** (also Resolved, Dismissed and All).
+
+Below the tiles are a chart of findings over time, open findings by severity with how many are attached to incidents, and a **Tool impact** table you can click to filter by tool. Group the list by detector, agent or tool. Each row expands to the evidence the detector recorded, with **Jump to evidence** to open the exact span or event.
+
+Operators and admins can **Resolve** or **Dismiss** a finding. Viewers can read everything but change nothing. Changes are recorded in the audit log as `finding.status`.
+
+## Incidents
+
+### How incidents open
+
+When a detector opens a finding, or a finding's severity rises, the console attaches it to the one unresolved incident for that agent and detector. If none exists, it opens one named after the detector and the agent. An incident's severity rises to its worst finding and never goes down.
+
+Operators and admins can also open one by hand with **New incident**, giving a title, severity, agent, detector and first note.
+
+### Statuses
+
+| From | Can move to |
+|---|---|
+| open | acknowledged, resolved |
+| acknowledged | open, resolved |
+| resolved | open |
+
+Resolving an incident also resolves its findings that are still open; dismissed findings stay dismissed. Reopening fails with `409 incident_already_open` if another unresolved incident already exists for the same agent and detector.
+
+### The incidents list
+
+Unresolved incidents are always listed. The window applies to resolved incidents only. The tiles show open, acknowledged (with the median time to acknowledge), resolved in the window (with the median time to resolve) and unresolved. Two charts show open incidents per day over the last 14 days and daily time to acknowledge and resolve.
+
+Views: All, Mine, and Unowned critical (critical or high with no owner). Filter by severity, agent and status, choose columns, and **Share view** to copy a link.
+
+Operators and admins can set the owner from the row, **Acknowledge** or **Assign to me** from the row actions, and select several rows to acknowledge, resolve, assign or unassign them together.
+
+### The incident page
+
+The page has **Acknowledge**, **Resolve** (with a resolution note) and **Reopen**, the incident's findings, a timeline of the newest 500 events, and a details panel with owner, source, detector and every timestamp. **Add a note** accepts up to 4,000 characters. Notes are permanent.
+
+Every change to an incident is recorded in the audit log. To be notified when incidents open, see [Alerts and notifications](/pro/alerts).

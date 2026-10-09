@@ -1,0 +1,70 @@
+---
+title: "Team, roles and access"
+description: "Workspaces, the viewer, operator and admin roles and what each can do, inviting and adding members, changing roles, disabling access, and switching workspaces."
+---
+
+## Workspaces
+
+A workspace holds its own agents, sessions, tokens, rules, members and billing. Nothing is shared between workspaces.
+
+You get a workspace by creating an account (see [Get started](/pro/getting-started)) and by accepting invitations to others. An existing account cannot create a second workspace, and a workspace cannot be renamed or deleted from the console. There is no limit on how many workspaces you can belong to.
+
+To switch, open the workspace card at the top of the sidebar and pick one under **Switch workspace**; each entry shows your role there. The console reloads in the new workspace. A second tab still showing the old one reloads the next time it makes a request. Signing in opens the workspace you used last.
+
+## Roles
+
+Each membership has one role. Roles are per workspace, so you can be an admin in one and a viewer in another. All admins are equal; there is no owner role. A role change takes effect on the member's next request.
+
+| Capability | Viewer | Operator | Admin |
+|---|:-:|:-:|:-:|
+| Read every monitoring, defend and assure screen | ✓ | ✓ | ✓ |
+| Verify the attestation chain, generate evidence reports | ✓ | ✓ | ✓ |
+| Set own notifications, view the plan | ✓ | ✓ | ✓ |
+| Resolve or dismiss findings | | ✓ | ✓ |
+| Create, acknowledge, assign, resolve and comment on incidents | | ✓ | ✓ |
+| Review drift findings | | ✓ | ✓ |
+| View the alert delivery log and retention settings | | ✓ | ✓ |
+| Create and revoke ingest tokens | | | ✓ |
+| View, create, change and delete alert rules | | | ✓ |
+| Change retention | | | ✓ |
+| Invite, add, disable members and change roles | | | ✓ |
+| Read, verify and export the audit log | | | ✓ |
+| Change the plan and payment details | | | ✓ |
+| Merge agents, reset drift baselines | | | ✓ |
+
+Settings tabs follow the same lines: members see only the tabs their role can use. A request your role does not allow returns `403 insufficient_role`.
+
+## Invitations
+
+Admins invite people from **Settings**, on the **Team** tab, with **Invite member**. Enter the email address and a role (viewer is the default), then **Send invitation**. The person joins only when they accept.
+
+- **Expiry.** An invitation lasts 72 hours. Sending a new one to the same address replaces the old one. Pending invitations are listed under **Pending invitations**, each with **Revoke**.
+- **Seats.** Pending invitations do not take a seat. The seat check runs when the invitation is sent and again when it is accepted. A full workspace refuses with `403 plan_limit_seats`.
+- **Accepting.** The email links to the invitation. Only the invited address can accept it. Someone signed in as a different account is asked to sign out first. Someone without an account creates one on the spot, and that account gets no workspace of its own. When the console requires confirmed email addresses, an invited person who is already signed in with a confirmed address also sees the invitation in the workspace card's **Invitations** section, with **Join** and **Decline**.
+- **Email confirmation.** Signing in or signing up through an emailed invitation link confirms the email address.
+
+Inviting someone who is already an active member returns `409 already_member`. A workspace can send at most 50 invitations a day.
+
+### Create an account directly
+
+**Create account** on the Team tab makes a new account in the workspace without an invitation. Leave the password blank to email the person a "Set your password" link, valid for 72 hours, or set a temporary password yourself. If the address already has an account, the console offers to send an invitation instead.
+
+## Manage members
+
+The Team tab lists every member with their role and status. Each active member takes a seat on your plan.
+
+- **Change a role** with the role menu on the member's row.
+- **Disable** closes this workspace to the member and signs them out of it. Their account and other workspaces are untouched, and a disabled member does not take a seat. **Enable** restores access if a seat is free. Members cannot be removed outright.
+- A workspace always keeps at least one active admin: you cannot demote or disable the last one ("A workspace needs at least one active admin."). You cannot disable yourself, but you can demote yourself while another admin remains.
+
+Every change is recorded in the [audit log](/pro/governance#audit-log).
+
+## Account security
+
+These apply to every account. Details are in [Get started](/pro/getting-started#sign-in-and-stay-signed-in).
+
+- Five wrong passwords lock the account for 15 minutes, doubling with each further failure up to 24 hours.
+- A sign-in lasts 12 hours. **Sign out** ends every session you hold on every device.
+- A password reset signs you out everywhere.
+- Signing in with Google or GitHub links that provider to an existing account with the same verified address, and emails you that a sign-in method was added.
+- There is no multi-factor authentication.

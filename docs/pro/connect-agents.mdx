@@ -1,0 +1,128 @@
+---
+title: "Connect an agent"
+description: "Point Python, TypeScript, Claude Code, Codex and OpenTelemetry agents at a workspace, check the connection, and understand how the console identifies agents and closes sessions."
+---
+
+Every connection needs two values: an [ingest token](/pro/ingest-tokens) and the workspace URL. The workspace URL is the console's origin, with no path and no trailing slash:
+
+```text
+https://app.cogensec.com
+```
+
+The library appends the endpoint paths itself, and a trailing slash is removed. A URL with a path, such as `https://app.cogensec.com/api`, sends requests to the wrong place.
+
+## Python
+
+Set two variables in the environment the agent runs in. Every Python adapter attaches an exporter when it is constructed, so your code does not change.
+
+```bash
+export AGENTEGRITY_EXPORTER_URL="https://app.cogensec.com"
+export AGENTEGRITY_TOKEN="agk_live_..."
+python my_agent.py
+```
+
+The adapter logs `agentegrity: streaming session data to https://app.cogensec.com` at INFO when it attaches. The Python library also accepts `AGENTEGRITY_URL` when `AGENTEGRITY_EXPORTER_URL` is unset. See [Stream to Agentegrity Pro](/exporters/agentegrity-pro) for attaching the exporter in code, the delivery queue and exactly what is sent, and [Python](/integrations/python) for each framework's adapter.
+
+## TypeScript
+
+The `@agentegrity/<framework>` packages read only `AGENTEGRITY_URL` for the URL:
+
+```bash
+export AGENTEGRITY_URL="https://app.cogensec.com"
+export AGENTEGRITY_TOKEN="agk_live_..."
+```
+
+<Warning>
+The TypeScript packages do not read `AGENTEGRITY_EXPORTER_URL`. Without `AGENTEGRITY_URL` they send every session to `http://localhost:8787` and nothing reaches the workspace. If one environment runs both Python and TypeScript agents, set `AGENTEGRITY_URL` alone: the Python library reads it too.
+</Warning>
+
+The TypeScript packages report events without evaluating them. The console scores those events itself when they arrive; see [Server-scored events](#server-scored-events) for what that changes. Package setup is in [TypeScript](/integrations/typescript).
+
+## Claude Code and Codex
+
+The hook plugins stream through the Python library, so they use the Python variables. Set `AGENTEGRITY_EXPORTER_URL` and `AGENTEGRITY_TOKEN` in the environment where Claude Code or Codex runs, then install the plugin as described in [Claude Code](/integrations/claude-code#stream-sessions-to-a-console) or [Codex](/integrations/codex#stream-sessions-to-a-console). Sessions are not streamed when the hook falls back to in-process evaluation; those pages explain when that happens.
+
+## Let a coding agent wire it up
+
+The **Connect agent** card in the top bar shows a command that installs Agentegrity skills into a coding agent (Claude Code, Cursor, OpenAI Codex, GitHub Copilot, Windsurf or Gemini CLI):
+
+```bash
+npx skills add Cogensec/agentegrity-skills -y
+```
+
+Then ask the coding agent to connect the project to Agentegrity. It needs the two values the card lists: the workspace URL and an ingest token. Admins can mint the token from the same card.
+
+## OpenTelemetry
+
+Agents that already emit OpenTelemetry traces can send them without the Agentegrity library. Point any OTLP/HTTP exporter at the workspace URL with the token as a header:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://app.cogensec.com"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/json"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer agk_live_..."
+```
+
+Traces arrive at `POST /v1/traces`. Use the JSON encoding: a protobuf request can be refused with `415`, and the error tells you to switch to `http/json`. Gzip-compressed bodies (`Content-Encoding: gzip`) are accepted.
+
+Traces appear under **Runs** and feed the [failure detectors](/pro/issues-and-incidents#the-detectors). They carry no integrity evaluation, so they produce no scores, verdicts or certificates.
+
+Two resource attributes control how a trace stream is labelled:
+
+```bash
+export OTEL_RESOURCE_ATTRIBUTES="agentegrity.agent.id=invoice-reconciler,agentegrity.agent.type=langchain"
+```
+
+- `agentegrity.agent.id` names the agent. Without it the console uses `gen_ai.agent.name`, then `service.name`, then `otel-unknown`. If the same agent also streams through the library, set this to the library's `agent_id` so both streams count as one agent.
+- `agentegrity.agent.type` names the framework or product, so the console shows the right name instead of a generic `otel-python` label.
+
+Limits per request: 5 MB of body (checked again after decompression), 2,000 spans and 200 traces. String attributes longer than 8 KB are truncated, not rejected.
+
+## Check the connection
+
+`agentegrity pro` checks a token before you run anything:
+
+```bash
+agentegrity pro --ingest-token agk_live_... --url https://app.cogensec.com --push
+```
+
+It prints `connected to https://app.cogensec.com (workspace: <name>)` when the token is accepted. `--push` on its own only checks the token and prints the variables to set; it does not send a session. To stream, put your agent command after `--`:
+
+```bash
+agentegrity pro --ingest-token agk_live_... --url https://app.cogensec.com -- python my_agent.py
+```
+
+The check calls `GET /ingest/verify`, which returns the workspace name, the token name and the number of agents the workspace already has. It creates nothing, but it does update the token's **Last used** time. See the [CLI reference](/reference/cli#pro) for exit codes.
+
+## How agents are identified
+
+The library sends the agent's profile when a session starts, and the console keys the agent on its `agent_id`.
+
+- **One agent per id.** Ids that differ only in case or separators are the same agent: `invoice_reconciler` and `Invoice-Reconciler` both map to `invoice-reconciler`.
+- **The profile updates on every session start.** Name, type, capabilities, deployment context, risk tier, framework, model provider and model id are overwritten with the latest values. A change to any of them is recorded as a [drift finding](/pro/drift#profile-changes).
+- **New agents count against the plan.** The plan's agent limit is checked only when a new agent appears. An agent that already exists keeps reporting after a downgrade. A new agent over the limit is refused with `403 plan_limit_agents`; for OpenTelemetry, the whole batch is refused.
+
+### Merge duplicate agents
+
+If one agent ended up under two ids, an admin can merge them from **Agents**, using **Merge duplicates**. Merging moves the history of one agent into the other and remembers the old id, so later data sent under it lands on the merged agent. The console asks for confirmation because merging rewrites history and cannot be undone.
+
+## When a session closes
+
+A session stays open until the library sends its end request. The end request carries the summary, and the console seals the session, scores it and issues the certificate.
+
+If the end request never arrives (a crash, a killed process), a daily job seals any session that has had no event for 2 hours. Such a session can therefore stay open for up to about a day. It is marked **server-sealed**, and what only the library can report, such as the state of its local chain, stays "not reported".
+
+After a session is sealed, further events for it are refused with `409 session_ended`. A late end request from the library is accepted once: its claims are recorded, and the original certificate stays the record.
+
+Per-session limits: 10,000 events, and 64 KB of `data` per event. Request bodies over 1 MB are refused. The event timestamp is clamped to the window from 5 minutes before the session started to 5 minutes from now, and the original value is kept in `data._client_timestamp`.
+
+## Server-scored events
+
+When an event arrives without an evaluation, which is always the case for the TypeScript packages, the console scores it with the same four layers. It scores `pre_tool_use`, `post_tool_use`, `user_prompt_submit` and `stop` events.
+
+Server-scored events are marked **server-scored** in the console and treated differently:
+
+- They are never signed into a certificate. A session with only server-scored events gets no certificate, and the certificate page says "No certificate issued".
+- A threat they detect on a tool call the agent should have stopped shows as **not enforced**, because the console scored it after the fact and could not stop anything.
+- What only the library can report, such as enforce mode and the local chain, is unavailable.
+
+Server scoring stops for the rest of a session in a few cases: the agent's risk tier is missing or not one of `low`, `medium`, `high` or `critical`, its capabilities are not a list of strings, the first multi-agent event arrives, or the scorer missed an event. The session page states the reason. A valid `risk_tier` and `capabilities` in the agent profile avoid the first two.

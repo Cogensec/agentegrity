@@ -1,0 +1,66 @@
+---
+title: "Drift"
+description: "Profile changes recorded at every session start, behavioral baselines and the deviation findings computed against them, default thresholds, and how drift findings are reviewed."
+---
+
+Drift findings record two kinds of change: a change in what the agent says it is (its profile), and a change in how it behaves compared with its own history. Every finding carries the baseline, the observed value, the rule that fired and the threshold, so you can check the judgment yourself.
+
+| Kind | Source | Plan |
+|---|---|---|
+| `profile_change` | Each session start, compared with the agent's stored profile | Every plan |
+| `baseline_deviation` | A daily job comparing recent behavior with the agent's baseline | Scale |
+| `new_tool` | The same daily job: a tool the baseline never saw | Scale |
+
+Every plan can read the drift findings. Reviewing them needs Pro or Scale.
+
+## Profile changes
+
+When a session starts, the console compares the agent's profile with the stored one. Each changed field opens a finding. The first time a field is declared is never a change.
+
+| Field | Severity |
+|---|---|
+| `risk_tier` lowered | high |
+| `model_id`, `model_provider` | high |
+| `risk_tier` raised, or changed to a value outside low, medium, high, critical | medium |
+| `capabilities` added | medium |
+| `deployment_context`, `framework`, `agent_type` | medium |
+| `capabilities` removed | low |
+| `name` | low |
+
+A lowered risk tier is high severity because declaring an agent less risky than it is can switch off controls that depend on the tier.
+
+Profile changes also feed the certificate. A certificate's **Configuration stability** block fails if a profile change in the session's window was still waiting for review when the certificate was issued. See [Certificates](/pro/attestations#certificates).
+
+## Behavioral baselines
+
+On the Scale plan, a daily job builds a baseline for each agent from the 30 days before the current window and compares it with the last 7 days.
+
+| Metric | Bad direction | Severity |
+|---|---|---|
+| `composite_mean` | down | medium, high at twice the threshold |
+| `layer_score_mean:<layer>` | down | medium, high at twice the threshold |
+| `violation_rate` | up | medium, high at twice the threshold |
+| `tool_failure_rate` | up | medium, high at twice the threshold |
+| `events_per_session` | up | low |
+| `subagent_rate` | up | low |
+| `tool_mix` | any shift | medium |
+
+For the first six metrics the job computes a z-score: the current mean minus the baseline mean, divided by the baseline's standard deviation (with a small floor so a perfectly steady baseline does not divide by zero). A finding opens when the score reaches 3.0 in the bad direction. Movement in the good direction never opens a finding.
+
+`tool_mix` compares which tools the agent calls, measured as total variation distance between the two windows. A distance of 0.3 or more is a finding. A tool that appears in the current window but never in the baseline opens a separate `new_tool` finding (medium), even if it was called once.
+
+A metric is only judged once there is enough data. The baseline window needs at least 50 events and 5 sessions, and the current window at least 20 events and 3 sessions. Until then the metric shows as **building** or **waiting for current data**. Judged metrics show as **stable**, **improving** or **deviating**.
+
+### Reset a baseline
+
+After a deliberate change, such as a model upgrade or a new tool, the old normal is no longer the right reference. An admin on the Scale plan can choose **Reset baseline** on the agent. The baseline starts again from that moment. Existing findings are kept, since they record what happened before the reset. The reset is recorded in the audit log as `drift.baseline_reset`.
+
+## Review drift findings
+
+The screen opens on pending findings. Filter by status (pending, approved, dismissed), severity and agent. Each row shows the agent, kind, metric, baseline and observed values, severity, when it was detected and its status.
+
+Operators and admins on Pro or Scale can **Approve** a finding (the change was expected) or **Dismiss** it, with an optional note. Reviews are recorded in the audit log as `drift.finding_reviewed`.
+
+The Overview tab charts a fleet drift index, a drift calendar, agents in band versus drifting, and findings per day. The Agents tab shows each agent's baseline metrics side by side.
+
+To be emailed or to send a webhook when drift findings open, create an alert rule with the Drift category (Pro or Scale). See [Alerts and notifications](/pro/alerts).

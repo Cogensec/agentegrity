@@ -1,0 +1,91 @@
+---
+title: "Fleet and agents"
+description: "What the Fleet and Agents screens show, how verdicts, severities, score colors and agent status are computed, and what each number on the Fleet screen counts."
+---
+
+## Scores and verdicts
+
+Every evaluated event carries a composite score between 0 and 1 and a verdict from the agent's layers. The console reuses a few fixed bands everywhere.
+
+| Verdict | Meaning in the console |
+|---|---|
+| `pass` | No layer found a problem. |
+| `alert` | A layer flagged the event. Counts as a violation. |
+| `escalate` | A layer asked for approval. Counts as a violation. |
+| `block` | A layer blocked the event. Counts as a violation. |
+
+An event also counts as a violation when any layer reported `passed: false`, whatever the verdict. See [Scoring and actions](/concepts/scoring-and-actions) for how the library decides.
+
+Each violation gets a severity:
+
+| Severity | Rule |
+|---|---|
+| critical | `block` verdict, or composite below 0.55 |
+| high | `escalate` verdict, or composite below 0.70 |
+| medium | composite below 0.80 |
+| low | anything else |
+
+Score colors follow the same lines: green from 0.80, amber from 0.55 to 0.80, red below 0.55. Charts draw a dashed line at 0.70, the threshold a certificate dimension must reach to pass.
+
+A session's composite is the mean of its scored events, updated while the session runs and recomputed when it ends. An agent's mean is the mean of its sessions' composites. Agent status comes from that mean:
+
+| Status | Agent mean |
+|---|---|
+| healthy | 0.85 or higher |
+| watch | 0.70 to 0.85 |
+| degrading | below 0.70 |
+| new | no score yet |
+
+## Fleet
+
+Fleet is the console's home screen. The range picker covers 24 hours, 7 days or 30 days, or a custom start date up to 365 days back that always ends now. **Export** downloads the "Posture by agent" table as CSV.
+
+### Overview tab
+
+A banner at the top shows the worst unresolved incident if it is critical or high. Otherwise it names the worst agent whose composite is below 0.55, and if no agent is that low, it shows the worst incident whatever its severity.
+
+| Number | What it counts |
+|---|---|
+| Composite posture | Mean composite of all evaluated events in the range. |
+| Agents monitored | Every agent in the workspace, split by status. |
+| Open violations | Events in the range with an `alert`, `escalate` or `block` verdict or a failed layer, with the number of `block` events beside it. These events cannot be closed; the count falls as they age out of the range. |
+| Chain integrity | Share of ended sessions in the range whose library reported a valid local chain. Sessions that reported nothing are left out. This is the agent's own claim; see [Verify the chain](/pro/attestations#verify-the-chain) for the console's own check. |
+| Open incidents | Open and acknowledged incidents, with the unacknowledged count. |
+| Open findings | Open detector findings in the range, with how many of the four detectors are flagging. |
+| Drift findings | Drift findings waiting for review. |
+| Sessions evaluated | Sessions in the selected range. |
+
+Below the numbers:
+
+- **Fleet composite posture** charts the trend.
+- **Fleet health** shows agents by status.
+- **Posture by agent** lists every agent, worst first, with its framework, last 8 sessions, composite, change, session count and status.
+- **Live sessions** shows the five newest sessions and updates as sessions end.
+- **Needs attention** states how many agents are below the 0.70 threshold.
+
+### Dimensions tab
+
+**Posture shape** shows the mean score of each layer in the range. **Integrity heatmap** shows each agent's pass rate per layer.
+
+## Agents
+
+Agents lists every agent the workspace has seen. Profiles are built from the session start each agent sends; nothing is configured in the console. The list has views for all agents, agents below the 0.70 floor and critical-tier agents, a status filter and a risk filter, and you can save your own views in the browser.
+
+| Column | Meaning |
+|---|---|
+| Agent | Name and id |
+| Type, Model, Risk | From the latest profile |
+| Status | From the agent mean, as above |
+| Sessions, Events | All-time counts |
+| Mean | Agent mean composite |
+| Last seen | Latest session |
+
+The risk distribution above the list puts agents with no declared risk tier under "unassigned".
+
+**Find credential** takes a 64-character hex fingerprint from `agentegrity.fingerprint(secret)` and lists every agent that declared that credential, with its session count and when it was last seen. The console never holds the secret or the fingerprint key, so it can only match what agents declared. See [Credential provenance](/concepts/attestation#credential-provenance) for how fingerprints are computed.
+
+**Merge duplicates** (admins) merges two agents that are the same agent under different ids. See [Merge duplicate agents](/pro/connect-agents#merge-duplicate-agents).
+
+### Agent detail
+
+The agent page shows sessions, events, all-time violations, mean integrity and tokens (input plus output). It has the agent's profile, pass rate per layer and composite trend. **What changed** lists, newest first, the agent's incidents, findings, drift findings, sessions with a broken chain and sessions below 0.70. Below that are the 8 most recent sessions, the credentials the agent declared and its [drift baseline](/pro/drift).

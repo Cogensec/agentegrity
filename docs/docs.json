@@ -66,6 +66,36 @@
         ]
       },
       {
+        "group": "Agentegrity Pro",
+        "pages": [
+          "pro/overview",
+          "pro/getting-started",
+          "pro/ingest-tokens",
+          "pro/connect-agents",
+          {
+            "group": "Monitor and defend",
+            "pages": [
+              "pro/fleet-and-agents",
+              "pro/runs-and-sessions",
+              "pro/issues-and-incidents",
+              "pro/threats",
+              "pro/drift"
+            ]
+          },
+          {
+            "group": "Assure",
+            "pages": [
+              "pro/attestations",
+              "pro/governance"
+            ]
+          },
+          "pro/alerts",
+          "pro/team-and-roles",
+          "pro/plans-and-limits",
+          "pro/troubleshooting"
+        ]
+      },
+      {
         "group": "Reference",
         "pages": [
           "reference/configuration",

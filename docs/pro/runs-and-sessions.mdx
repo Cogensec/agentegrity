@@ -1,0 +1,69 @@
+---
+title: "Runs and sessions"
+description: "The Runs screen for library sessions and OpenTelemetry traces, cross-run span search, the Sessions screen, the session page and how token usage is shown."
+---
+
+The console has two lists of agent activity. **Runs** merges library sessions and OpenTelemetry traces into one view of what ran, how long it took and whether it failed. **Sessions** lists only library sessions, with their integrity scores, chain status and certificates.
+
+## Runs
+
+A run is either a library session or an OpenTelemetry trace. The **Source** column says which.
+
+| Status | Library session | OpenTelemetry trace |
+|---|---|---|
+| ok | The session ended | The root span ended without an error |
+| error | Never used for sessions | The root span has an error status |
+| running | Still open | The root span has not ended |
+| stale | Open, with no event for 30 minutes | Running, with no span for 30 minutes |
+
+Only the root span decides a trace's status. A tool error the agent absorbed does not fail the run; the [silent failure detector](/pro/issues-and-incidents#the-detectors) looks for exactly that case.
+
+The window covers 24 hours, 7 days (the default), 30 days or all time. The numbers above the list show runs in the window with the failed and stale counts, the failure rate and mean duration, open findings per detector, and the tool with the most errors. Two charts plot runs over time by status and run duration (median, 95th percentile and error rate) for up to 200 runs.
+
+### Find runs
+
+- **Views.** All runs, Failing runs and With findings. **Save current** keeps your own view in this browser only.
+- **Filters.** Status, detector, agent, and a search box that matches the root span name, agent id or adapter.
+- **Compare.** Tick two rows to compare them side by side.
+- **Span search.** The **Spans** toggle searches spans across every run instead of listing runs. It needs the Pro plan or higher.
+
+The table shows source, agent, status, start time, duration, span count with errors, tokens and findings for each run.
+
+### Trace detail
+
+Opening a trace shows a summary bar, a step scan of up to 40 steps, the findings for this run, and a waterfall timeline of its spans. Operators and admins can **Resolve** or **Dismiss** each finding here. **Share** copies a link to the trace.
+
+## Sessions
+
+Sessions lists the 50 most recent library sessions. Use the **Adapter** filter or the views (All, Live, Enforce mode) to narrow it. Two charts show sessions over time split by measure and enforce mode, and the distribution of session composites with the 0.70 line.
+
+| Column | Meaning |
+|---|---|
+| Agent, Adapter, Risk | From the session start |
+| Started, Events | When it started and how many events arrived |
+| Mean | Session composite |
+| Chain | What the library reported about its local chain: valid, broken, pending (session still open) or not reported |
+| Mode | enforce or measure, as the library reported it |
+
+The certificate icon on an ended session's row opens its [certificate](/pro/attestations#certificates).
+
+### The session page
+
+The strip at the top shows whether the session ended, its event count, flagged events, tool errors, findings, mean composite, chain status and mode. Badges mark sessions that were **server-sealed** (the library never sent its end request) or **server-scored** (the console scored the events). See [When a session closes](/pro/connect-agents#when-a-session-closes) and [Server-scored events](/pro/connect-agents#server-scored-events).
+
+**Event trace** lists every event with its verdict and scores. Filter it to implicated events, flagged events or errors, or to one event type. It loads 500 events at a time; **Load more events** fetches the next page.
+
+The side panel shows the agent, the recovery layer's state, token usage, the credentials the session declared, and how the session was scored and attested. **Certificate** opens the certificate once the session has ended.
+
+## Token usage
+
+Token counts come from the library's session usage report (agentegrity 0.12 and later). Each `stop` event updates a running total and the session end sets the final value. A session whose library reports no usage shows no token figures, including in **Runs**.
+
+| Where | What it shows |
+|---|---|
+| Runs | Input plus output tokens per run |
+| Trace detail | Input and output tokens |
+| Session page | Input (with cache reads and writes), output (with reasoning), model calls and a breakdown by model. A "lower bound" note appears when the library marked its count incomplete. |
+| Agent page | Total input plus output tokens |
+
+The console shows token counts only. It does not estimate cost. See [Token usage](/concepts/token-usage) for what the library counts and how.

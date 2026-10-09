@@ -1,0 +1,50 @@
+---
+title: "Agentegrity Pro overview"
+sidebarTitle: "Overview"
+description: "What the hosted console does with the data your agents stream, how the console is organized, and which numbers the platform observed versus which the agent reported."
+---
+
+Agentegrity Pro is the hosted console at [app.cogensec.com](https://app.cogensec.com). Agents instrumented with the open-source library stream their sessions to a workspace, where they become live sessions, per-agent posture, failure findings, threat and drift findings, and signed integrity certificates. The console also accepts OpenTelemetry traces from agents that do not use the library.
+
+The library pages describe what runs inside your agent. These pages describe the console: what each screen shows, how its numbers are computed, and what you can do with them.
+
+## How data gets there
+
+Each workspace has ingest tokens. You put a token and the console's URL in the agent's environment, and the agent sends three kinds of request: a session start with the agent's profile, one request per evaluated event, and a session end with the summary. See [Connect an agent](/pro/connect-agents) for every supported path, and [Stream to Agentegrity Pro](/exporters/agentegrity-pro) for how the Python exporter delivers them.
+
+When a session ends, the console seals it, appends a record to the workspace's attestation chain and, if the agent's library evaluated at least one event, issues an Ed25519-signed certificate.
+
+## The console
+
+The sidebar has four groups.
+
+| Group | Screens | Use it to |
+|---|---|---|
+| Monitor | Fleet, Runs, Issues, Incidents, Sessions, Agents | Watch posture across agents, inspect individual runs and sessions, and work the failures the detectors find |
+| Defend | Threats, Drift | Review adversarial detections and whether they were stopped, and changes in what an agent is or how it behaves |
+| Assure | Attestations, Governance | Verify the attestation chain and certificates, and produce signed evidence for framework controls |
+| Admin | Settings, Audit log | Manage tokens, team, alert rules, notifications, retention and billing |
+
+Screens refresh every 30 seconds while the tab is visible, and sooner when a session ends or a drift finding opens. The live toggle in the top bar pauses this.
+
+## Observed versus reported
+
+The console separates what it saw from what the agent told it, and the separation shows up on every certificate.
+
+- **Server observed.** Event counts, evaluation counts, session start and end times, and duration. The console counted these as the requests arrived.
+- **Client asserted.** Layer scores, the state of the agent's local hash chain, attestation record counts and enforce mode. The library computed these inside the agent, and the console records and signs them as the agent's claims.
+
+A certificate proves that the console received and counted a session with those claims. It does not independently prove that the scores are correct. See [Attestations and certificates](/pro/attestations).
+
+## Layer names and codes
+
+The console uses two sets of short codes for the four layers. Certificates and the API use the codes in the second column; some charts use the third.
+
+| Layer | Certificate dimension | Chart code |
+|---|---|---|
+| Adversarial | AR, Adversarial Resistance | ARI |
+| Cortical | BC, Behavioral Consistency | BCI |
+| Governance | PC, Policy Compliance | GOV |
+| Recovery | RI, Recovery Integrity | REC |
+
+See [How it works](/concepts/how-it-works) for what each layer checks.
