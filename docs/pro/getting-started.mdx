@@ -1,0 +1,65 @@
+---
+title: "Get started with Agentegrity Pro"
+sidebarTitle: "Get started"
+description: "Create an account and workspace, sign in, understand the trial, and walk through the Setup & SDK wizard to your first reported run."
+---
+
+## Create an account
+
+Open [app.cogensec.com](https://app.cogensec.com) and choose **New here? Create a workspace**. The form asks for:
+
+| Field | Notes |
+|---|---|
+| Your name | Optional. |
+| Workspace name | Optional. Without it the workspace is named after you (for example "Ada Lovelace's workspace"), or after the part of your email before the @ if you left your name blank. Workspaces cannot be renamed after they are created, so pick the name here. |
+| Work email | Stored in lowercase. One account per address. |
+| Password | At least 8 characters and at most 72 bytes. There are no other complexity rules. |
+
+**Create workspace** creates your account and a new workspace, and makes you its admin. If the deployment requires email verification, you are not signed in yet: confirm the address from the email first (the link lasts 48 hours), then sign in. **Resend confirmation email** on the sign-in screen sends a new link.
+
+If the sign-in screen shows **Continue with Google** or **Continue with GitHub**, you can use either instead of a password. The provider must vouch for the email address. If an account with that address already exists, the provider is linked to it and you receive an email saying a sign-in method was added. An account created this way has no password until you set one through **Forgot password?**.
+
+To join an existing workspace instead of creating one, accept an invitation from one of its admins. See [Team, roles and access](/pro/team-and-roles#invitations).
+
+## Sign in and stay signed in
+
+Sign-in takes two steps: your work email, then your password. A wrong password, an unknown email and a locked account all show the same message, "Invalid email or password.", so the screen does not reveal which accounts exist. An unconfirmed email address gets its own message with a link to resend the confirmation.
+
+- **Lockout.** Five wrong passwords in a row lock the account for 15 minutes. Each further failure doubles the lock, up to 24 hours. A successful sign-in or a password reset clears it, and you receive one email per lock.
+- **Session length.** A sign-in lasts 12 hours. After that the console asks you to sign in again.
+- **Sign out.** **Sign out** ends every session you hold, on every device, not only the current browser.
+- **Password reset.** **Forgot password?** emails a link that works once and lasts 1 hour; only the newest link works. Resetting your password signs you out everywhere, clears any lockout and confirms your email address. There is no password change form inside the console, so use the reset link to change a password.
+
+The console has no multi-factor authentication.
+
+## The trial
+
+A new workspace starts a 7-day trial. The banner at the top of the console counts the days left and links to **Choose a plan**. Two days before the end, and again when it ends, the workspace admins receive an email.
+
+During the trial the workspace has the Free plan's limits: 2 seats, 3 agents, 1 alert rule and a 7-day retention ceiling. See [Plans and limits](/pro/plans-and-limits).
+
+When the trial ends without a paid plan, the workspace pauses. The console shows "Choose a plan to continue", and both the console and agent ingest return `402 trial_expired`. Sign-in, billing, notification settings and workspace switching keep working. No data is deleted: everything comes back when you choose a plan.
+
+## The Setup & SDK wizard
+
+After you create a workspace, the console opens the setup wizard. Admins see it until setup is finished; other members go straight to the console. You can reopen it at any time from **Setup & SDK** in the sidebar.
+
+<Steps>
+  <Step title="Choose a framework">
+    Pick the framework your agent runs on. The next steps show the install command and code for it.
+  </Step>
+  <Step title="Install the adapter">
+    Run the install command and add the lines the wizard shows. For the Vercel AI SDK the wizard shows the TypeScript package; every other choice shows the Python adapter. See [Python](/integrations/python) and [TypeScript](/integrations/typescript) for the full reference.
+  </Step>
+  <Step title="Connect to this workspace">
+    Admins can create an ingest token here with **Create an ingest token**. The wizard then shows the two variables to set in the shell that runs your agent and a **Quick connect** command. See [Connect an agent](/pro/connect-agents) for what each one does.
+  </Step>
+  <Step title="Verify the first run">
+    Run your agent. The wizard checks every 3 seconds and shows whether a token exists, whether it has been used, and how many runs (library sessions or OpenTelemetry traces) have started since you opened the step. When one arrives the step changes to "Your agent is reporting". If nothing arrives after 20 seconds, it lists the usual causes; [Troubleshooting](/pro/troubleshooting#the-first-run-never-arrives) explains each one.
+  </Step>
+  <Step title="Choose a plan">
+    Shown during first-time setup only. Start the trial or pick a plan.
+  </Step>
+</Steps>
+
+**I'll do this later** skips ahead. Setup stays available under **Setup & SDK**.

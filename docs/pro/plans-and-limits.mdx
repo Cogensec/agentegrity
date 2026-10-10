@@ -1,0 +1,60 @@
+---
+title: "Plans and limits"
+description: "What each plan includes, what happens when a workspace reaches a limit or its trial ends, changing plans, and how retention settings work."
+---
+
+## Plans
+
+| | Free | Pro | Scale | Enterprise |
+|---|---|---|---|---|
+| Seats (active members) | 2 | 5 | 20 | Unlimited |
+| Agents | 3 | 20 | 100 | Unlimited |
+| Alert rules | 1 | 10 | 50 | Unlimited |
+| Longest retention window | 7 days | 30 days | 90 days | Unlimited |
+| Ingest requests per minute | 60 | 600 | 3,000 | Contact sales |
+| Monthly ingest units (shown, not enforced) | 50,000 | 1,000,000 | 10,000,000 | Unlimited |
+| Certificates and audit log | ✓ | ✓ | ✓ | ✓ |
+| Cross-run span search | | ✓ | ✓ | ✓ |
+| Drift review and drift alert rules | | ✓ | ✓ | ✓ |
+| Behavioral baselines and deviation findings | | | ✓ | ✓ |
+
+Every plan records profile-change drift and lets you read drift findings. Monthly ingest units are shown on the Plan & billing tab for visibility only: telemetry is never dropped for exceeding them.
+
+A 7-day trial runs with the Free plan's limits. See [The trial](/pro/getting-started#the-trial) for what happens when it ends.
+
+Enterprise is arranged with sales, including self-hosted and bring-your-own-cloud deployments. Contact [sales@cogensec.com](mailto:sales@cogensec.com).
+
+## Change your plan
+
+Admins change plans in **Settings**, on the **Plan & billing** tab, with **Change plan**. The same plan picker opens from **Plan & billing** in the workspace card, from the trial banner, and from **View plans** next to any limit message. Payment, proration and invoices are handled by Stripe. **Manage billing** opens the Stripe billing portal, which is also where you move between paid plans or downgrade. Other members see the plan but cannot change it.
+
+- **Failed payment.** The workspace keeps its plan and the tab shows "Payment failed" with **Update payment**. Monitoring keeps running. Admins receive an email.
+- **Cancelled subscription.** The workspace moves to the Free plan. It does not pause.
+
+## When you reach a limit
+
+Limits are checked only when something new is created. What already exists keeps working after a downgrade: agents keep reporting, rules keep firing, members keep access.
+
+| Limit | What is refused | Error | Message in the console |
+|---|---|---|---|
+| Seats | Inviting, accepting an invitation, creating an account, re-enabling a member | `403 plan_limit_seats` | "You've used every seat on this plan. Upgrade to add teammates." |
+| Agents | Data from an agent the workspace has not seen before | `403 plan_limit_agents` | "You're monitoring the maximum agents for this plan. Upgrade to add more." |
+| Alert rules | Creating a rule | `403 plan_limit_alert_rules` | "You've reached this plan's alert rule limit. Upgrade to add more." |
+| Retention | Saving a window longer than the plan allows | `403 plan_limit_retention` | "That retention window is longer than this plan allows." |
+| Feature | Span search, drift review, Drift alert rules, baseline reset | `403 plan_required:<feature>` | Names the plans that include it |
+| Ingest rate | Requests over the per-minute allowance, counted across all of a workspace's tokens | `429 rate_limited` | |
+
+The agent limit matters most in production: sessions from a new agent over the limit are refused until you upgrade, so nothing from that agent is stored. For OpenTelemetry, a batch that names a new agent over the limit is refused whole.
+
+## Retention
+
+Admins set retention in **Settings**, on the **Retention** tab. Operators can see it. Two kinds of data have a window you choose: 7 days, 30 days, 90 days, 180 days, 1 year, 7 years or forever, up to your plan's limit.
+
+| Data | What the retention job deletes |
+|---|---|
+| Events | Events older than the window, and threat and policy rows last seen in them |
+| Sessions | Sessions that ended before the window, but only when no attestation record, certificate or finding refers to them and the Events window does not still keep any of their events. Every sealed session has an attestation record, so in practice sessions are kept and the Events window is what removes data. |
+
+Attestation records, certificates, the audit log, findings and OpenTelemetry traces are never deleted.
+
+Retention is opt-in. Until you save a setting, nothing is deleted, and the tab says so; the windows it shows are suggestions. The suggested windows (90 days for events, 1 year for sessions) are longer than the Free and Pro limits, so on those plans choose a window within your limit before saving. Every deletion run is recorded in the audit log as `retention.prune`.

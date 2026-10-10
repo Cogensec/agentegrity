@@ -1,0 +1,63 @@
+---
+title: "Ingest tokens"
+description: "Create, list and revoke the bearer tokens your agents use to send data to a workspace, and replace a token without losing data."
+---
+
+An ingest token is the credential an agent sends with every request, as `Authorization: Bearer <token>`. It decides which workspace receives the data.
+
+| Property | Behavior |
+|---|---|
+| Format | `agk_live_` followed by 40 hex characters |
+| Scope | One workspace. A token can report any number of agents. |
+| Permissions | All ingest: sessions, events, session ends, OpenTelemetry traces and the token check. There are no narrower scopes. |
+| Expiry | None. A token works until it is revoked. |
+| Visibility | The full token is shown once, when it is created. Afterwards the console shows only its first 13 characters. |
+| Who manages tokens | Admins. Operators and viewers cannot see the token list. |
+| Plan limit | None on the number of tokens. |
+
+## Create a token
+
+Admins can create a token in three places. All three create the same kind of token.
+
+- **Settings, Ingest tokens tab.** Enter a name and choose **Create token**. A blank name becomes `ingest-token`.
+- **Connect agent** card in the top bar. **Mint token** creates a token named "Connect agent".
+- **Setup & SDK** wizard, step 3. **Create an ingest token** creates a token named "Setup & SDK".
+
+Copy the token when it appears. Closing the card or leaving the page discards it, and there is no way to show it again. If you lose it, create a new one and revoke the old one.
+
+Members who are not admins see "Ask a workspace admin to mint one" on the Connect agent card.
+
+## The token list
+
+The Ingest tokens tab lists every token in the workspace, including revoked ones. Each row shows the name, the first 13 characters (for example `agk_live_3f9a…`), whether it is active or revoked, the creation date (hover to see who created it) and when it was last used, or "never used".
+
+**Last used** updates on every ingest request the token authenticates, including the token check that `agentegrity pro` runs, unless the request is refused because the trial ended or the rate limit was reached. It tells you whether an agent is reaching the workspace even when no session has finished yet.
+
+## Revoke a token
+
+Choose **Revoke** on the token's row. Revocation is immediate and permanent. The row stays in the list, dimmed, with a revoked badge. Any agent still using the token receives `401 invalid_token` and its data is not stored.
+
+## Replace a token
+
+There is no rotate action. To replace a token without a gap:
+
+<Steps>
+  <Step title="Create the new token">
+    Give it a name that tells you where it will be deployed.
+  </Step>
+  <Step title="Deploy it">
+    Update `AGENTEGRITY_TOKEN` (or your secret store) wherever the agent runs, and restart the agent so it reads the new value.
+  </Step>
+  <Step title="Check it is in use">
+    Wait until the new token's **Last used** time updates.
+  </Step>
+  <Step title="Revoke the old token">
+    Its **Last used** time should stop moving once every agent has switched.
+  </Step>
+</Steps>
+
+Creating and revoking tokens are recorded in the [audit log](/pro/governance#audit-log) as `token.create` and `token.revoke`.
+
+## Keep tokens out of code
+
+Treat a token like a password. Anyone who has it can write sessions into your workspace. Set it as an environment variable or load it from a secret store, and never commit it. The Python exporter sends the token to whatever URL you configure, so always use the `https://` console URL.

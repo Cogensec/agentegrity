@@ -1,0 +1,77 @@
+---
+title: "Troubleshooting"
+description: "Why a first run does not appear, what each ingest error code means, and why a certificate, chain status or alert is missing."
+---
+
+## The first run never arrives
+
+Run `agentegrity pro` first. It checks the token and URL and prints exactly which one fails:
+
+```bash
+agentegrity pro --ingest-token agk_live_... --url https://app.cogensec.com --push
+```
+
+If the check passes and still nothing appears, the cause is one of these.
+
+**The variables are set in the wrong shell.** They must be exported in the environment of the process that runs the agent. Setting them in another terminal, or in a file your process manager does not read, has no effect. The Python adapter logs `agentegrity: streaming session data to ...` when it attaches; if that line is missing, the variables did not reach it.
+
+**A TypeScript agent uses the Python variable.** The TypeScript packages read `AGENTEGRITY_URL`, not `AGENTEGRITY_EXPORTER_URL`, and otherwise send to `http://localhost:8787`. See [TypeScript](/pro/connect-agents#typescript).
+
+**The URL has a path.** Use the bare origin, `https://app.cogensec.com`. A trailing slash is fine; a path such as `/api` is not.
+
+**The token belongs to another workspace.** A token from a different workspace authenticates and delivers there. Create one in the workspace you are looking at.
+
+**The process exits before anything is sent.** The Python exporter sends from a background thread and, at a normal exit, waits up to 5 seconds for its queue to drain. A process killed with `SIGKILL`, or one that exits through `os._exit`, skips that wait and can lose everything it queued. A session sent without its end request still appears, but it stays open until the console seals it after 2 idle hours (through a daily job), and only then gets its certificate.
+
+**The token reached the console but no run landed.** The wizard says this when the token's **Last used** time moved but no session or trace started after you opened the step. The token and URL are right, so look at the agent side: `agentegrity pro --push` on its own only checks the token, so run the agent itself, and check the exporter's warnings for dropped requests.
+
+## Ingest errors
+
+The Python exporter logs these as warnings and drops the request; the agent is never interrupted. The TypeScript packages pass them to `onError`.
+
+| Status and code | Meaning | What to do |
+|---|---|---|
+| `401 missing_bearer_token` | No `Authorization: Bearer` header | Set `AGENTEGRITY_TOKEN` |
+| `401 invalid_token` | Unknown or revoked token | Create a new token |
+| `402 trial_expired` | The trial ended without a plan | An admin chooses a plan; data comes back intact |
+| `403 plan_limit_agents` | A new agent would exceed the plan | Upgrade, or report under an existing agent id |
+| `404 unknown_session` | An event for a session the workspace has not seen | Usually the session start was dropped; check earlier warnings |
+| `409 session_id_taken` | Another workspace already used this session id | Session ids must be unique; let the library generate them |
+| `409 session_ended` | An event after the session was sealed | Expected after a server seal; check why the session went idle for 2 hours |
+| `409 session_event_limit` | The session passed 10,000 events | Split long-running work into several sessions |
+| `413 payload_too_large` | Body over 1 MB (5 MB for OpenTelemetry) | Send smaller batches |
+| `413 event_too_large` | An event's `data` over 64 KB | Trim large tool outputs or prompts before they reach the framework |
+| `415` on `/v1/traces` | Protobuf encoding | Set `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` |
+| `422 schema_validation_failed: ...` | The request does not match the exporter schema; the detail names the field | Upgrade the library, or fix a hand-built request |
+| `429 rate_limited` | Over the plan's requests per minute, across all tokens | Upgrade, or spread load |
+
+## A session has no certificate
+
+The certificate page says why.
+
+- **"server scored only".** Every event was scored by the console, which happens with the TypeScript packages. Server-scored events are never signed. See [Server-scored events](/pro/connect-agents#server-scored-events).
+- **"no SDK evaluations".** The library sent no evaluated events, for example because the session ended before its first tool call.
+- **Preview only.** The session is still open. It is signed when it ends or is sealed.
+
+## Chain shows "not reported"
+
+The library reports the state of its local chain in its end request. A session sealed by the console after going idle never sent one, so its chain, attestation count and enforce mode stay "not reported". Threats in that session that were live on a tool call the agent should have stopped show as **Unconfirmed**.
+
+## Server scoring stopped
+
+The session page states why server scoring halted. The common causes are a risk tier that is missing or not one of `low`, `medium`, `high` or `critical`, capabilities that are not a list of strings, and the first multi-agent event. See [Server-scored events](/pro/connect-agents#server-scored-events).
+
+## An alert did not arrive
+
+Open **Settings**, the **Alert deliveries** tab. If there is no row, either no rule matched (check the rule's minimum severity, category and detector, and that it is enabled), or the finding was already sent to that rule recently: within an hour after a success, or 5 minutes after a failure, no new attempt is made or logged. If there is a row, its error says why.
+
+- `HTTP <code>`: your endpoint answered with something other than 2xx.
+- `blocked_address`, `blocked_host`, `blocked_port`, `unresolvable_host`: the URL failed the [webhook URL checks](/pro/alerts#webhook-urls).
+- `org_delivery_budget_exceeded`: more than 60 deliveries in a minute.
+- Muted: the email recipient turned that topic off in their notifications.
+
+The same finding is not sent to the same rule again for an hour after a success. Email alerts go only to members who have confirmed their address.
+
+## Duplicate agents
+
+An agent that reports through both the library and OpenTelemetry, or under two spellings of its id, can appear twice. Ids that differ only in case or separators are merged automatically. For anything else, set `agentegrity.agent.id` on the OpenTelemetry stream, or have an admin use **Merge duplicates** on the Agents screen. See [How agents are identified](/pro/connect-agents#how-agents-are-identified).

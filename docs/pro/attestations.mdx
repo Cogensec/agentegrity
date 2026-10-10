@@ -1,0 +1,111 @@
+---
+title: "Attestations and certificates"
+description: "When the console issues a signed certificate, what it contains and what the signature does and does not prove, the workspace attestation chain, and how to verify both."
+---
+
+When a session is sealed, the console does two things. It appends a signed record to the workspace's attestation chain, and, if the agent's library evaluated at least one event, it issues a signed integrity certificate for the session. Both are signed with Ed25519 by the console's attestation key, whose public half is published without authentication:
+
+```text
+https://app.cogensec.com/api/attestation/public-key
+```
+
+## What the signature proves
+
+The console signs what it received and counted. It records the library's scores and its local chain status as the agent's own claims, and every certificate labels which is which in its `provenance` block.
+
+| Server observed | Client asserted |
+|---|---|
+| Event count, evaluation count, start and end time, duration | Layer scores (the certificate's dimensions), the local chain's validity, attestation record count, enforce mode |
+
+So a valid certificate proves that this workspace received a session with these counts and times, that the agent claimed these scores, and that nothing in the document has changed since it was signed. It does not prove that the agent computed its scores honestly. Events the console scored itself are shown in the dashboard but never signed into a certificate.
+
+## Certificates
+
+A certificate is issued when a session is sealed, whether by the library's end request or by the console after the session went idle. Only events the library evaluated count. A session with no such events gets no certificate, and its certificate page says "No certificate issued" with the reason: "server scored only" or "no SDK evaluations". While a session is still open, the page shows an unsigned preview.
+
+### What a certificate contains
+
+| Field | Contents |
+|---|---|
+| `session` | Session id, adapter, start and end time, duration, enforce mode |
+| `agent` | Agent id and name |
+| `dimensions` | One per layer: code, title, mean score, pass rate, number of evaluations, the 0.70 threshold, and `passed` (true when the mean score is at least 0.70) |
+| `configuration_stability` | Profile changes for this agent inside the session window, how many were unreviewed when the certificate was issued, and `passed` (true when none were unreviewed). Reviewing a change later does not alter a certificate already issued. |
+| `provenance` | `server_observed`, `client_asserted`, and, when they apply, `sealed_by: "server"` and the number of server-scored events left out |
+| `issued_at`, `scoring_spec_version`, `key_id` | When it was signed, the scoring specification version, and which key signed it |
+| `fingerprint_sha256` | SHA-256 of the canonical JSON of every other field |
+
+The signature covers the whole document, `fingerprint_sha256` included.
+
+### In the console
+
+Open a certificate from the certificate icon on an ended session in **Sessions**, the **Certificate** button on the session page, or a row in **Attestations**. The page shows each dimension, the configuration stability row, the provenance split, the fingerprint and the signature.
+
+- **Print** and **Download PDF** both open the browser's print dialog; choose Save as PDF.
+- **Verify offline** downloads `certificate-<id>.json` with the signed payload, the signature, the key id and the public key URL, for verification outside the console. Read the number-formatting warning under [Verify a certificate](#verify-a-certificate) before relying on it.
+
+## Verify a certificate
+
+Verification needs the signed payload, the hex signature and the public key. The procedure:
+
+1. Fetch the public key and pick the entry whose `key_id` matches the certificate's `key_id`. After a key rotation, older keys are listed under `retired`.
+2. Remove `fingerprint_sha256` from the payload, serialize the rest canonically, and take the SHA-256. It must equal `fingerprint_sha256`.
+3. Serialize the full payload canonically and verify the Ed25519 signature over those bytes.
+
+**Canonical** means Python's `json.dumps(payload, sort_keys=True, separators=(",", ":"))`: sorted keys, no whitespace, and non-ASCII characters escaped as `\uXXXX`, encoded as UTF-8.
+
+<Warning>
+Number formatting is part of the signed bytes. Python writes the float `1.0` as `1.0`; JavaScript's `JSON.stringify` writes it as `1`. A payload that has been parsed and re-serialized by JavaScript, or a verifier written in another language that formats numbers differently, will fail even though the certificate is genuine. Verify with Python, from the JSON exactly as the console served it.
+
+The **Verify offline** file is written by the browser, so it has this problem: a certificate with a whole-number value, such as a pass rate of `1.0`, does not verify from that file.
+</Warning>
+
+```python verify_certificate.py
+import hashlib
+import json
+import sys
+import urllib.request
+
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+KEY_URL = "https://app.cogensec.com/api/attestation/public-key"
+
+
+def canonical(payload: dict) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+cert = json.load(open(sys.argv[1]))
+payload, signature = cert["signed_payload"], bytes.fromhex(cert["signature"])
+
+keys = json.load(urllib.request.urlopen(KEY_URL))
+candidates = [keys] + keys.get("retired", [])
+pem = next(k["public_key_pem"] for k in candidates if k["key_id"] == payload["key_id"])
+
+body = {k: v for k, v in payload.items() if k != "fingerprint_sha256"}
+assert hashlib.sha256(canonical(body)).hexdigest() == payload["fingerprint_sha256"], "fingerprint mismatch"
+load_pem_public_key(pem.encode()).verify(signature, canonical(payload))  # raises InvalidSignature
+print("certificate verified, key", payload["key_id"])
+```
+
+Run it on a downloaded certificate with `python verify_certificate.py certificate-<id>.json` (it needs `pip install cryptography`).
+
+## The attestation chain
+
+Each workspace has one chain. Every sealed session appends one record, whether or not it got a certificate. A record holds the session id, agent id, adapter, the server's event and evaluation counts, the library's attestation record count and chain status (`null` when the library did not report it), enforce mode, the end time, `sealed_by: "server"` when the console sealed it, the key id, and `prev_hash`. Its `record_hash` is the SHA-256 of the previous record's hash followed by the canonical record, and the signature covers the record including `record_hash`. Changing, removing or reordering a record breaks every link after it.
+
+### Attestations screen
+
+**Attestations**, under Assure, is the ledger: one hash-linked, signed row per sealed session, newest first, up to 100 rows. Filter it to broken chains or enforce mode. Each row opens its certificate.
+
+The numbers at the top are records, chain integrity, certificates issued in the last 24 hours, the console's own verification and the signing key (with how many retired keys are still trusted). Note that **Chain integrity**, and the per-day grid beside it, show what each library reported about its own local chain. That is the agent's claim. The console's own check is **Verify chain**.
+
+### Verify the chain
+
+**Verify chain** walks the whole workspace chain on the server. It recomputes every `record_hash`, checks every link and checks every signature, and reports how many records it checked, how many signatures it verified, how long it took, the head hash and the first break, if any. Any member can run it.
+
+The problems it can report are `first_record_has_predecessor`, `chain_link_mismatch`, `record_hash_mismatch`, `bad_signature`, `no_payload`, `stored_hash_differs_from_payload` and `stored_prev_hash_differs_from_payload`. Any of them means a record was changed or removed outside the console.
+
+Attestation records are not available outside the console, so the chain can only be verified there. Certificates can be verified anywhere.
+
+Attestation records and certificates are never deleted by [retention](/pro/plans-and-limits#retention).

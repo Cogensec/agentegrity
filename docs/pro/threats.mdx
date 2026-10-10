@@ -1,0 +1,51 @@
+---
+title: "Threats"
+description: "How the Threats screen groups adversarial detections, how severity is banded, and how each outcome (blocked, held, not enforced, unconfirmed, flagged, logged) is decided."
+---
+
+The Threats screen shows what the agent's adversarial layer detected: prompt injection in a tool result, a suspicious tool argument, an instruction in a retrieved document. For each detection it also shows what happened next, which is the question that matters: did the agent stop it?
+
+The console does not stop anything itself. Enforcement happens inside the agent, when an adapter in enforce mode refuses a tool call before it runs. The console reads what the agent reported and works out the outcome. See [Measure-only and enforce](/concepts/scoring-and-actions#measure-only-and-enforce).
+
+## One row per threat
+
+Each row is one distinct threat in one session, identified by its channel and threat type, and on most channels by its indicators too, so two different injections on one channel stay apart. When the same threat is detected again later in the session, the row's count goes up (shown as "×N") instead of adding a row. Expand a row to see the evidence, the outcome with its reason, and links to the first detection and to the event where enforcement applied.
+
+Severity comes from the detection's own severity:
+
+| Band | Detection severity |
+|---|---|
+| critical | 0.90 or higher |
+| high | 0.70 to 0.89 |
+| medium | 0.50 to 0.69 |
+| low | below 0.50 |
+
+## Outcomes
+
+The outcome depends on whether the threat was live on a `pre_tool_use` event that got a `block` or `escalate` verdict. That event is the point where an enforce-mode adapter would have refused the call. If there was such an event, the first rule that matches decides:
+
+| Outcome | Rule |
+|---|---|
+| Not enforced | The event was [server-scored](/pro/connect-agents#server-scored-events): the console scored it after the fact. |
+| Unconfirmed | The session is still open, so enforce mode is not known yet. |
+| Unconfirmed | The session ended without the library reporting its enforce mode (for example, it was server-sealed). |
+| Not enforced | The session ran in observe mode, so the verdict was recorded but nothing was stopped. |
+| Blocked | The verdict was `block` and the session ran in enforce mode: the call was denied before it ran. |
+| Held | The verdict was `escalate` in enforce mode: the call was denied unless an approval handler approved it. |
+
+If the threat was never live on such an event:
+
+| Outcome | Rule |
+|---|---|
+| Flagged | The layer's worst verdict for this threat was `alert`, `escalate` or `block`, but no tool call it was live on was stopped. |
+| Logged | Below the library's alert threshold. Recorded only. |
+
+Outcomes are worked out each time you load the page, because the facts arrive late: enforce mode is reported only in the session's end request. A threat can therefore move from Unconfirmed to Blocked once its session ends.
+
+## The screen
+
+The window defaults to 7 days. The numbers at the top count detections, blocked, not enforced, unconfirmed and flagged; click one to filter the table. Charts show new threats over time, threats by channel (the attack surface), and threats by type with their top indicators. Filter by severity, outcome and agent. The filters are kept in the URL, so you can share a filtered view. The table loads 50 rows at a time.
+
+A note above the charts explains what the page cannot see. It appears when some agents are server-scored, which means fewer channels are visible and nothing can be stopped, or when some sessions ran in observe mode. It can also say that older sessions have not been read for threats yet; a daily job reads them.
+
+The sidebar badge counts critical and high threats seen in the last 24 hours whose outcome is not Blocked or Held.

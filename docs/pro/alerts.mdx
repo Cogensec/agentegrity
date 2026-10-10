@@ -1,0 +1,124 @@
+---
+title: "Alerts and notifications"
+description: "Send detector and drift findings to a webhook or an inbox with alert rules, verify signed webhook deliveries, read the delivery log, and choose which notifications reach you."
+---
+
+Two separate things decide what reaches people. **Alert rules** are workspace settings that send findings to a webhook or an email address. **Notifications** are each member's own choice of what appears in the bell and in their inbox.
+
+## Alert rules
+
+Admins manage rules in **Settings**, on the **Alert rules** tab. Operators see the delivery log, not the rules. Choose **New rule** and fill in:
+
+| Field | Options |
+|---|---|
+| Name | Any name |
+| Channel | `webhook` or `email` |
+| Target | A webhook URL, or an email address |
+| Minimum severity | `low`, `medium`, `high` (the default) or `critical` |
+| Category | Findings, Drift or Any |
+| Detector | Any detector, or one of `stuck_loop`, `faulty_tool`, `context_degradation`, `silent_failure`. Hidden when the category is Drift. |
+
+A rule fires when a detector finding opens or its severity rises, or when a drift finding opens, and the finding meets the rule's severity, category and detector. A rule limited to one detector never matches drift findings. From a rule's menu you can disable or enable it, rotate a webhook secret, or delete it.
+
+Plan limits: the number of rules counts every rule, enabled or not (Free 1, Pro 10, Scale 50). The Drift category needs Pro or Scale. Rules that already exist keep working after a downgrade. See [Plans and limits](/pro/plans-and-limits).
+
+There is no test button. To test a rule, use a severity and category that a finding you can produce will match.
+
+### Email rules
+
+Email alerts go only to members of the workspace who have confirmed their email address. The console checks this when you save the rule and again on every delivery. The subject is `[<severity>] <title>`. A member who turned the matching topic off in their [notifications](#notifications) is skipped, and the delivery log records it as muted.
+
+### Webhook rules
+
+The console sends a `POST` with `Content-Type: application/json` and `User-Agent: agentegrity-pro-alerts/1`. The body is JSON with sorted keys and no whitespace.
+
+A detector finding:
+
+```json
+{
+  "event": "finding",
+  "finding": {"id": "...", "detector": "faulty_tool", "severity": "critical", "title": "...",
+              "status": "open", "agent_id": "...", "created_at": "...", "evidence": {}},
+  "run": {"kind": "session", "id": "...", "path": "/sessions/<id>"},
+  "rule": {"id": "...", "name": "..."},
+  "incident": {"id": "...", "status": "open", "severity": "critical", "title": "...",
+               "findings_count": 1, "opened_at": "...", "path": "..."}
+}
+```
+
+`run.kind` is `trace` for OpenTelemetry runs, whose path is `/runs/<id>`. `incident` is `null` when the finding is not attached to one.
+
+A drift finding:
+
+```json
+{
+  "event": "drift",
+  "finding": {"id": "...", "kind": "profile_change", "metric": "model_id", "severity": "high",
+              "status": "pending", "agent_id": "...", "baseline": {}, "observed": {}, "detail": {},
+              "session_id": "...", "detected_at": "...", "last_seen_at": "..."},
+  "agent": {"agent_id": "...", "path": "/agents/<id>"},
+  "rule": {"id": "...", "name": "..."},
+  "emitted_at": "..."
+}
+```
+
+### Verify webhook signatures
+
+Each webhook rule has a signing secret starting with `whs_`. It is shown once when you create the rule, and again only when you rotate it with **Rotate secret**. Every delivery carries:
+
+```text
+X-Agentegrity-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256>
+```
+
+The HMAC uses the secret as key over the string `<unix seconds>.<raw body>`. Compute it over the raw request body before any JSON parsing, compare in constant time, and reject timestamps more than 5 minutes old so a captured delivery cannot be replayed.
+
+```python
+import hashlib
+import hmac
+import time
+
+
+def verify(secret: str, body: bytes, header: str, tolerance: int = 300) -> bool:
+    try:
+        fields = dict(part.split("=", 1) for part in header.split(","))
+        ts = int(fields["t"])
+    except (ValueError, KeyError):
+        return False
+    if abs(int(time.time()) - ts) > tolerance:
+        return False
+    mac = hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(mac, fields.get("v1", ""))
+```
+
+The header has the same shape as Stripe's, so a Stripe-style verifier works with the secret swapped in. Rules created before signing existed are delivered unsigned until they get a secret. Editing such a rule creates one without showing it, so choose **Rotate secret** to see the secret your receiver needs.
+
+### Webhook URLs
+
+The URL must use `http` or `https` on port 80 or 443, with no user name or password in it. Use `https`, since the payload carries finding evidence. Hosts such as `localhost`, `metadata.google.internal` and names ending in `.local`, `.internal`, `.localhost` or `.arpa` are refused, and every address the name resolves to must be a public one: private, loopback, link-local and similar ranges are blocked. The console connects to the address it checked. A URL that fails these checks is refused when you save the rule with `invalid_webhook_url`, `blocked_port`, `blocked_host`, `blocked_address` or `unresolvable_host`, and is checked again at delivery.
+
+### How delivery behaves
+
+- One attempt per trigger, with a 5-second timeout. Redirects are not followed. Any 2xx response counts as delivered.
+- **No retry queue.** After a failure, the same finding is sent again only if it fires the rule again, and not within 5 minutes. After a success, the same finding is not sent to the same rule again for an hour.
+- Up to 20 rules are considered per finding, oldest first.
+- Each workspace can send 60 deliveries per minute. Deliveries over that budget are logged as failed with `org_delivery_budget_exceeded`.
+- A failed delivery never affects ingest.
+
+### Delivery log
+
+The **Alert deliveries** tab (operators and admins) lists the last 50 attempts with time, trigger, channel, target, status, HTTP code and error. Errors include `HTTP <code>`, a network error name, the URL check codes above, `org_delivery_budget_exceeded`, and "the recipient turned these alerts off" for muted email.
+
+## Notifications
+
+Every member sets their own notifications in **Settings**, on the **Notifications** tab. For each topic you choose whether it appears in the bell, whether it is emailed, and a minimum severity (any, medium and up, high and up, or critical only) where severity applies.
+
+| Topic | Channels | Who sees it |
+|---|---|---|
+| Findings | email | everyone |
+| Drift | bell and email | everyone |
+| Incidents | bell | everyone |
+| Failed deliveries | bell | operators and admins |
+| Trial reminders | email | admins |
+| Plan changes | email | admins |
+
+Every topic starts on. Emails you can turn off carry a one-click unsubscribe link. Security and account emails (password resets, sign-in alerts, lockouts) are always sent, and admins always receive failed payment notices.
