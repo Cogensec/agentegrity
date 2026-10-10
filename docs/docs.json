@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Agentegrity",
+  "name": "Cogensec",
   "description": "Integrity verification, signed decision provenance and token usage for AI agents.",
   "colors": {
     "primary": "#0B5F80",
