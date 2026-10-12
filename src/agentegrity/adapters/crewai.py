@@ -90,7 +90,8 @@ class CrewAIAdapter(_BaseAdapter):
 
         If ``crew`` is None, subscribes globally (all crews in the
         process). Otherwise tool calls are evaluated only for the given
-        crew, and its topology is declared to this adapter.
+        crew and its copies (``kickoff_for_each``, ``train`` and ``test``
+        run copies), and its topology is declared to this adapter.
 
         Parameters
         ----------
@@ -146,13 +147,11 @@ class CrewAIAdapter(_BaseAdapter):
             adapter._dispatch("stop", {"output": str(getattr(event, "output", ""))})
 
         def _before_tool_call(context: Any) -> bool | None:
-            if crew is not None and getattr(context, "crew", None) is not crew:
+            if crew is not None and not _same_crew(getattr(context, "crew", None), crew):
                 return None
-            tool_input = getattr(context, "tool_input", None)
-            arguments = dict(tool_input) if isinstance(tool_input, dict) else {
-                "args": str(tool_input or "")
-            }
-            denied = adapter._tool_call_denial(getattr(context, "tool_name", ""), arguments)
+            denied = adapter._tool_call_denial(
+                getattr(context, "tool_name", ""), getattr(context, "tool_input", None)
+            )
             return False if denied is not None else None
 
         def _on_tool_end(source_: Any, event: Any) -> None:
@@ -349,3 +348,11 @@ class CrewAIAdapter(_BaseAdapter):
             comm_channels=frozenset({"peer_messages"}),
         )
         self.set_topology(topology, my_role=AgentRole.LEADER)
+
+
+def _same_crew(candidate: Any, crew: Any) -> bool:
+    """Whether ``candidate`` is ``crew`` or a copy of it, which keeps its ``key`` but not its id."""
+    if candidate is crew:
+        return True
+    key = getattr(crew, "key", None)
+    return key is not None and getattr(candidate, "key", None) == key

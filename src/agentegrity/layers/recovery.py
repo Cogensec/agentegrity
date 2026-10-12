@@ -429,6 +429,7 @@ class RecoveryLayer:
         checkpoint_id: str,
         *,
         signing_key: Any | None = None,
+        trusted_keys: set[bytes] | None = None,
     ) -> CheckpointSnapshot:
         """Roll the score history back to a checkpoint without losing any attestation record.
 
@@ -437,8 +438,18 @@ class RecoveryLayer:
         A chain that no longer verifies is saved in full to the checkpoint
         backend as an archive, then continues from the checkpoint's records;
         the recovery record cites the archive. With no chain yet, the
-        checkpoint's chain is adopted. ``signing_key`` signs the recovery
-        record.
+        checkpoint's chain is adopted.
+
+        ``signing_key`` signs the recovery record, and is required when the
+        chain holds signed records, so restoring never leaves a signed chain
+        failing ``verify_signatures``. Without ``trusted_keys`` the backend
+        is trusted: anyone who can write to it can re-link a modified chain
+        under the same record ids. With ``trusted_keys`` every checkpoint
+        record must carry a valid signature from one of them. The score
+        history in a checkpoint is not signed either way.
+
+        Call it while the adapter is not handling events: the adapter's
+        lock does not cover a restore.
 
         Raises
         ------
@@ -447,8 +458,9 @@ class RecoveryLayer:
         KeyError
             If the snapshot cannot be loaded.
         ValueError
-            If the snapshot is an archive, its chain does not verify, or it
-            is not from this chain's history.
+            If the snapshot is an archive, its chain does not verify or is
+            not signed by ``trusted_keys``, it is not from this chain's
+            history, or the chain is signed and no ``signing_key`` is given.
         """
         backend = self._require_checkpoint()
         snap = backend.load(checkpoint_id)
@@ -459,6 +471,11 @@ class RecoveryLayer:
         restored = AttestationChain.from_dict_list(snap.chain_records)
         if not restored.verify_chain():
             raise ValueError(f"checkpoint {checkpoint_id!r} holds a chain that does not verify")
+        if trusted_keys is not None and not restored.verify_signatures(trusted_keys)[0]:
+            raise ValueError(f"checkpoint {checkpoint_id!r} is not signed by a trusted key")
+        live = self._chain.records if self._chain is not None else []
+        if signing_key is None and any(r.signature is not None for r in [*live, *restored.records]):
+            raise ValueError("the chain is signed; pass signing_key so the recovery record is too")
 
         archive_id: str | None = None
         archived = 0

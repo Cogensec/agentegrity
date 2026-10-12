@@ -233,7 +233,7 @@ class AgnoAdapter(_BaseAdapter):
                 adapter._dispatch("stop", {"output": output})
 
         def _tool(name: str, func: Any, arguments: dict[str, Any]) -> Any:
-            reason = adapter._tool_call_denial(name, dict(arguments or {}))
+            reason = adapter._tool_call_denial(name, arguments)
             if reason is not None:
                 # StopAgentRun (an AgentRunException subclass) is the only
                 # exception FunctionCall.execute() re-raises to halt the run;

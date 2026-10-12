@@ -18,7 +18,8 @@ to another agent, so a run that ends in a transfer reports no ``stop``.
 Enforcement: ADK skips a tool when a before-tool callback returns a
 dict, and passes that dict to the model as the tool's result. Under
 ``enforce=True`` a denied call returns ``{"error": <reason>}``, so the
-tool never runs and the model sees why.
+tool never runs and the model sees why. Tool nodes in an ADK workflow graph
+run only plugin callbacks, not agent callbacks, so they are not evaluated.
 
 Usage:
     from google.adk.agents import LlmAgent
@@ -108,9 +109,7 @@ class GoogleADKAdapter(_BaseAdapter):
                 adapter._dispatch("subagent_stop", {"agent_id": name})
 
         def _before_tool(tool: Any, args: Any, tool_context: Any) -> dict[str, str] | None:
-            reason = adapter._tool_call_denial(
-                getattr(tool, "name", str(tool)), dict(args) if args else {}
-            )
+            reason = adapter._tool_call_denial(getattr(tool, "name", str(tool)), args)
             return {"error": reason} if reason is not None else None
 
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:

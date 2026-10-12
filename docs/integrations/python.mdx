@@ -148,7 +148,7 @@ print(report())
 
 **Hooks into:** a `RunHooks` subclass. `on_agent_start` becomes `user_prompt_submit`, `on_tool_start` becomes `pre_tool_use`, `on_tool_end` becomes `post_tool_use`, `on_handoff` becomes `subagent_start`, and `on_agent_end` becomes `stop`. `pre_tool_use` carries the call's arguments, parsed from the JSON string the SDK passes on `ToolContext`.
 
-**Enforcement:** the SDK awaits `on_tool_start` before it invokes a function tool, so under `enforce=True` a denied call raises `agentegrity.IntegrityViolationError` there, the tool never runs, and `Runner.run` ends with that error. Hosted tools (web search, file search, computer use) and handoffs fire no `on_tool_start` and cannot be blocked.
+**Enforcement:** the SDK awaits `on_tool_start` before it invokes a function tool, so under `enforce=True` a denied call raises `agentegrity.IntegrityViolationError` there, the tool never runs, and `Runner.run` ends with that error. Tools that run on OpenAI's side (web search, file search) and handoffs fire no `on_tool_start` and cannot be blocked. Shell, local shell, computer and apply_patch tools are evaluated by name only, because the hook receives no arguments for them. An agent used through `Agent.as_tool()` runs its tools in a nested run these hooks do not reach, so only the call to the agent-tool is evaluated.
 
 **Topology:** `PEER_TO_PEER`, built incrementally. The starting agent seeds a one-member topology and each handoff target is added as a peer, emitting `topology_change`.
 
@@ -165,7 +165,7 @@ adapter().close()
 print(report())
 ```
 
-**Hooks into:** the global `crewai_event_bus` and a before-tool-call hook. The hook turns each tool call into `pre_tool_use`, with its arguments; `CrewKickoffStartedEvent` becomes `user_prompt_submit`, `CrewKickoffCompletedEvent` becomes `stop`, `ToolUsageFinishedEvent` and `ToolUsageErrorEvent` become `post_tool_use` and `post_tool_use_failure`, `TaskStartedEvent` becomes `task_started`, and `AgentExecutionStartedEvent` / `AgentExecutionCompletedEvent` become `subagent_start` / `subagent_stop`. The bus handlers see every crew in the process whether or not you pass a crew; the tool hook evaluates only the crew you pass, or every crew when you pass none. `instrument()` returns the adapter, and its `close()` removes the hook.
+**Hooks into:** the global `crewai_event_bus` and a before-tool-call hook. The hook turns each tool call into `pre_tool_use`, with its arguments; `CrewKickoffStartedEvent` becomes `user_prompt_submit`, `CrewKickoffCompletedEvent` becomes `stop`, `ToolUsageFinishedEvent` and `ToolUsageErrorEvent` become `post_tool_use` and `post_tool_use_failure`, `TaskStartedEvent` becomes `task_started`, and `AgentExecutionStartedEvent` / `AgentExecutionCompletedEvent` become `subagent_start` / `subagent_stop`. The bus handlers see every crew in the process whether or not you pass a crew; the tool hook evaluates the crew you pass and its copies (`kickoff_for_each`, `train` and `test` run copies), matched by `crew.key`, or every crew when you pass none. A different crew with the same agents and tasks has the same key and is evaluated too. `instrument()` returns the adapter, and its `close()` removes the hook.
 
 **Enforcement:** CrewAI skips a tool when a before-tool-call hook returns `False`. Under `enforce=True` the hook returns `False` for a denied call, the tool never runs, the agent receives "Tool execution blocked by hook" as the result, and the crew continues. The hook runs synchronously; the event bus runs its handlers on a thread pool, which is why tool calls are not evaluated from `ToolUsageStartedEvent`.
 
@@ -191,7 +191,7 @@ print(report())
 
 **Hooks into:** ADK agent callbacks, placed ahead of any callbacks already set, on the agent and on every agent reachable through `sub_agents` or an `AgentTool`. `before_agent_callback` becomes `user_prompt_submit` on the instrumented agent and `subagent_start` on any other; `after_agent_callback` becomes `stop` or `subagent_stop`; `before_tool_callback` and `after_tool_callback` become the tool events. ADK uses the first value a callback returns. These callbacks return nothing unless enforcement denies a tool call, so otherwise your own callbacks still run and decide. Instrumenting an agent again is a no-op. ADK does not run after-agent callbacks once it has transferred to another agent, so a run that ends in a transfer reports no `stop`.
 
-**Enforcement:** ADK skips a tool when a before-tool callback returns a dict and gives that dict to the model as the tool's result. Under `enforce=True` a denied call returns `{"error": <reason>}`, so the tool never runs, the model sees why, and the run continues.
+**Enforcement:** ADK skips a tool when a before-tool callback returns a dict and gives that dict to the model as the tool's result. Under `enforce=True` a denied call returns `{"error": <reason>}`, so the tool never runs, the model sees why, and the run continues. Tool nodes in an ADK workflow graph run only plugin callbacks, not agent callbacks, so they are not evaluated.
 
 **Topology:** an agent with `sub_agents` (`SequentialAgent`, `ParallelAgent`, `LoopAgent`) gives a `HIERARCHICAL_DAG` with the workflow agent as supervisor. A plain agent stays single-agent.
 

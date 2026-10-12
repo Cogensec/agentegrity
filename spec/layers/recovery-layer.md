@@ -95,7 +95,7 @@ compromise:
    the chain (every record dict), the rolling score history, an
    optional behavioural baseline, and arbitrary metadata via the
    attached :class:`Checkpoint`. Returns the canonical id.
-2. `restore_to(checkpoint_id, *, signing_key=None) -> CheckpointSnapshot`:
+2. `restore_to(checkpoint_id, *, signing_key=None, trusted_keys=None) -> CheckpointSnapshot`:
    replace `_score_history` with the snapshot's history. The chain is
    evidence and is never rolled back:
    - If the live chain verifies, the snapshot's records MUST be a prefix
@@ -111,7 +111,11 @@ compromise:
      `archive_id` and `archived_records`.
    - With no live chain, the snapshot's chain is adopted.
    `restore_to()` refuses an archive, a snapshot whose chain does not
-   verify, and a snapshot from another chain's history (`ValueError`).
+   verify, a snapshot from another chain's history, a snapshot not signed
+   by `trusted_keys` when they are given, and a signed chain when no
+   `signing_key` is given (`ValueError`). Without `trusted_keys` the
+   backend is trusted: a writer can re-link modified records under the
+   same record ids.
    After a tamper→restore cycle the layer reports `chain_intact == True`
    and `action != "escalate"` again, and every pre-restore record is
    retrievable from the archive.

@@ -151,9 +151,9 @@ recovery.restore_to(clean, signing_key=private_key)
 
 - **Intact chain.** Every record stays, and a `recovery_restore` decision record is appended that names the checkpoint.
 - **Chain that no longer verifies.** The whole chain, broken records included, is first saved to the checkpoint backend as an archive (`metadata["kind"] == "pre_restore_archive"`). The live chain then continues from the checkpoint's records, and the `recovery_restore` record carries `archive_id` and `archived_records`. An archive cannot itself be restored to.
-- **Refusals.** `restore_to()` raises `ValueError` for a checkpoint whose chain does not verify or that is not from this chain's history, and `KeyError` for an unknown id.
+- **Refusals.** `restore_to()` raises `ValueError` for a checkpoint whose chain does not verify, is not signed by `trusted_keys`, or is not from this chain's history, and for a signed chain without `signing_key`. It raises `KeyError` for an unknown id.
 
-`signing_key` signs the recovery record. Without it the record is unsigned, and `verify_signatures()` reports it like any other unsigned record.
+`signing_key` signs the recovery record, and is required when the chain holds signed records, so a restore never leaves a signed chain failing `verify_signatures()`. Pass `trusted_keys` to require that every record in the checkpoint is signed by one of those keys. Without it the checkpoint backend is trusted: anyone who can write to it can rewrite a record and re-link the hashes under the same record ids. The score history in a checkpoint is not signed. Restore while the adapter is not handling events, since its lock does not cover a restore.
 
 ## Verifying from the command line
 

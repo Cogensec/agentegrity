@@ -127,6 +127,12 @@ class TestLangChain:
         assert self._instrumented("pass", True, ran).invoke({"command": "ls"}) == "ok"
         assert ran == ["ls"]
 
+    def test_an_evaluation_crash_stops_the_tool(self) -> None:
+        ran: list[str] = []
+        with pytest.raises(IntegrityViolationError, match="RuntimeError"):
+            self._instrumented("crash", True, ran).invoke({"command": "ls"})
+        assert ran == []
+
     def test_block_without_enforcement_only_records(self) -> None:
         ran: list[str] = []
         assert self._instrumented("block", False, ran).invoke({"command": "ls"}) == "ok"
@@ -204,7 +210,7 @@ class TestCrewAI:
         monkeypatch.setenv("CREWAI_TRACING_ENABLED", "false")
 
     @staticmethod
-    def _crew(ran: list[str]) -> Any:
+    def _crew(ran: list[str], task: str = "d") -> Any:
         from crewai import Agent, Crew, Task
         from crewai.llms.base_llm import BaseLLM
         from crewai.tools import tool
@@ -229,7 +235,7 @@ class TestCrewAI:
             "Thought: done\nFinal Answer: finished",
         ])
         agent = Agent(role="r", goal="g", backstory="b", llm=llm, tools=[run_shell])
-        return Crew(agents=[agent], tasks=[Task(description="d", expected_output="e",
+        return Crew(agents=[agent], tasks=[Task(description=task, expected_output="e",
                                                 agent=agent)])
 
     def _kickoff(self, action: str, enforce: bool, ran: list[str],
@@ -257,6 +263,21 @@ class TestCrewAI:
         calls = [e for e in adapter.events if e.event_type == "pre_tool_use"]
         assert [e.data["tool_input"] for e in calls] == [{"command": "ls"}]
 
+    def test_a_crew_scoped_adapter_covers_copies_of_the_crew(self) -> None:
+        from agentegrity.adapters.crewai import CrewAIAdapter
+
+        ran: list[str] = []
+        crew = self._crew(ran)
+        adapter = CrewAIAdapter(**_kwargs("block", True))
+        adapter.subscribe(crew)
+        try:
+            copy = crew.copy()
+            copy.agents[0].llm.replies = list(crew.agents[0].llm.replies)
+            copy.kickoff()
+        finally:
+            adapter.close()
+        assert ran == []
+
     def test_a_crew_scoped_adapter_ignores_other_crews(self) -> None:
         from agentegrity.adapters.crewai import CrewAIAdapter
 
@@ -264,7 +285,7 @@ class TestCrewAI:
         adapter = CrewAIAdapter(**_kwargs("block", True))
         adapter.subscribe(self._crew([]))
         try:
-            self._crew(ran).kickoff()
+            self._crew(ran, task="another task").kickoff()
         finally:
             adapter.close()
         assert ran == ["ls"]

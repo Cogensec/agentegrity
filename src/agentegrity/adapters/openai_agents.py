@@ -13,11 +13,17 @@ Event mapping:
     on_agent_end       -> stop
     on_llm_end         -> token usage
 
-Enforcement: ``on_tool_start`` runs after the SDK resolves a function tool
-and before it invokes it. Under ``enforce=True`` a denied call raises
-:class:`IntegrityViolationError` there, so the tool never runs and the run
-ends with that error. Hosted tools (web search, file search, computer use)
-and handoffs fire no ``on_tool_start`` and cannot be blocked.
+Enforcement: the SDK awaits ``on_tool_start`` before it invokes a tool.
+Under ``enforce=True`` a denied call raises :class:`IntegrityViolationError`
+there, so the tool never runs and the run ends with that error. Limits:
+
+* Tools that run on OpenAI's side (web search, file search) and handoffs
+  fire no ``on_tool_start`` and cannot be blocked.
+* Shell, local shell, computer and apply_patch tools receive no arguments
+  in the hook, so they are evaluated by name only.
+* An agent used through ``Agent.as_tool()`` runs its tools in a nested run
+  that these hooks do not reach; only the call to the agent-tool itself is
+  evaluated.
 
 Token usage comes from each model response, attributed to the agent's
 model. An agent run as a tool shares its parent's ``Usage`` object but

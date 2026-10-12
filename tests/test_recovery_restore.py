@@ -142,6 +142,63 @@ class TestRestoreIntactChain:
         assert _recovery_record(chain).verify()
 
 
+class TestRestoreSignedChain:
+    @pytest.fixture
+    def key(self):
+        pytest.importorskip("cryptography")
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        return Ed25519PrivateKey.generate()
+
+    @staticmethod
+    def _signed_chain(key, n: int = 3) -> AttestationChain:
+        chain = AttestationChain()
+        for i in range(n):
+            record = AttestationRecord(agent_id="t", integrity_score={"composite": 0.9},
+                                       layer_states={}, chain_previous=(
+                                           chain.latest.content_hash if chain.latest else None))
+            record.sign(key)
+            chain.append(record)
+        return chain
+
+    @staticmethod
+    def _public(key) -> bytes:
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+        return key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+    def test_a_signed_chain_needs_a_signing_key(self, key):
+        chain = self._signed_chain(key)
+        layer = RecoveryLayer(chain=chain, checkpoint=InMemoryCheckpoint())
+        cid = layer.snapshot(agent_id="t")
+        with pytest.raises(ValueError, match="signing_key"):
+            layer.restore_to(cid)
+        assert len(chain) == 3
+
+    def test_the_restored_chain_still_verifies_its_signatures(self, key):
+        chain = self._signed_chain(key)
+        layer = RecoveryLayer(chain=chain, checkpoint=InMemoryCheckpoint())
+        cid = layer.snapshot(agent_id="t")
+        layer.restore_to(cid, signing_key=key)
+        assert chain.verify_signatures({self._public(key)}) == (True, None)
+
+    def test_a_forged_checkpoint_is_refused_with_trusted_keys(self, key):
+        backend = InMemoryCheckpoint()
+        chain = self._signed_chain(key)
+        layer = RecoveryLayer(chain=chain, checkpoint=backend)
+        cid = layer.snapshot(agent_id="t")
+        # Someone with write access to the backend rewrites a record and re-links the hashes.
+        forged = AttestationChain.from_dict_list(backend.load(cid).chain_records)
+        forged._records[0].integrity_score = {"composite": 0.99}
+        for i in range(1, len(forged)):
+            forged._records[i].chain_previous = forged._records[i - 1].content_hash
+        backend.load(cid).chain_records[:] = forged.to_records_dict()
+        chain._records[1].chain_previous = "tampered_hash"
+        with pytest.raises(ValueError, match="trusted"):
+            layer.restore_to(cid, signing_key=key, trusted_keys={self._public(key)})
+        assert chain._records[1].chain_previous == "tampered_hash"
+
+
 class TestRestoreTamperedChain:
     def _tampered(self, backend):
         chain = _populated_chain()

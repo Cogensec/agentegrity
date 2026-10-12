@@ -32,6 +32,7 @@ import json
 import logging
 import threading
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, TypeVar
@@ -243,6 +244,15 @@ async def _safe_await(coro: Any, method_name: str) -> None:
         await coro
     except Exception as exc:
         logger.warning("exporter %s failed: %s", method_name, exc)
+
+
+def _arguments(value: Any) -> dict[str, Any]:
+    """A tool call's arguments as a dict: mappings copied, None empty, anything else wrapped."""
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {"input": str(value)}
 
 
 class _BaseAdapter:
@@ -818,12 +828,10 @@ class _BaseAdapter:
         }
         handler = handlers.get(event_type)
         with self._lock:
-            if self._usage_reader is not None:
-                self._usage_reader.note(event_data)
-            if handler is None:
-                return {}
             try:
-                return handler(event_data)
+                if self._usage_reader is not None:
+                    self._usage_reader.note(event_data)
+                return handler(event_data) if handler is not None else {}
             except Exception as exc:
                 logger.warning(
                     "%s handler %s failed: %s",
@@ -842,9 +850,14 @@ class _BaseAdapter:
 
     def _tool_call_denial(self,
         tool_name: str,
-        tool_input: dict[str, Any],
+        tool_input: Any,
     ) -> str | None:
-        """Evaluate a tool call before it runs; return the reason when enforcement denies it."""
+        """Evaluate a tool call before it runs; return the reason when enforcement denies it.
+
+        ``tool_input`` is the framework's arguments as given: a mapping is
+        copied and anything else is wrapped, inside the evaluation that
+        fails closed, so malformed arguments cannot skip enforcement.
+        """
         decision = self._evaluate_sync(
             "pre_tool_use", {"tool_name": tool_name, "tool_input": tool_input}
         )
@@ -975,7 +988,8 @@ class _BaseAdapter:
 
     def _handle_pre_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_name = data.get("tool_name", "")
-        tool_input = data.get("tool_input", {})
+        tool_input = _arguments(data.get("tool_input"))
+        data = {**data, "tool_input": tool_input}
 
         self._append_capped(
             self._buffer.tool_calls,

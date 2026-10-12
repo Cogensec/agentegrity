@@ -332,10 +332,7 @@ class _StrandsHookProvider:
     # and gives the model that message as the result.
     async def _on_before_tool_call(self, event: Any) -> None:
         tool_use = getattr(event, "tool_use", {}) or {}
-        reason = self._adapter._tool_call_denial(
-            tool_use.get("name", ""),
-            dict(tool_use.get("input", {})) if tool_use.get("input") else {},
-        )
+        reason = self._adapter._tool_call_denial(tool_use.get("name", ""), tool_use.get("input"))
         if reason is None:
             return
         try:
