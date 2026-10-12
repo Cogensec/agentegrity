@@ -30,6 +30,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ from agentegrity.core.decision import (
     build_decision_record,
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
+from agentegrity.core.monitor import IntegrityViolationError
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.tool_classifier import classify_tool_call
 from agentegrity.core.usage import TokenUsage, UsageLedger
@@ -309,6 +311,10 @@ class _BaseAdapter:
         self._usage_reader: TranscriptUsage | None = (
             self._usage_reader_type(self._usage) if self._usage_reader_type else None
         )
+        # Some frameworks deliver events from worker threads (CrewAI's event
+        # bus runs handlers on a thread pool). Evaluation appends to the
+        # chain and the buffers, so events are handled one at a time.
+        self._lock = threading.RLock()
 
         if evaluator is not None:
             self._evaluator = evaluator
@@ -316,6 +322,9 @@ class _BaseAdapter:
             from agentegrity.layers import default_layers
 
             self._evaluator = IntegrityEvaluator(layers=default_layers())
+        # The recovery layer's continuity check reads the chain this adapter writes.
+        for recovery in self._layers_of(RecoveryLayer):
+            recovery.bind_chain(self._chain)
 
     @property
     def name(self) -> str:
@@ -807,10 +816,12 @@ class _BaseAdapter:
             "task_started": self._handle_task_started,
             "credential_declared": self._handle_credential_declared,
         }
-        if self._usage_reader is not None:
-            self._usage_reader.note(event_data)
         handler = handlers.get(event_type)
-        if handler:
+        with self._lock:
+            if self._usage_reader is not None:
+                self._usage_reader.note(event_data)
+            if handler is None:
+                return {}
             try:
                 return handler(event_data)
             except Exception as exc:
@@ -821,7 +832,35 @@ class _BaseAdapter:
                     exc,
                     exc_info=True,
                 )
-        return {}
+                # A call that could not be evaluated is not known to be safe.
+                if self._enforce and event_type == "pre_tool_use":
+                    return self._deny_payload(
+                        f"Agentegrity could not evaluate this tool call "
+                        f"({type(exc).__name__}), so enforcement denies it"
+                    )
+                return {}
+
+    def _tool_call_denial(self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> str | None:
+        """Evaluate a tool call before it runs; return the reason when enforcement denies it."""
+        decision = self._evaluate_sync(
+            "pre_tool_use", {"tool_name": tool_name, "tool_input": tool_input}
+        )
+        output = decision.get("hookSpecificOutput", {})
+        if output.get("permissionDecision") != "deny":
+            return None
+        return str(output.get("permissionDecisionReason") or "Agentegrity denied this tool call")
+
+    def _enforce_tool_call(self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> None:
+        """Raise :class:`IntegrityViolationError` when enforcement denies a tool call."""
+        reason = self._tool_call_denial(tool_name, tool_input)
+        if reason is not None:
+            raise IntegrityViolationError(reason)
 
     # --- Buffering ---
 

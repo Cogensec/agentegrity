@@ -12,10 +12,10 @@ The two languages do different work. A Python adapter runs the four evaluation l
 | Integration | Language | Package or module | Enable call | Enforcement |
 |---|---|---|---|---|
 | Claude Agent SDK | Python | `agentegrity.claude` | `ClaudeAgentOptions(hooks=hooks())` | Denies through the `PreToolUse` hook return |
-| LangChain / LangGraph | Python | `agentegrity.langchain` | `chain = instrument_chain(chain)` / `graph = instrument_graph(graph)` | Observation only |
-| OpenAI Agents SDK | Python | `agentegrity.openai_agents` | `Runner.run(agent, input=..., hooks=run_hooks())` | Observation only |
-| CrewAI | Python | `agentegrity.crewai` | `instrument(crew)` | Observation only |
-| Google ADK | Python | `agentegrity.google_adk` | `instrument(agent)` | Observation only (warns on `enforce=True`) |
+| LangChain / LangGraph | Python | `agentegrity.langchain` | `chain = instrument_chain(chain)` / `graph = instrument_graph(graph)` | Raises `IntegrityViolationError` before the tool runs |
+| OpenAI Agents SDK | Python | `agentegrity.openai_agents` | `Runner.run(agent, input=..., hooks=run_hooks())` | Raises `IntegrityViolationError` before a function tool runs |
+| CrewAI | Python | `agentegrity.crewai` | `instrument(crew)` | Before-tool-call hook skips the tool |
+| Google ADK | Python | `agentegrity.google_adk` | `instrument(agent)` | Before-tool callback returns the denial as the tool result |
 | AutoGen | Python | `agentegrity.autogen` | `instrument()` | Observation only (warns on `enforce=True`) |
 | Agno | Python | `agentegrity.agno` | `agent = instrument(agent)` / `team = instrument_team(team)` | Raises `StopAgentRun` before the tool runs |
 | AWS Bedrock Agents | Python | `agentegrity.bedrock_agents` | `agent = instrument_strands(agent)` / `client = wrap_client(client)` | Strands: sets `event.cancel_tool`. boto3: observation only (warns) |
@@ -28,9 +28,9 @@ The two languages do different work. A Python adapter runs the four evaluation l
 | Claude Code | Hook plugin | `integrations/claude-code` | `/plugin install agentegrity@agentegrity` | `block` denies, `escalate` asks for approval |
 | Codex | Hook plugin | `integrations/codex` | `codex plugin marketplace add cogensec/agentegrity`, then trust the hooks with `/hooks` | `block` and `escalate` both deny |
 
-"Observation only" means the adapter evaluates every event and records the decision in the attestation chain, but the framework surface it hooks has no way to stop a tool call, so `enforce=True` does not prevent anything. The LangChain, OpenAI Agents and CrewAI adapters evaluate each tool call and discard the decision without raising. Google ADK, AutoGen and the Bedrock boto3 path also emit a `UserWarning` when you pass `enforce=True`.
+Under `enforce=True`, every Python adapter except AutoGen and the Bedrock boto3 path stops a denied tool call before it runs. A `block` verdict always denies, an `escalate` verdict denies unless an approval handler approves it, and a call whose evaluation raises is denied (see [Scoring and actions](/concepts/scoring-and-actions)). What the agent sees depends on the framework: CrewAI, Google ADK, Strands and the Claude Agent SDK give the model the denial and the run continues, while LangChain, OpenAI Agents and Agno end the run with an exception.
 
-For enforcement in Python, use the Claude Agent SDK, Agno, or the Strands path of the Bedrock adapter. Under enforcement a `block` verdict always denies, and an `escalate` verdict denies unless an approval handler approves it (see [Scoring and actions](/concepts/scoring-and-actions)).
+"Observation only" means the adapter evaluates every event and records the decision in the attestation chain, but the surface it hooks runs after the tool or cannot stop it, so `enforce=True` prevents nothing. AutoGen and the Bedrock boto3 path emit a `UserWarning` when you pass `enforce=True`.
 
 <CardGroup cols={2}>
   <Card title="Python frameworks" href="/integrations/python">
@@ -69,7 +69,7 @@ To stop a Python adapter, do not call its entry point. To stop anonymous usage a
 
 ### Fail-open
 
-An instrumented agent does not fail because of Agentegrity. In Python, exporter exceptions are caught and logged, and each adapter's framework callbacks catch their own errors (the Google ADK adapter, for example, wraps every callback so it never raises into the run). In TypeScript, every exporter call and every HTTP request is wrapped, and errors go to `console.warn`. The deliberate exception is enforcement: a Python adapter with `enforce=True` on a blocking surface denies the call.
+An instrumented agent does not fail because of Agentegrity. In Python, exporter exceptions are caught and logged, and each adapter's framework callbacks catch their own errors (the Google ADK adapter, for example, wraps every callback so it never raises into the run). In TypeScript, every exporter call and every HTTP request is wrapped, and errors go to `console.warn`. The deliberate exception is enforcement: a Python adapter with `enforce=True` on a blocking surface denies the call, including a call it could not evaluate.
 
 ### Idempotency
 

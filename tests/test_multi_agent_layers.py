@@ -250,13 +250,16 @@ class TestRecoveryPeerQuarantine:
     def test_peer_quarantine_in_recovery_capabilities(self):
         assert "peer_quarantine" in RECOVERY_CAPABILITIES
 
-    def test_quarantine_capable_when_declared(self):
+    def test_declaring_quarantine_does_not_make_it_capable(self):
+        # Nothing in the library quarantines a peer yet, so the declaration
+        # is reported as unbacked instead of raising the score.
         profile = _multi_agent_profile(
             capabilities=["tool_use", "multi_agent_comm", "peer_quarantine"]
         )
         layer = RecoveryLayer()
         result = layer.evaluate(profile, {})
-        assert result.details["quarantine_capable"] is True
+        assert result.details["quarantine_capable"] is False
+        assert "peer_quarantine" in result.details["recovery_capabilities_unbacked"]
 
     def test_quarantine_not_capable_by_default(self):
         layer = RecoveryLayer()

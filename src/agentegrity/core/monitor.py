@@ -123,6 +123,11 @@ class IntegrityMonitor:
         self.approval_handler = approval_handler
 
         self._chain = AttestationChain()
+        # The recovery layer's continuity check reads the chain this monitor writes.
+        for layer in getattr(evaluator, "layers", []):
+            bind = getattr(layer, "bind_chain", None)
+            if callable(bind):
+                bind(self._chain)
         self._violations: list[ViolationEvent] = []
         self._evaluation_count: int = 0
 

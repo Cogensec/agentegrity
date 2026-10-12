@@ -13,6 +13,12 @@ Event mapping:
     on_agent_end       -> stop
     on_llm_end         -> token usage
 
+Enforcement: ``on_tool_start`` runs after the SDK resolves a function tool
+and before it invokes it. Under ``enforce=True`` a denied call raises
+:class:`IntegrityViolationError` there, so the tool never runs and the run
+ends with that error. Hosted tools (web search, file search, computer use)
+and handoffs fire no ``on_tool_start`` and cannot be blocked.
+
 Token usage comes from each model response, attributed to the agent's
 model. An agent run as a tool shares its parent's ``Usage`` object but
 fires no hooks of its own, so whatever the shared total holds beyond the
@@ -29,12 +35,15 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
+from functools import cache
 from typing import Any
 from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.core.monitor import IntegrityViolationError
 from agentegrity.core.usage import UNKNOWN_MODEL, TokenUsage
 
 logger = logging.getLogger("agentegrity.adapters.openai_agents")
@@ -118,10 +127,9 @@ class OpenAIAgentsAdapter(_BaseAdapter):
                 self, context: Any, agent: Any, tool: Any
             ) -> None:
                 tool_name = getattr(tool, "name", str(tool))
-                await adapter.on_event(
-                    "pre_tool_use",
-                    {"tool_name": tool_name, "tool_input": {}},
-                )
+                reason = adapter._tool_call_denial(tool_name, _tool_arguments(context))
+                if reason is not None:
+                    raise _denial_error()(reason)
 
             async def on_tool_end(
                 self, context: Any, agent: Any, tool: Any, result: Any
@@ -204,6 +212,33 @@ class _Run:
     key: str
     counted: TokenUsage = _NOTHING
     calls: int = 0
+
+
+@cache
+def _denial_error() -> type[IntegrityViolationError]:
+    """An :class:`IntegrityViolationError` the SDK re-raises as is.
+
+    The SDK wraps exceptions from tool execution in ``UserError`` unless
+    they derive from ``AgentsException``.
+    """
+    from agents.exceptions import AgentsException
+
+    class ToolCallDenied(IntegrityViolationError, AgentsException):  # type: ignore[misc, unused-ignore]
+        """Agentegrity denied a tool call under enforcement."""
+
+    return ToolCallDenied
+
+
+def _tool_arguments(context: Any) -> dict[str, Any]:
+    """The call's arguments, which the SDK passes to hooks as a JSON string on ``ToolContext``."""
+    raw = getattr(context, "tool_arguments", None)
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"arguments": raw}
+    return parsed if isinstance(parsed, dict) else {"arguments": parsed}
 
 
 def _sdk_usage(usage: Any) -> TokenUsage | None:

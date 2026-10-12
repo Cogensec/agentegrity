@@ -55,6 +55,7 @@ from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.core.evaluator import IntegrityEvaluator
+from agentegrity.core.monitor import IntegrityViolationError
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.usage import TokenUsage
 
@@ -327,38 +328,22 @@ class _StrandsHookProvider:
             "stop", {"output": str(result) if result is not None else ""}
         )
 
-    # Async tool-call callbacks. We need the evaluator's verdict synchronously
-    # enough to write event.cancel_tool, so we await on_event and inspect the
-    # block decision dict that _handle_pre_tool_use returns.
+    # Strands skips the tool when a BeforeToolCallEvent's cancel_tool is set,
+    # and gives the model that message as the result.
     async def _on_before_tool_call(self, event: Any) -> None:
         tool_use = getattr(event, "tool_use", {}) or {}
-        result = await self._adapter.on_event(
-            "pre_tool_use",
-            {
-                "tool_name": tool_use.get("name", ""),
-                "tool_input": dict(tool_use.get("input", {})) if tool_use.get("input") else {},
-            },
+        reason = self._adapter._tool_call_denial(
+            tool_use.get("name", ""),
+            dict(tool_use.get("input", {})) if tool_use.get("input") else {},
         )
-        decision = (
-            result.get("hookSpecificOutput", {}).get("permissionDecision")
-            if result
-            else None
-        )
-        if decision == "deny":
-            reason = result["hookSpecificOutput"].get(
-                "permissionDecisionReason", "blocked by agentegrity"
-            )
-            try:
-                event.cancel_tool = reason
-            except AttributeError:
-                # Defensive: Strands restricts writes via __setattr__. If a
-                # future version locks cancel_tool down, log instead of
-                # crashing the agent run.
-                logger.warning(
-                    "bedrock_agents: tried to cancel tool '%s' but "
-                    "event.cancel_tool is not writable on this Strands version",
-                    tool_use.get("name", ""),
-                )
+        if reason is None:
+            return
+        try:
+            event.cancel_tool = reason
+        except AttributeError as exc:
+            # Strands restricts writes via __setattr__. If a version locks
+            # cancel_tool, halting the run is the only way left to stop the call.
+            raise IntegrityViolationError(reason) from exc
 
     async def _on_after_tool_call(self, event: Any) -> None:
         tool_use = getattr(event, "tool_use", {}) or {}

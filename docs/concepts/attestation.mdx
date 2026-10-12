@@ -45,6 +45,7 @@ Adapters capture decisions at these points:
 | `subagent_start` | When a child agent starts. The parent already decided earlier, so `candidate_action.type` is `subagent_dispatch_observed` with `boundary_category: lifecycle_attestation` |
 | `approval` | Each time an approval handler is consulted under enforcement ([Scores and actions](/concepts/scoring-and-actions#escalation-and-approval)) |
 | `hook_verdict` | Coding-agent hooks only: every non-allow verdict, with the verdict, mode, and the threats and rules behind it |
+| `recovery_restore` | Each `RecoveryLayer.restore_to()`, with the checkpoint id and, when the chain had stopped verifying, the archive that holds its records ([Restoring from a checkpoint](#restoring-from-a-checkpoint)) |
 
 Framework adapters produce `minimal` records today: frameworks expose the candidate action but not the model's deliberation. `IntegrityMonitor.record_decision()` and the adapters' `record_decision()` accept a reasoning chain and rejected alternatives when you have them.
 
@@ -133,6 +134,26 @@ Loading keeps every stored link and signature. Write the public key as hex for t
 ```python
 Path("agent.pub").write_text(public_key.hex())
 ```
+
+### Restoring from a checkpoint
+
+`RecoveryLayer.restore_to()` rolls the layer's score history back to a checkpoint. It never removes a record from the chain, because the records after a checkpoint are the evidence of what went wrong.
+
+```python
+from agentegrity import RecoveryLayer
+from agentegrity.layers.checkpoint import FileCheckpoint
+
+recovery = RecoveryLayer(chain=chain, checkpoint=FileCheckpoint("checkpoints/"))
+clean = recovery.snapshot(agent_id="billing")
+# ... later
+recovery.restore_to(clean, signing_key=private_key)
+```
+
+- **Intact chain.** Every record stays, and a `recovery_restore` decision record is appended that names the checkpoint.
+- **Chain that no longer verifies.** The whole chain, broken records included, is first saved to the checkpoint backend as an archive (`metadata["kind"] == "pre_restore_archive"`). The live chain then continues from the checkpoint's records, and the `recovery_restore` record carries `archive_id` and `archived_records`. An archive cannot itself be restored to.
+- **Refusals.** `restore_to()` raises `ValueError` for a checkpoint whose chain does not verify or that is not from this chain's history, and `KeyError` for an unknown id.
+
+`signing_key` signs the recovery record. Without it the record is unsigned, and `verify_signatures()` reports it like any other unsigned record.
 
 ## Verifying from the command line
 

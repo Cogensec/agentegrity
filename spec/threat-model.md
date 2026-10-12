@@ -383,10 +383,10 @@ operational threat-model status.
   with topology breadth (more peers → more signal). Mitigation
   for two-agent topologies is necessarily weaker; the layer
   documents this honestly.
-- **Operator must.** Declare `peer_quarantine` in the profile's
-  recovery_capabilities when the deployment has an out-of-band
-  mechanism to isolate a compromised peer; operationalize the
-  alert.
+- **Operator must.** Operationalize the alert with an out-of-band
+  mechanism that isolates a compromised peer. Declaring
+  `peer_quarantine` in the profile does not provide one and does not
+  raise the recovery score.
 
 **T-ROLE-DRIFT — Agent in declared role acts outside role.** A
 compromised member in a hub-spoke or hierarchical topology

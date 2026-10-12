@@ -51,7 +51,7 @@ agentegrity.shutdown()                 # ends every session, sends on_session_en
   Adapter names to build instead of detecting them: `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno`, `bedrock_agents`. An unknown name raises `ValueError`.
 </ParamField>
 <ParamField path="enforce" type="bool" default="False">
-  Forwarded to every adapter. Observation-only adapters warn.
+  Forwarded to every adapter. The two observation-only surfaces (AutoGen and the Bedrock boto3 path) warn.
 </ParamField>
 <ParamField path="policy_set" type="str" default="enterprise-default">
   Governance policy set for the shared client.
@@ -130,7 +130,7 @@ Use the returned object. `instrument_chain()` wraps the runnable with `with_conf
 
 **Hooks into:** a LangChain callback handler. A top-level `on_chain_start` becomes `user_prompt_submit`, a nested chain start (a graph node) becomes `subagent_start`, a top-level `on_chain_end` becomes `stop`, and `on_tool_start`, `on_tool_end` and `on_tool_error` become the three tool events.
 
-**Enforcement:** observation only. The handler evaluates each event and discards the decision without raising, so `enforce=True` records block decisions but does not stop the tool.
+**Enforcement:** LangChain calls `on_tool_start` before it runs the tool body, and the handler sets `raise_error`, so under `enforce=True` a denied call raises `agentegrity.IntegrityViolationError` and the tool never runs. The error ends the `invoke` call. A LangGraph `ToolNode` that is configured to handle every tool error turns it into an error message for the model instead.
 
 **Topology:** `instrument_graph()` reads `graph.get_graph().nodes`. A node named `supervisor`, `supervisor_agent` or `orchestrator` gives a `HIERARCHICAL_DAG` with that node as supervisor and the rest as workers; otherwise every node is a peer in a `PEER_TO_PEER` topology. If introspection fails, the graph is instrumented as a single agent. `instrument_chain()` declares no topology.
 
@@ -146,9 +146,9 @@ await Runner.run(Agent(...), input="...", hooks=run_hooks())
 print(report())
 ```
 
-**Hooks into:** a `RunHooks` subclass. `on_agent_start` becomes `user_prompt_submit`, `on_tool_start` becomes `pre_tool_use`, `on_tool_end` becomes `post_tool_use`, `on_handoff` becomes `subagent_start`, and `on_agent_end` becomes `stop`. `on_tool_start` receives no tool arguments, so `pre_tool_use` carries an empty `tool_input`.
+**Hooks into:** a `RunHooks` subclass. `on_agent_start` becomes `user_prompt_submit`, `on_tool_start` becomes `pre_tool_use`, `on_tool_end` becomes `post_tool_use`, `on_handoff` becomes `subagent_start`, and `on_agent_end` becomes `stop`. `pre_tool_use` carries the call's arguments, parsed from the JSON string the SDK passes on `ToolContext`.
 
-**Enforcement:** observation only. `on_tool_start` evaluates the call but discards the decision; the SDK does not act on a `RunHooks` return value.
+**Enforcement:** the SDK awaits `on_tool_start` before it invokes a function tool, so under `enforce=True` a denied call raises `agentegrity.IntegrityViolationError` there, the tool never runs, and `Runner.run` ends with that error. Hosted tools (web search, file search, computer use) and handoffs fire no `on_tool_start` and cannot be blocked.
 
 **Topology:** `PEER_TO_PEER`, built incrementally. The starting agent seeds a one-member topology and each handoff target is added as a peer, emitting `topology_change`.
 
@@ -165,9 +165,9 @@ adapter().close()
 print(report())
 ```
 
-**Hooks into:** the global `crewai_event_bus`. `CrewKickoffStartedEvent` becomes `user_prompt_submit`, `CrewKickoffCompletedEvent` becomes `stop`, the three `ToolUsage*` events become the tool events, `TaskStartedEvent` becomes `task_started`, and `AgentExecutionStartedEvent` / `AgentExecutionCompletedEvent` become `subagent_start` / `subagent_stop`. The handlers are registered on the global bus whether or not you pass a crew, so they see every crew in the process. `instrument()` returns the adapter.
+**Hooks into:** the global `crewai_event_bus` and a before-tool-call hook. The hook turns each tool call into `pre_tool_use`, with its arguments; `CrewKickoffStartedEvent` becomes `user_prompt_submit`, `CrewKickoffCompletedEvent` becomes `stop`, `ToolUsageFinishedEvent` and `ToolUsageErrorEvent` become `post_tool_use` and `post_tool_use_failure`, `TaskStartedEvent` becomes `task_started`, and `AgentExecutionStartedEvent` / `AgentExecutionCompletedEvent` become `subagent_start` / `subagent_stop`. The bus handlers see every crew in the process whether or not you pass a crew; the tool hook evaluates only the crew you pass, or every crew when you pass none. `instrument()` returns the adapter, and its `close()` removes the hook.
 
-**Enforcement:** observation only. The bus handlers evaluate each event and discard the decision without raising.
+**Enforcement:** CrewAI skips a tool when a before-tool-call hook returns `False`. Under `enforce=True` the hook returns `False` for a denied call, the tool never runs, the agent receives "Tool execution blocked by hook" as the result, and the crew continues. The hook runs synchronously; the event bus runs its handlers on a thread pool, which is why tool calls are not evaluated from `ToolUsageStartedEvent`.
 
 **Topology:** only when you pass the crew. A sequential process gives `HUB_SPOKE`, with the first agent as leader by convention; a hierarchical process gives `HIERARCHICAL_DAG`. Members are identified by agent role.
 
@@ -189,9 +189,9 @@ instrument(agent)
 print(report())
 ```
 
-**Hooks into:** ADK agent callbacks, placed ahead of any callbacks already set, on the agent and on every agent reachable through `sub_agents` or an `AgentTool`. `before_agent_callback` becomes `user_prompt_submit` on the instrumented agent and `subagent_start` on any other; `after_agent_callback` becomes `stop` or `subagent_stop`; `before_tool_callback` and `after_tool_callback` become the tool events. These callbacks return nothing, so your own callbacks still run and decide. Instrumenting an agent again is a no-op. ADK does not run after-agent callbacks once it has transferred to another agent, so a run that ends in a transfer reports no `stop`.
+**Hooks into:** ADK agent callbacks, placed ahead of any callbacks already set, on the agent and on every agent reachable through `sub_agents` or an `AgentTool`. `before_agent_callback` becomes `user_prompt_submit` on the instrumented agent and `subagent_start` on any other; `after_agent_callback` becomes `stop` or `subagent_stop`; `before_tool_callback` and `after_tool_callback` become the tool events. ADK uses the first value a callback returns. These callbacks return nothing unless enforcement denies a tool call, so otherwise your own callbacks still run and decide. Instrumenting an agent again is a no-op. ADK does not run after-agent callbacks once it has transferred to another agent, so a run that ends in a transfer reports no `stop`.
 
-**Enforcement:** observation only. The adapter's callbacks always return nothing, so they never stop a call; `enforce=True` records block decisions in the chain, and the adapter warns at construction.
+**Enforcement:** ADK skips a tool when a before-tool callback returns a dict and gives that dict to the model as the tool's result. Under `enforce=True` a denied call returns `{"error": <reason>}`, so the tool never runs, the model sees why, and the run continues.
 
 **Topology:** an agent with `sub_agents` (`SequentialAgent`, `ParallelAgent`, `LoopAgent`) gives a `HIERARCHICAL_DAG` with the workflow agent as supervisor. A plain agent stays single-agent.
 
@@ -259,7 +259,7 @@ print(report())
 
 **Hooks into:** two surfaces on one adapter. `instrument_strands()` registers a hook provider for `BeforeInvocationEvent`, `AfterInvocationEvent`, `BeforeToolCallEvent` and `AfterToolCallEvent`. `wrap_client()` replaces the client's `invoke_agent` with a version that sets `enableTrace=True` (unless you pass `force_trace=False`) and maps trace parts onto canonical events as you consume the stream. `chunk` and other events pass through unchanged.
 
-**Enforcement:** on Strands, a deny decision sets `event.cancel_tool` so Strands does not run the tool. The boto3 path is observation only, because traces arrive after the tool ran; `wrap_client()` warns when the adapter has `enforce=True`.
+**Enforcement:** on Strands, a deny decision sets `event.cancel_tool` so Strands does not run the tool. If a Strands version refuses the write, the adapter raises `IntegrityViolationError` instead. The boto3 path is observation only, because traces arrive after the tool ran; `wrap_client()` warns when the adapter has `enforce=True`.
 
 **Topology:** `HUB_SPOKE`, seeded with the Strands agent or the `agentId` as supervisor. On the boto3 path, collaborators found in `agentCollaboratorInvocationInput` traces are added through `topology_change`.
 

@@ -34,7 +34,7 @@ from agentegrity.core.decision import (
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
 from agentegrity.core.keys import FileKeyProvider, KeyProvider, StaticKeyProvider
-from agentegrity.core.monitor import IntegrityMonitor
+from agentegrity.core.monitor import IntegrityMonitor, IntegrityViolationError
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.core.telemetry import disable_telemetry
 from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_call
@@ -111,6 +111,7 @@ __all__ = [
     "TopologyKind",
     "TopologyChange",
     "IntegrityMonitor",
+    "IntegrityViolationError",
     "AgentegrityClient",
     "disable_telemetry",
     "FrameworkEvent",

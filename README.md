@@ -160,7 +160,7 @@ The framework implements verification through four architectural layers. Each la
 └─────────────────────────────────────────────┘
 ```
 
-The **Adversarial Layer** verifies self-defense by mapping the agent's attack surface and detecting threats across input channels. The **Cortical Layer** verifies self-stability by monitoring reasoning consistency, memory integrity, and behavioral drift from baseline. The **Governance Layer** enforces organizational policy and produces audit trails so verification results have a place to live in compliance workflows. The **Recovery Layer** verifies self-recovery by tracking the attestation chain for continuity, watching score history for sustained degradation, and confirming the agent declares the recovery capabilities it claims (`state_restore`, `checkpoint`, `rollback`, `session_reset`).
+The **Adversarial Layer** verifies self-defense by mapping the agent's attack surface and detecting threats across input channels. The **Cortical Layer** verifies self-stability by monitoring reasoning consistency, memory integrity, and behavioral drift from baseline. The **Governance Layer** enforces organizational policy and produces audit trails so verification results have a place to live in compliance workflows. The **Recovery Layer** verifies self-recovery by tracking the attestation chain for continuity, watching score history for sustained degradation, and counting the recovery mechanisms actually attached (today, a `Checkpoint` backend). Capabilities a profile only declares are reported as unbacked and do not raise the score.
 
 ---
 

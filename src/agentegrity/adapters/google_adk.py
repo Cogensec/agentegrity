@@ -15,11 +15,10 @@ and agents wrapped in an ``AgentTool``):
 ADK does not run an agent's after-agent callbacks once it has transferred
 to another agent, so a run that ends in a transfer reports no ``stop``.
 
-Limitation: this adapter is fundamentally observation-only. ADK's
-``before_*`` callbacks expose no return-value or exception-signaling
-mechanism the runtime acts on to veto a tool call, so ``enforce=True``
-records block decisions in the attestation chain but cannot prevent
-the call. The adapter warns at construction when ``enforce=True``.
+Enforcement: ADK skips a tool when a before-tool callback returns a
+dict, and passes that dict to the model as the tool's result. Under
+``enforce=True`` a denied call returns ``{"error": <reason>}``, so the
+tool never runs and the model sees why.
 
 Usage:
     from google.adk.agents import LlmAgent
@@ -34,7 +33,6 @@ Usage:
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import Any
 from uuid import uuid4
 
@@ -60,16 +58,6 @@ class GoogleADKAdapter(_BaseAdapter):
     ) -> None:
         super().__init__(profile, evaluator, enforce, api_key)
         self._instrumented: list[Any] = []
-        if enforce:
-            warnings.warn(
-                "GoogleADKAdapter is observation-only: ADK before_* callbacks "
-                "expose no return-value or exception-signaling mechanism the "
-                "runtime acts on, so enforce=True records block decisions in "
-                "the attestation chain but cannot prevent tool calls. For "
-                "enforcement, use a framework with a blocking pre-tool hook.",
-                UserWarning,
-                stacklevel=2,
-            )
 
     def instrument(self, agent: Any) -> Any:
         """Attach agentegrity callbacks to a Google ADK agent.
@@ -77,9 +65,10 @@ class GoogleADKAdapter(_BaseAdapter):
         Callbacks go on the agent and on every agent reachable from it
         (``sub_agents``, and agents wrapped in an ``AgentTool``), ahead of
         any callbacks already set. ADK stops at the first callback that
-        returns a value; these return nothing, so the user's callbacks still
-        run and decide. Instrumenting an agent again is a no-op. Returns the
-        agent for chaining.
+        returns a value. These return nothing except when enforcement denies
+        a tool call, so otherwise the user's callbacks still run and decide.
+        Instrumenting an agent again is a no-op. Returns the agent for
+        chaining.
         """
         try:
             for reached in _reachable(agent):
@@ -118,11 +107,11 @@ class GoogleADKAdapter(_BaseAdapter):
             else:
                 adapter._dispatch("subagent_stop", {"agent_id": name})
 
-        def _before_tool(tool: Any, args: Any, tool_context: Any) -> None:
-            adapter._dispatch("pre_tool_use", {
-                "tool_name": getattr(tool, "name", str(tool)),
-                "tool_input": dict(args) if args else {},
-            })
+        def _before_tool(tool: Any, args: Any, tool_context: Any) -> dict[str, str] | None:
+            reason = adapter._tool_call_denial(
+                getattr(tool, "name", str(tool)), dict(args) if args else {}
+            )
+            return {"error": reason} if reason is not None else None
 
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
             adapter._dispatch("post_tool_use", {
@@ -222,19 +211,20 @@ def _count(source: Any, name: str) -> int:
 
 def _safe(fn: Any) -> Any:
     """Run an agentegrity callback without ever failing the agent's run."""
-    def _callback(*args: Any, **kwargs: Any) -> None:
+    def _callback(*args: Any, **kwargs: Any) -> Any:
         try:
-            fn(*args, **kwargs)
+            return fn(*args, **kwargs)
         except Exception as exc:
             logger.warning("google_adk agentegrity callback failed: %s", exc)
+            return None
     return _callback
 
 
 def _prepend(existing: Any, fn: Any) -> Any:
     """Run ``fn`` ahead of the callback, or list of callbacks, already set.
 
-    ``fn`` returns nothing, so whatever the user's callbacks return still
-    decides, as ADK takes the first value a callback returns.
+    ADK takes the first value a callback returns, so a value from ``fn``
+    (an enforcement denial) decides; otherwise the user's callbacks do.
     """
     ours = _safe(fn)
     if existing is None:
@@ -243,7 +233,9 @@ def _prepend(existing: Any, fn: Any) -> Any:
         return [ours, *existing]
 
     def _chained(*args: Any, **kwargs: Any) -> Any:
-        ours(*args, **kwargs)
+        result = ours(*args, **kwargs)
+        if result is not None:
+            return result
         return existing(*args, **kwargs)
 
     return _chained

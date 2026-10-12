@@ -3,7 +3,9 @@ CrewAI adapter for agentegrity.
 
 Instruments CrewAI crews by subscribing to the global event bus
 (``crewai.events.crewai_event_bus``) and forwarding each event to the
-shared ``_BaseAdapter`` dispatcher. Compatible with crewai 1.x; the
+shared ``_BaseAdapter`` dispatcher. Tool calls are evaluated in a
+before-tool-call hook instead, because the bus runs its handlers on a
+thread pool and so cannot hold a tool back. Compatible with crewai 1.x; the
 1.0 release relocated event classes from ``crewai.utilities.events``
 to ``crewai.events`` (which re-exports the canonical ``types.*``
 submodules).
@@ -11,7 +13,7 @@ submodules).
 Event mapping:
 
     CrewKickoffStartedEvent       -> user_prompt_submit
-    ToolUsageStartedEvent         -> pre_tool_use
+    before-tool-call hook         -> pre_tool_use
     ToolUsageFinishedEvent        -> post_tool_use
     ToolUsageErrorEvent           -> post_tool_use_failure
     LLMCallCompletedEvent         -> token usage (per call_id)
@@ -35,6 +37,12 @@ ships for one cycle (v0.8 only) and is removed in v0.9. Operators
 hitting the deprecation warning should migrate their consumers
 toward the corrected event shape.
 
+Enforcement: CrewAI skips a tool when a before-tool-call hook returns
+``False`` and gives the agent "Tool execution blocked by hook" as the
+result. Under ``enforce=True`` the hook returns ``False`` for a denied
+call, so the tool never runs and the crew continues. ``close()`` removes
+the hook.
+
 Topology: when ``subscribe(crew=...)`` is called with a non-None
 ``crew``, the adapter constructs an :class:`AgentTopology` from
 ``crew.agents`` and declares it via ``set_topology()`` so the
@@ -55,7 +63,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from typing import Any
+from typing import Any, Callable
 
 from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.core.usage import TokenUsage
@@ -68,6 +76,10 @@ class CrewAIAdapter(_BaseAdapter):
 
     _name = "crewai"
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._tool_hook: Callable[[Any], bool | None] | None = None
+
     def subscribe(
         self,
         crew: Any | None = None,
@@ -77,8 +89,8 @@ class CrewAIAdapter(_BaseAdapter):
         """Subscribe to the CrewAI event bus.
 
         If ``crew`` is None, subscribes globally (all crews in the
-        process). Otherwise scopes the subscription to the given crew
-        instance and declares the topology to this adapter.
+        process). Otherwise tool calls are evaluated only for the given
+        crew, and its topology is declared to this adapter.
 
         Parameters
         ----------
@@ -102,9 +114,9 @@ class CrewAIAdapter(_BaseAdapter):
                 TaskStartedEvent,
                 ToolUsageErrorEvent,
                 ToolUsageFinishedEvent,
-                ToolUsageStartedEvent,
                 crewai_event_bus,
             )
+            from crewai.hooks import register_before_tool_call_hook
         except ImportError:
             raise ImportError(
                 "crewai is required for the CrewAI adapter. "
@@ -133,14 +145,15 @@ class CrewAIAdapter(_BaseAdapter):
         def _on_kickoff_end(source_: Any, event: Any) -> None:
             adapter._dispatch("stop", {"output": str(getattr(event, "output", ""))})
 
-        def _on_tool_start(source_: Any, event: Any) -> None:
-            adapter._dispatch(
-                "pre_tool_use",
-                {
-                    "tool_name": getattr(event, "tool_name", ""),
-                    "tool_input": {"args": str(getattr(event, "tool_args", ""))},
-                },
-            )
+        def _before_tool_call(context: Any) -> bool | None:
+            if crew is not None and getattr(context, "crew", None) is not crew:
+                return None
+            tool_input = getattr(context, "tool_input", None)
+            arguments = dict(tool_input) if isinstance(tool_input, dict) else {
+                "args": str(tool_input or "")
+            }
+            denied = adapter._tool_call_denial(getattr(context, "tool_name", ""), arguments)
+            return False if denied is not None else None
 
         def _on_tool_end(source_: Any, event: Any) -> None:
             adapter._dispatch(
@@ -224,9 +237,12 @@ class CrewAIAdapter(_BaseAdapter):
             crewai_event_bus.on(llm_call_event)(_on_llm_call)
         crewai_event_bus.on(CrewKickoffStartedEvent)(_on_kickoff_start)
         crewai_event_bus.on(CrewKickoffCompletedEvent)(_on_kickoff_end)
-        crewai_event_bus.on(ToolUsageStartedEvent)(_on_tool_start)
         crewai_event_bus.on(ToolUsageFinishedEvent)(_on_tool_end)
         crewai_event_bus.on(ToolUsageErrorEvent)(_on_tool_error)
+
+        self._remove_tool_hook()
+        register_before_tool_call_hook(_before_tool_call)
+        self._tool_hook = _before_tool_call
 
         if legacy_task_mapping:
             crewai_event_bus.on(TaskStartedEvent)(_on_task_start_legacy)
@@ -238,6 +254,19 @@ class CrewAIAdapter(_BaseAdapter):
         # v0.8: declare the topology when we know the crew.
         if crew is not None:
             self._declare_topology(crew)
+
+    def close(self) -> None:
+        """End the session and remove the before-tool-call hook."""
+        self._remove_tool_hook()
+        super().close()
+
+    def _remove_tool_hook(self) -> None:
+        if self._tool_hook is None:
+            return
+        from crewai.hooks import unregister_before_tool_call_hook
+
+        unregister_before_tool_call_hook(self._tool_hook)
+        self._tool_hook = None
 
     def _record_llm_call(self, event: Any) -> None:
         """Count one LLM call; CrewAI's normalizer makes the input count include the cache."""
