@@ -70,8 +70,15 @@ def stub_crewai_events(monkeypatch: pytest.MonkeyPatch) -> _FakeBus:
     events.AgentExecutionCompletedEvent = AgentExecutionCompletedEvent  # type: ignore[attr-defined]
     events.crewai_event_bus = bus  # type: ignore[attr-defined]
 
+    hooks = types.ModuleType("crewai.hooks")
+    registered: list[Callable[[Any], Any]] = []
+    hooks.before_tool_call_hooks = registered  # type: ignore[attr-defined]
+    hooks.register_before_tool_call_hook = registered.append  # type: ignore[attr-defined]
+    hooks.unregister_before_tool_call_hook = registered.remove  # type: ignore[attr-defined]
+
     monkeypatch.setitem(sys.modules, "crewai", pkg)
     monkeypatch.setitem(sys.modules, "crewai.events", events)
+    monkeypatch.setitem(sys.modules, "crewai.hooks", hooks)
     return bus
 
 
@@ -102,10 +109,10 @@ def test_subscribe_routes_bus_events(stub_crewai_events: _FakeBus) -> None:
     kickoff.inputs = "investigate X"  # type: ignore[attr-defined]
     stub_crewai_events.emit(None, kickoff)
 
-    tool_start = events_mod.ToolUsageStartedEvent()
-    tool_start.tool_name = "search"  # type: ignore[attr-defined]
-    tool_start.tool_args = {"q": "llm"}  # type: ignore[attr-defined]
-    stub_crewai_events.emit(None, tool_start)
+    (before_tool_call,) = sys.modules["crewai.hooks"].before_tool_call_hooks
+    assert before_tool_call(
+        types.SimpleNamespace(tool_name="search", tool_input={"q": "llm"}, crew=None)
+    ) is None
 
     tool_err = events_mod.ToolUsageErrorEvent()
     tool_err.tool_name = "search"  # type: ignore[attr-defined]

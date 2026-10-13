@@ -1,7 +1,11 @@
 """Tests for the Recovery Layer."""
 
+import asyncio
+
+from agentegrity.adapters.claude import ClaudeAdapter
 from agentegrity.core.attestation import AttestationChain, AttestationRecord
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
+from agentegrity.layers.checkpoint import InMemoryCheckpoint
 from agentegrity.layers.recovery import RecoveryLayer
 
 
@@ -27,14 +31,24 @@ class TestRecoveryLayer:
         assert result.action in ("pass", "alert", "escalate", "block")
 
     def test_recovery_capable_agent_scores_higher(self):
-        layer = RecoveryLayer()
-        basic_profile = _make_profile(capabilities=["tool_use"])
-        recovery_profile = _make_profile(
-            capabilities=["tool_use", "state_restore", "checkpoint", "rollback"]
-        )
-        basic_result = layer.evaluate(basic_profile)
-        recovery_result = layer.evaluate(recovery_profile)
+        # Capability means an attached implementation, not a declared string.
+        profile = _make_profile(capabilities=["tool_use"])
+        basic_result = RecoveryLayer().evaluate(profile)
+        recovery_result = RecoveryLayer(checkpoint=InMemoryCheckpoint()).evaluate(profile)
         assert recovery_result.score > basic_result.score
+
+    def test_an_adapter_binds_its_chain_so_tampering_escalates(self):
+        adapter = ClaudeAdapter(profile=_make_profile())
+        (recovery,) = [layer for layer in adapter._evaluator.layers
+                       if isinstance(layer, RecoveryLayer)]
+        assert recovery._chain is adapter.attestation_chain
+        asyncio.run(adapter.on_event("user_prompt_submit", {"prompt": "hi"}))
+        adapter.attestation_chain._records[0].chain_previous = "tampered_hash"
+        asyncio.run(adapter.on_event("user_prompt_submit", {"prompt": "again"}))
+        result = next(r for r in adapter.events[-1].evaluation_result.layer_results
+                      if r.layer_name == "recovery")
+        assert result.details["chain_intact"] is False
+        assert result.action == "escalate"
 
     def test_sustained_degradation_detected(self):
         # Scores that drop significantly

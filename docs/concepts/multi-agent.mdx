@@ -113,7 +113,7 @@ score = evaluator.evaluate(profile, {
 })
 ```
 
-A profile that lists `peer_quarantine` in its capabilities reports `quarantine_capable: true` in the recovery details. The library does not quarantine anything itself.
+The library does not quarantine a peer itself. A profile that lists `peer_quarantine` reports it under `recovery_capabilities_unbacked`, and `quarantine_capable` stays `false`, because the score only counts mechanisms that are attached.
 
 ## Topology on the chain
 

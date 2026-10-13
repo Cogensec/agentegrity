@@ -188,8 +188,15 @@ def stub_crewai_events(monkeypatch: pytest.MonkeyPatch):
         setattr(events, cls.__name__, cls)
     events.crewai_event_bus = bus
 
+    hooks = types.ModuleType("crewai.hooks")
+    registered: list[Any] = []
+    hooks.before_tool_call_hooks = registered  # type: ignore[attr-defined]
+    hooks.register_before_tool_call_hook = registered.append  # type: ignore[attr-defined]
+    hooks.unregister_before_tool_call_hook = registered.remove  # type: ignore[attr-defined]
+
     monkeypatch.setitem(sys.modules, "crewai", pkg)
     monkeypatch.setitem(sys.modules, "crewai.events", events)
+    monkeypatch.setitem(sys.modules, "crewai.hooks", hooks)
     return bus, events
 
 

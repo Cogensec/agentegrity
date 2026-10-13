@@ -97,6 +97,7 @@ class ChainedRecord(Protocol):
     """
 
     record_kind: str
+    record_id: str
     chain_previous: str | None
     signature: bytes | None
     public_key: bytes | None
@@ -292,6 +293,19 @@ class AttestationChain:
             )
         self._records.append(record)
 
+    def restart_from(self, records: list[ChainedRecord]) -> list[ChainedRecord]:
+        """Replace this chain's records with ``records`` and return the ones removed.
+
+        Recovery uses this to continue from a verified checkpoint after the
+        chain stopped verifying. The removed records are evidence: callers
+        persist them before calling. Raises ``ValueError`` if ``records``
+        do not verify as a chain.
+        """
+        if not AttestationChain.from_records(records).verify_chain():
+            raise ValueError("restart_from needs records that verify as a chain")
+        removed, self._records = self._records, list(records)
+        return removed
+
     @scoped_telemetry
     def verify_chain(self) -> bool:
         """Verify the integrity of the full chain.
@@ -405,7 +419,7 @@ class AttestationChain:
         decisions_by_id: dict[str, tuple[int, ChainedRecord]] = {}
         for i, r in enumerate(self._records):
             if r.record_kind == "decision":
-                decisions_by_id[r.record_id] = (i, r)  # type: ignore[attr-defined]
+                decisions_by_id[r.record_id] = (i, r)
 
         for i, r in enumerate(self._records):
             if not isinstance(r, AttestationRecord):

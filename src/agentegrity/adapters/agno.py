@@ -233,12 +233,8 @@ class AgnoAdapter(_BaseAdapter):
                 adapter._dispatch("stop", {"output": output})
 
         def _tool(name: str, func: Any, arguments: dict[str, Any]) -> Any:
-            decision = adapter._evaluate_sync(
-                "pre_tool_use",
-                {"tool_name": name, "tool_input": dict(arguments or {})},
-            )
-            hook_output = decision.get("hookSpecificOutput", {})
-            if hook_output.get("permissionDecision") == "deny":
+            reason = adapter._tool_call_denial(name, arguments)
+            if reason is not None:
                 # StopAgentRun (an AgentRunException subclass) is the only
                 # exception FunctionCall.execute() re-raises to halt the run;
                 # a plain Exception or InputCheckError would be swallowed into
@@ -246,10 +242,7 @@ class AgnoAdapter(_BaseAdapter):
                 # importable without agno installed.
                 from agno.exceptions import StopAgentRun
 
-                raise StopAgentRun(
-                    hook_output.get("permissionDecisionReason")
-                    or "agentegrity blocked this tool call"
-                )
+                raise StopAgentRun(reason)
             try:
                 result = func(**arguments)
             except Exception as exc:

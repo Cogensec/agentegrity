@@ -66,9 +66,10 @@ restorable baseline exists.
 
 ### Recovery Capability Assessment
 
-Inspects the agent profile's `capabilities` list for declared recovery
-mechanisms: `state_restore`, `checkpoint`, `rollback`, `session_reset`. The
-score scales with the number of capabilities declared:
+Counts the recovery mechanisms that have an implementation attached. A
+declaration in the profile is not evidence that a mechanism exists, so it
+does not raise the score; otherwise any profile could reach the maximum by
+listing the right strings.
 
 | Capabilities present | Score |
 |---|---|
@@ -77,10 +78,12 @@ score scales with the number of capabilities declared:
 | 1                    | 0.70  |
 | 0                    | 0.40  |
 
-A `Checkpoint` backend attached via `RecoveryLayer(checkpoint=...)` is
-treated as a synthetic `checkpoint` capability for scoring purposes —
-operational evidence supersedes profile declaration when the
-declaration is missing.
+Today one mechanism has an implementation: a `Checkpoint` backend attached
+via `RecoveryLayer(checkpoint=...)` provides `checkpoint`. Recovery
+capabilities the profile declares without an implementation
+(`state_restore`, `rollback`, `session_reset`, `peer_quarantine`, or
+`checkpoint` with no backend) are reported in
+`recovery_capabilities_unbacked`.
 
 ### Checkpoint Round-Trip
 
@@ -92,12 +95,30 @@ compromise:
    the chain (every record dict), the rolling score history, an
    optional behavioural baseline, and arbitrary metadata via the
    attached :class:`Checkpoint`. Returns the canonical id.
-2. `restore_to(checkpoint_id) -> CheckpointSnapshot` — rebuild the
-   chain from the snapshot's record dicts (preserving original
-   `chain_previous` link hashes so `verify_chain()` returns True
-   post-restore) and replace `_score_history` with the snapshot's
-   history. After a tamper→restore cycle the layer reports
-   `chain_intact == True` and `action != "escalate"` again.
+2. `restore_to(checkpoint_id, *, signing_key=None, trusted_keys=None) -> CheckpointSnapshot`:
+   replace `_score_history` with the snapshot's history. The chain is
+   evidence and is never rolled back:
+   - If the live chain verifies, the snapshot's records MUST be a prefix
+     of it (compared by `content_hash`). Every record stays, and a
+     `DecisionRecord` with `decision_point="recovery_restore"` is
+     appended naming the checkpoint.
+   - If the live chain does not verify, the snapshot's records MUST be a
+     prefix of it by `record_id`. The full live chain is saved to the
+     backend as a snapshot with `metadata["kind"] ==
+     "pre_restore_archive"`, the live chain continues from the
+     snapshot's records (the same chain object, so an adapter sharing it
+     sees the result), and the `recovery_restore` record carries
+     `archive_id` and `archived_records`.
+   - With no live chain, the snapshot's chain is adopted.
+   `restore_to()` refuses an archive, a snapshot whose chain does not
+   verify, a snapshot from another chain's history, a snapshot not signed
+   by `trusted_keys` when they are given, and a signed chain when no
+   `signing_key` is given (`ValueError`). Without `trusted_keys` the
+   backend is trusted: a writer can re-link modified records under the
+   same record ids.
+   After a tamper→restore cycle the layer reports `chain_intact == True`
+   and `action != "escalate"` again, and every pre-restore record is
+   retrievable from the archive.
 
 The `Checkpoint` Protocol is four methods:
 
@@ -169,10 +190,13 @@ A conforming implementation MUST:
 4. Map a tampered chain to `action == "escalate"`.
 5. When a `Checkpoint` backend is attached, expose `snapshot(...)` and
    `restore_to(checkpoint_id)` such that the post-restore chain
-   verifies under `verify_chain()` (i.e., link hashes are preserved
-   verbatim, not re-derived).
+   verifies under `verify_chain()` (link hashes are preserved verbatim,
+   not re-derived) and no record that existed before the restore is
+   lost: it stays in the live chain or is persisted in an archive.
+6. Score only recovery capabilities that have an attached
+   implementation.
 
 A conforming implementation SHOULD also surface `sustained_degradation`,
 `chain_intact`, `recovery_capable`, `recovery_capabilities_present`,
-`checkpoint_count`, and `last_checkpoint_id` in its result `details`
+`recovery_capabilities_unbacked`, `checkpoint_count`, and `last_checkpoint_id` in its result `details`
 for downstream telemetry.

@@ -82,7 +82,7 @@ PyPI releases use GitHub Actions trusted publishing, so CI holds no long-lived t
 ## Known limits
 
 - Detection quality is your responsibility to validate. A record with no threats proves only that the layers did not fire. Published numbers, including the weak ones, are in [STATUS.md](https://github.com/Cogensec/agentegrity/blob/main/STATUS.md).
-- Most of the library fails open by design: exporters, model-backed layers and hooks log and continue on error rather than stopping the agent. Enforcement decisions under `enforce=True` are the exception: an `escalate` without an approving handler is denied.
+- Most of the library fails open by design: exporters, model-backed layers and hooks log and continue on error rather than stopping the agent. Enforcement decisions under `enforce=True` are the exception: an `escalate` without an approving handler is denied, and so is a tool call whose evaluation raised.
 - Chains live in memory unless you persist them. The hook runtime persists its own.
 
 Report a threat that is not covered, or a bypass of a listed mitigation, through the process in [SECURITY.md](https://github.com/Cogensec/agentegrity/blob/main/SECURITY.md): a private GitHub security advisory, or security@cogensec.com.

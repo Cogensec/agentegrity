@@ -14,6 +14,12 @@ Event mapping:
     on_chain_end (top-level)     -> stop
     on_llm_end                   -> token usage (usage_metadata, per run_id)
 
+Enforcement: ``on_tool_start`` runs before LangChain invokes the tool body,
+and the handler sets ``raise_error``, so under ``enforce=True`` a denied
+call raises :class:`IntegrityViolationError` and the tool never runs. The
+error propagates out of ``invoke``; a LangGraph ``ToolNode`` configured to
+handle all tool errors turns it into an error message for the model instead.
+
 Usage (LangChain):
     from agentegrity.langchain import instrument_chain, report
     chain = instrument_chain(my_chain)
@@ -95,6 +101,11 @@ class LangChainAdapter(_BaseAdapter):
         class _AgentegrityCallbackHandler(BaseCallbackHandler):  # type: ignore[misc, unused-ignore]
             """LangChain callback handler forwarding to the adapter."""
 
+            # LangChain logs and swallows callback errors unless this is set.
+            # Only on_tool_start raises on purpose; the other callbacks
+            # catch their own failures.
+            raise_error = True
+
             def on_chain_start(
                 self,
                 serialized: dict[str, Any] | None,
@@ -168,10 +179,9 @@ class LangChainAdapter(_BaseAdapter):
                 **kwargs: Any,
             ) -> None:
                 tool_name = (serialized or {}).get("name", "tool") if serialized else "tool"
-                adapter._dispatch(
-                    "pre_tool_use",
-                    {"tool_name": tool_name, "tool_input": {"input": input_str}},
-                )
+                inputs = kwargs.get("inputs")
+                tool_input = dict(inputs) if isinstance(inputs, dict) else {"input": input_str}
+                adapter._enforce_tool_call(tool_name, tool_input)
 
             def on_tool_end(
                 self,

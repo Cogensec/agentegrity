@@ -150,7 +150,7 @@ def test_strands_enforce_true_writes_cancel_tool_on_block(monkeypatch: pytest.Mo
     agent = _FakeAgent()
     adapter.instrument_strands(agent)  # type: ignore[arg-type]
 
-    async def fake_on_event(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+    def fake_evaluate(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
         if event_type == "pre_tool_use":
             return {
                 "hookSpecificOutput": {
@@ -161,7 +161,7 @@ def test_strands_enforce_true_writes_cancel_tool_on_block(monkeypatch: pytest.Mo
             }
         return {}
 
-    monkeypatch.setattr(adapter, "on_event", fake_on_event)
+    monkeypatch.setattr(adapter, "_evaluate_sync", fake_evaluate)
 
     tool_use = {"toolUseId": "t3", "name": "dangerous", "input": {}}
     event = BeforeToolCallEvent(

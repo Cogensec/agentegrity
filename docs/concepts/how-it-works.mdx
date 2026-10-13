@@ -79,10 +79,10 @@ A `DENY` rule produces `block`, a `REQUIRE_APPROVAL` rule produces `escalate`, a
 |---|---|
 | Baseline | 1.0 for a baseline under 24 hours old with at least 5 samples, falling to 0.5 for a stale or empty one |
 | Sustained degradation | 1.0 unless recent composites trend down; see [Scores and actions](/concepts/scoring-and-actions#sustained-degradation) |
-| Recovery capabilities | 0.4 to 1.0 by how many of `state_restore`, `checkpoint`, `rollback`, `session_reset`, `peer_quarantine` the profile declares; an attached `Checkpoint` backend counts as `checkpoint` |
-| Chain continuity | 1.0 for an intact chain, 0.0 for a broken one, 0.5 when no chain was passed |
+| Recovery capabilities | 0.4 with no recovery mechanism attached, 0.7 with a `Checkpoint` backend attached (`checkpoint`). Capabilities the profile only declares (`state_restore`, `rollback`, `session_reset`, `peer_quarantine`) are listed in `recovery_capabilities_unbacked` and do not raise the score |
+| Chain continuity | 1.0 for an intact chain (an empty one included), 0.0 for a broken one, 0.5 when no chain is bound |
 
-Sustained degradation alerts, a broken chain escalates, and two or more degrading peers (cascade detection) alert. The layer scores the chain you pass as `RecoveryLayer(chain=...)`. The default pipeline constructs `RecoveryLayer()` without one, so the continuity check scores 0.5 there. With a `checkpoint=` backend, `snapshot()` and `restore_to()` save and restore the score history and chain.
+Sustained degradation alerts, a broken chain escalates, and two or more degrading peers (cascade detection) alert. Adapters and `IntegrityMonitor` bind their own attestation chain to the recovery layer, so the continuity check covers the chain they write; a chain you pass as `RecoveryLayer(chain=...)` takes precedence. With a `checkpoint=` backend, `snapshot()` saves the score history and chain, and `restore_to()` rolls the score history back without removing any chain record. See [Attestation](/concepts/attestation#restoring-from-a-checkpoint).
 
 ## Integrity properties
 
@@ -173,7 +173,7 @@ The shipped adapters fill the latest prompt, tool outputs and errors, tool-call 
 
 ## What it does not do
 
-**It is not a guardrail by default.** Every adapter except the coding-agent hook plugins starts measure-only. Enforcement is opt-in with `enforce=True`, and the Google ADK, AutoGen and Bedrock boto3 adapters can record a block but cannot stop the call.
+**It is not a guardrail by default.** Every adapter except the coding-agent hook plugins starts measure-only. Enforcement is opt-in with `enforce=True`, and the AutoGen and Bedrock boto3 adapters can record a block but cannot stop the call.
 
 **The regex tier catches known shapes.** The adversarial patterns match how an attack is phrased. Paraphrased or non-English injections will evade them, and separating an injected goal from a legitimate user task needs session context that content patterns do not have. Detection numbers, last measured 2026-08-02 with the regex taxonomy alone (no model layers, no embedding similarity):
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,9 +23,12 @@ def test_adapter_name() -> None:
     assert ad.name == "google_adk"
 
 
-def test_enforce_true_warns_observation_only() -> None:
-    with pytest.warns(UserWarning, match="observation-only"):
-        GoogleADKAdapter(profile=AgentProfile.default(), enforce=True)
+def test_before_tool_returns_the_denial_under_enforcement() -> None:
+    ad = GoogleADKAdapter(profile=AgentProfile.default(), enforce=True)
+    ad._tool_call_denial = lambda name, args: "denied"  # type: ignore[method-assign]
+    agent = _FakeAgent()
+    ad.instrument(agent)
+    assert agent.before_tool_callback(SimpleNamespace(name="t"), {}, None) == {"error": "denied"}
 
 
 @pytest.mark.asyncio

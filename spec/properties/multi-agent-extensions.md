@@ -186,10 +186,11 @@ should decide whether to quarantine.
 
 ### Peer-quarantine capability
 
-`RECOVERY_CAPABILITIES` adds `"peer_quarantine"`. An agent profile
-that declares this capability has `quarantine_capable=True` in its
-`RecoveryAssessment`. This is informational in v0.8; v0.9's
-`FederationLayer` can act on it (route around quarantined peers).
+`RECOVERY_CAPABILITIES` adds `"peer_quarantine"`. Nothing in the
+library quarantines a peer yet, so a profile that declares it reports
+the capability in `recovery_capabilities_unbacked` and keeps
+`quarantine_capable=False`. `quarantine_capable` becomes true when a
+quarantine mechanism is attached to the recovery layer.
 
 ### Chain restore under multi-agent
 

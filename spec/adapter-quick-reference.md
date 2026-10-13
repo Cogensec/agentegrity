@@ -11,10 +11,10 @@ Installed with `pip install agentegrity` plus the framework's extra. Every modul
 | Framework | Module | Enable snippet | Enforcement |
 |---|---|---|---|
 | Claude Agent SDK | `agentegrity.claude` | `ClaudeSDKClient(options=ClaudeAgentOptions(hooks=hooks()))` | deny via hook return |
-| LangChain / LangGraph | `agentegrity.langchain` | `graph = instrument_graph(my_graph)` | callback return |
-| OpenAI Agents SDK | `agentegrity.openai_agents` | `Runner.run(agent, input=..., hooks=run_hooks())` | RunHooks return |
-| CrewAI | `agentegrity.crewai` | `instrument(crew)` | event-bus deny |
-| Google ADK | `agentegrity.google_adk` | `instrument(agent)` | observation only |
+| LangChain / LangGraph | `agentegrity.langchain` | `graph = instrument_graph(my_graph)` | `on_tool_start` raises `IntegrityViolationError` |
+| OpenAI Agents SDK | `agentegrity.openai_agents` | `Runner.run(agent, input=..., hooks=run_hooks())` | `on_tool_start` raises `IntegrityViolationError` (function tools) |
+| CrewAI | `agentegrity.crewai` | `instrument(crew)` | before-tool-call hook returns `False` |
+| Google ADK | `agentegrity.google_adk` | `instrument(agent)` | before-tool callback returns `{"error": reason}` |
 | AutoGen | `agentegrity.autogen` | `instrument()` | observation only |
 | Agno | `agentegrity.agno` | `agent = instrument(agent)` / `team = instrument_team(team)` | `StopAgentRun` |
 | AWS Bedrock Agents | `agentegrity.bedrock_agents` | `agent = instrument_strands(agent)` / `client = wrap_client(client)` | Strands: `cancel_tool`; boto3: observation only |

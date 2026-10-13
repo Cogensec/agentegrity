@@ -68,8 +68,9 @@ With `enforce=True`, the adapter acts on `pre_tool_use` results:
 - `block` always denies the tool call.
 - `escalate` denies unless an `approval_handler` approves it.
 - `alert` and `pass` let the call run.
+- A call whose evaluation raises is denied, since it was never shown to be safe. Outside a tool call, or with `enforce=False`, the error is logged and the agent continues.
 
-The deny reaches the framework in its own form: a `permissionDecision: deny` hook return on the Claude Agent SDK, `StopAgentRun` on Agno, `event.cancel_tool` on Strands, and so on. The Google ADK, AutoGen and Bedrock boto3 adapters observe after the fact, so under `enforce=True` they record the decision but cannot stop the call. The zero-config functions take the flag directly:
+The deny reaches the framework in its own form: a `permissionDecision: deny` hook return on the Claude Agent SDK, a dict from the before-tool callback on Google ADK, a `False` from the before-tool-call hook on CrewAI, `event.cancel_tool` on Strands, `StopAgentRun` on Agno, and `IntegrityViolationError` on LangChain and the OpenAI Agents SDK. The AutoGen and Bedrock boto3 adapters observe after the fact, so under `enforce=True` they record the decision but cannot stop the call. See [Integrations](/integrations/overview) for what the agent sees in each case. The zero-config functions take the flag directly:
 
 ```python
 from agentegrity.claude import hooks
