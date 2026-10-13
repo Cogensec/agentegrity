@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from agentegrity.exporters.http import HTTPExporter, from_env
+from agentegrity.exporters.http import HTTPExporter, from_env, transport_problem
 
 
 class _Recorder(HTTPServer):
@@ -203,7 +203,8 @@ class TestTransport:
         monkeypatch.setenv("AGENTEGRITY_EXPORTER_URL", "http://example.test")
         with caplog.at_level("WARNING", logger="agentegrity.exporters.http"):
             assert from_env() is None
-        assert "http://example.test" in caplog.text
+        (record,) = caplog.records
+        assert record.args == (transport_problem("http://example.test"),)
         assert "agk_live_x" not in caplog.text
 
     @pytest.mark.asyncio

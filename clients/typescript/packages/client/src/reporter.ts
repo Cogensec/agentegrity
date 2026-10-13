@@ -64,6 +64,13 @@ function isTransportSafe(baseUrl: string): boolean {
   }
 }
 
+/** `url` without trailing slashes; a loop, since a `/\/+$/` regex is quadratic on input like "////x". */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end -= 1;
+  return url.slice(0, end);
+}
+
 function randomHex32(): string {
   // Node 18+ and modern browsers both expose crypto.randomUUID.
   // Strip hyphens to match Python's uuid4().hex.
@@ -92,7 +99,7 @@ export class AgentegrityReporter {
   constructor(opts: ReporterOptions) {
     this.sessionId = randomHex32();
     this.adapterName = opts.adapterName ?? "typescript";
-    const baseUrl = opts.baseUrl?.replace(/\/+$/, "");
+    const baseUrl = opts.baseUrl === undefined ? undefined : trimTrailingSlashes(opts.baseUrl);
     this.profile = opts.profile;
     this.apiKey = opts.apiKey;
     this.fetchImpl = opts.fetchImpl ?? fetch;

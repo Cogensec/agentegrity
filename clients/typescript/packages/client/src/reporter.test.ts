@@ -14,6 +14,7 @@ const PROFILE: AgentProfile = {
 
 interface Sent {
   calls: number;
+  url?: string;
   headers: Record<string, string>;
   init?: RequestInit;
   errors: string[];
@@ -27,8 +28,9 @@ async function send(baseUrl: string | undefined, apiKey?: string): Promise<Sent>
   const prevOffline = process.env.AGENTEGRITY_OFFLINE;
   delete process.env.AGENTEGRITY_OFFLINE;
   const sent: Sent = { calls: 0, headers: {}, errors: [] };
-  const fetchImpl = (async (_url: string, init?: RequestInit) => {
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
     sent.calls += 1;
+    sent.url = url;
     sent.init = init;
     sent.headers = (init?.headers as Record<string, string>) ?? {};
     return { ok: true, status: 200 } as Response;
@@ -81,4 +83,9 @@ test("token is sent over http://127.0.0.1 (loopback)", async () => {
 test("redirects are refused, so the token never follows one", async () => {
   const sent = await send("https://example.com", "secret-token");
   assert.equal(sent.init?.redirect, "error");
+});
+
+test("trailing slashes on the base URL are dropped", async () => {
+  const sent = await send("https://example.com///");
+  assert.equal(sent.url, "https://example.com/sessions");
 });
