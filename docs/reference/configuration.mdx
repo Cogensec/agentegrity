@@ -205,6 +205,10 @@ A reasoning conflict escalates regardless of these settings.
 | `policy_set` | `"enterprise-default"` | Built-in rule set: `enterprise-default` (rules GOV-001 to GOV-005), `minimal` (no rules) or `strict` (every tool call requires approval). Any other name loads no built-in rules. |
 | `custom_rules` | `None` | `PolicyRule` objects added to the set. |
 | `sensitive_tools` | built-in set | Tool names that GOV-001 gates for high and critical risk agents. Entries match exactly, as globs with `*` or `?`, or against the bare tool part of MCP-namespaced names. |
+| `sandboxed` | `False` | Declare that the agent's code runs in a sandbox. Turns GOV-002 off. A per-call `context["sandbox"]` overrides it. |
+| `code_execution_tools` | name heuristic | Tools GOV-002 treats as running code, matched like `sensitive_tools`. Replaces the name heuristic; inline code in a shell command counts either way. |
+| `financial_tools` | name heuristic | Tools GOV-003 treats as payments, matched like `sensitive_tools`. Replaces the name heuristic. |
+| `financial_threshold` | `1000` | GOV-003 requires approval when a payment's numeric `amount` argument is above this, in the tool's own unit: set it in cents for an API that takes cents. |
 | `escalation_callback` | `None` | Called with `(profile, action, evaluation)` when a rule requires approval. |
 | `enable_audit` | `True` | Keep audit log entries. |
 

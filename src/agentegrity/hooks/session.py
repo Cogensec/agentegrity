@@ -61,6 +61,7 @@ class HookSession:
         agent_name: str | None = None,
         model_id: str | None = None,
         signing_key: Any | None = None,
+        sandboxed: bool = False,
     ) -> None:
         """Build the session, resuming the chain at ``chain_path``; ``signing_key`` signs it."""
         self.host = host
@@ -78,7 +79,9 @@ class HookSession:
         profile.risk_tier = risk_tier
         profile.metadata = {"host": host, "session_id": session_id}
         store = _baseline_store(chain_path.parent, profile.agent_id)
-        evaluator = IntegrityEvaluator(layers=default_layers(baseline_store=store))
+        evaluator = IntegrityEvaluator(
+            layers=default_layers(baseline_store=store, sandboxed=sandboxed)
+        )
         self._adapter = ADAPTERS_BY_HOST[host](
             profile=profile, evaluator=evaluator, chain=_load_chain(chain_path),
             stream_from_env=stream, signing_key=signing_key,

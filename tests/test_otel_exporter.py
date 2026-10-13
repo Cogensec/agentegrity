@@ -277,6 +277,21 @@ def test_broken_hash_linkage_does_not_error_the_span():
     assert root.status.status_code.name != "ERROR"
 
 
+def test_a_session_without_a_chain_omits_hash_linkage_and_reports_signatures():
+    exporter, span_exporter, _ = _build()
+
+    async def drive():
+        await exporter.on_session_start(SESSION, "langchain", _profile())
+        await exporter.on_session_end(
+            SESSION, {"chain_hash_linked": None, "chain_signatures": "none"}
+        )
+
+    asyncio.run(drive())
+    root = _spans_by_name(span_exporter)["agentegrity.session"]
+    assert "agentegrity.chain.hash_linked" not in root.attributes
+    assert root.attributes["agentegrity.chain.signatures"] == "none"
+
+
 class _FakeChain:
     def __init__(self, verified: bool, bad_index: int | None = None) -> None:
         self._verified = verified

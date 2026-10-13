@@ -317,6 +317,8 @@ class TestAdapterConformance:
             == summary["chain_records"]
         )
         assert summary["chain_hash_linked"] is True
+        # No adapter signs without a signing_key, and the report says so.
+        assert summary["chain_signatures"] == "unsigned"
         assert summary["enforce_mode"] is False
 
     def test_close_is_idempotent(

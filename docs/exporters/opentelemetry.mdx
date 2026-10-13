@@ -86,7 +86,8 @@ Set at end, from the session summary:
 
 | Attribute | Value |
 |---|---|
-| `agentegrity.chain.hash_linked` | `chain_hash_linked` from the summary |
+| `agentegrity.chain.hash_linked` | `chain_hash_linked` from the summary; omitted when the session has no chain |
+| `agentegrity.chain.signatures` | `chain_signatures` from the summary (`unsigned`, `signed`, `trusted` and so on) |
 | `agentegrity.evaluations`, `agentegrity.attestation_records`, `agentegrity.decision_records` | Counts from the summary |
 | `agentegrity.enforce_mode` | Whether enforcement was on |
 | `agentegrity.chain.signatures_verified` | Only with `chain_provider`: whether every record is signed and verifies |

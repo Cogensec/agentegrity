@@ -57,14 +57,18 @@ provide them) a contact URL or email.
 ## Supported versions
 
 The library is pre-1.0. Until v1.0 lands, only the **latest minor
-release line** receives security backports. v0.5 and earlier are no
+release line** receives security backports. v0.11 and earlier are no
 longer supported.
 
 | Version | Supported | Notes |
 |---|:---:|---|
-| 0.6.x | ✅ | Current. All security fixes ship here first. |
-| 0.5.x | ❌ | EOL on the 2026-05-05 v0.6.0 release. Upgrade. |
-| < 0.5 | ❌ | Never supported in security backports. |
+| 0.12.x | ✅ | Current. All security fixes ship here first. |
+| 0.11.x | ❌ | EOL on the 2026-10-06 v0.12.0 release. Upgrade. |
+| < 0.11 | ❌ | Not supported. Upgrade to 0.12.x. |
+
+`scripts/check_versions.py` fails CI when the supported line here differs
+from the version in `pyproject.toml`, so a release cannot ship with this
+table behind it.
 
 After v1.0 we will move to a dual-track support window: latest minor
 + previous minor for at least 6 months. That policy will be
@@ -105,10 +109,17 @@ We document this here so reporters know which guarantees we're staking
 the project on. Bypasses of any of the items below are treated as
 critical by default.
 
-* **Attestation chain integrity.** Every `AttestationRecord` is signed
-  with Ed25519, and the chain links each record to the SHA-256 of the
-  previous record's canonical payload. `AttestationChain.verify_chain()`
-  walks the full chain and refuses to validate on any link mismatch.
+* **Attestation chain integrity.** The chain links each record to the
+  SHA-256 of the previous record's canonical payload, and
+  `AttestationChain.verify_chain()` refuses to validate on any link
+  mismatch. Records are signed with Ed25519 only when a signing key is
+  configured (`signing_key=` on an adapter, or the per-machine key the
+  coding-agent hooks create); without one they are unsigned, and the
+  session summary reports `chain_signatures: "unsigned"`. Hash linkage
+  alone does not stop someone who holds the chain from rewriting it.
+  `AttestationChain.verify_signatures(trusted_keys=...)` and
+  `agentegrity verify-decisions --trusted-key` check signatures against
+  pinned keys, which is the only check that shows who produced a chain.
 * **Deterministic canonical payload.** `AttestationRecord.canonical_payload`
   is `json.dumps(payload, sort_keys=True, separators=(",", ":"))` —
   byte-stable across Python versions for the same input.

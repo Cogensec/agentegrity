@@ -180,6 +180,8 @@ def _new_session(
         agent_name=env.get("AGENTEGRITY_AGENT_NAME"),
         model_id=env.get("AGENTEGRITY_MODEL_ID"),
         signing_key=_signing_key(host, env),
+        # The agent's commands run in a sandbox, so GOV-002 need not gate inline code.
+        sandboxed=env.get("AGENTEGRITY_SANDBOXED") in ("1", "true", "TRUE"),
     )
 
 

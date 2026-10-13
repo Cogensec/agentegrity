@@ -250,7 +250,11 @@ for (const { expectedName, module } of ADAPTER_MODULES) {
       expect(typeof summary.events).toBe("number");
       expect(summary.events).toBe(EVENT_STREAM.length);
       expect(typeof summary.attestation_records).toBe("number");
-      expect(typeof summary.chain_hash_linked).toBe("boolean");
+      // No TypeScript package evaluates or attests locally: no chain, nothing signed.
+      expect(summary.attestation_records).toBe(0);
+      expect(summary.chain_hash_linked).toBeNull();
+      expect(summary.chain_signatures).toBe("none");
+      expect(Array.isArray(summary.exporters)).toBe(true);
       expect(typeof summary.enforce_mode).toBe("boolean");
     });
   });

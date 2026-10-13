@@ -31,7 +31,8 @@ def test_report_before_instrument_returns_empty() -> None:
     summary = ag.report()
     assert summary["adapter"] == "agno"
     assert summary["evaluations"] == 0
-    assert summary["chain_hash_linked"] is True
+    assert summary["chain_hash_linked"] is None
+    assert summary["chain_signatures"] == "none"
 
 
 def test_adapter_lazy_construction() -> None:

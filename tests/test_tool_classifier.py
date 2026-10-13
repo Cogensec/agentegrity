@@ -17,6 +17,7 @@ SENDS = ToolCallCategory.SENDS_EXTERNAL
 RCE = ToolCallCategory.REMOTE_CODE_EXEC
 TAMPER = ToolCallCategory.LOG_TAMPER
 OBFUSCATED = ToolCallCategory.OBFUSCATED_COMMAND
+INLINE = ToolCallCategory.RUNS_INLINE_CODE
 
 
 def _bash(command: str) -> frozenset[ToolCallCategory]:
@@ -173,11 +174,14 @@ def test_obfuscated_commands(command: str) -> None:
         "git status",
         "pytest tests/rules -q",
         "echo \"$(date)\"",
-        "python3 -c 'print(1)'",
     ],
 )
 def test_benign_commands_have_no_categories(command: str) -> None:
     assert _bash(command) == frozenset()
+
+
+def test_inline_python_is_inline_code_and_nothing_else() -> None:
+    assert _bash("python3 -c 'print(1)'") == {INLINE}
 
 
 def test_unbalanced_quotes_do_not_raise() -> None:
@@ -237,7 +241,6 @@ _MD_BODY = f"`RecoveryLayer.record_score()` feeds the window\n$(echo rm) is iner
     [
         f"cat > notes.md <<'EOF'\n{_MD_BODY}\nEOF",
         f'cat >> notes.md <<"EOF"\n{_MD_BODY}\nEOF',
-        f"python3 - <<EOF\nimport os\n{_MD_BODY}\nEOF",
         f"cat > notes.md << EOF\n{_MD_BODY}\nEOF",
         f"cat > notes.md <<-EOF\n\t{_MD_BODY}\n\tEOF",
         f"cat > install.sh <<'EOF'\n{_MD_BODY}\nEOF",
@@ -247,6 +250,11 @@ _MD_BODY = f"`RecoveryLayer.record_score()` feeds the window\n$(echo rm) is iner
 )
 def test_heredoc_body_written_as_data_is_not_classified(command: str) -> None:
     assert _bash(command) == frozenset()
+
+
+def test_a_heredoc_fed_to_python_is_inline_code_not_shell() -> None:
+    # The body is Python: its shell-looking lines are not classified as shell.
+    assert _bash(f"python3 - <<EOF\nimport os\n{_MD_BODY}\nEOF") == {INLINE}
 
 
 @pytest.mark.parametrize(

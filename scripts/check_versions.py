@@ -9,6 +9,7 @@ Checks:
   - README.md                                "library-vX.Y.Z" shields badge
   - README.md "vX.Y.Z ships" / "vX.Y.Z — ..." current-release prose
   - integrations/*/plugin.json               coding-agent plugin manifests
+  - SECURITY.md                              supported-versions table
 
 Mirrors clients/typescript/scripts/check-versions.ts which covers the
 @agentegrity/* npm packages.
@@ -125,6 +126,17 @@ def check_plugin_manifests(version: str) -> bool:
     return good
 
 
+def check_security_policy(version: str) -> bool:
+    """SECURITY.md supports exactly one line, the current minor (``X.Y.x``)."""
+    supported = re.findall(r"^\| *([^|]+?) *\| *✅ *\|", read(ROOT / "SECURITY.md"), re.MULTILINE)
+    current = ".".join(version.split(".")[:2]) + ".x"
+    if supported != [current]:
+        fail(f"SECURITY.md supported versions {supported} != [{current!r}]")
+        return False
+    ok(f"SECURITY.md supports {current}")
+    return True
+
+
 def main() -> int:
     version = canonical_version()
     print(f"canonical version: {version}\n")
@@ -133,6 +145,7 @@ def main() -> int:
         check_readme_badge(version),
         check_readme_prose(version),
         check_plugin_manifests(version),
+        check_security_policy(version),
     ]
     if not all(checks):
         print("\nVersion drift detected. Bump every site together.", file=sys.stderr)

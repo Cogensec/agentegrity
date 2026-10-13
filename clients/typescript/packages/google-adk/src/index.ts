@@ -31,6 +31,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  emptySummary,
   AgentMember,
   AgentRole,
   AgentTopology,
@@ -225,15 +226,7 @@ export function instrument(agent: AdkAgentLike, options: InstrumentOptions = {})
 
 export async function report(): Promise<SessionSummary> {
   if (_default === null) {
-    return {
-      adapter: "google_adk",
-      agent_id: null,
-      evaluations: 0,
-      events: 0,
-      attestation_records: 0,
-      chain_hash_linked: true,
-      enforce_mode: false,
-    };
+    return emptySummary("google_adk");
   }
   return _default.getSummary();
 }

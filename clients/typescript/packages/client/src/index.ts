@@ -13,6 +13,7 @@ export { KNOWN_EVENT_TYPES } from "./types.js";
 export type { CredentialRef } from "./credentials.js";
 export {
   createDefaultAdapter,
+  emptySummary,
 } from "./default.js";
 export type {
   AdapterConfig,
@@ -21,8 +22,10 @@ export type {
 } from "./default.js";
 export type {
   AgentProfile,
+  ChainSignatures,
   EventPayload,
   EventType,
+  ExporterDescription,
   FrameworkEvent,
   IntegrityScore,
   LayerResult,

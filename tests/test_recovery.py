@@ -50,6 +50,34 @@ class TestRecoveryLayer:
         assert result.details["chain_intact"] is False
         assert result.action == "escalate"
 
+    def test_a_resumed_chain_is_the_one_the_recovery_layer_checks(self):
+        first = ClaudeAdapter(profile=_make_profile(), stream_from_env=False)
+        for prompt in ("one", "two"):
+            asyncio.run(first.on_event("user_prompt_submit", {"prompt": prompt}))
+        persisted = AttestationChain.from_json(first.attestation_chain.to_json())
+
+        resumed = ClaudeAdapter(profile=_make_profile(), stream_from_env=False, chain=persisted)
+        (recovery,) = [layer for layer in resumed._evaluator.layers
+                       if isinstance(layer, RecoveryLayer)]
+        assert recovery._chain is resumed.attestation_chain is persisted
+        asyncio.run(resumed.on_event("user_prompt_submit", {"prompt": "three"}))
+        result = next(r for r in resumed.events[-1].evaluation_result.layer_results
+                      if r.layer_name == "recovery")
+        assert result.details["chain_intact"] is True
+        assert len(persisted.records) == 3
+
+    def test_tampering_with_an_early_record_escalates_after_many(self):
+        adapter = ClaudeAdapter(profile=_make_profile(), stream_from_env=False)
+        for i in range(5):
+            asyncio.run(adapter.on_event("user_prompt_submit", {"prompt": f"p{i}"}))
+        adapter.attestation_chain._records[1].chain_previous = "tampered_hash"
+        asyncio.run(adapter.on_event("user_prompt_submit", {"prompt": "after"}))
+        result = next(r for r in adapter.events[-1].evaluation_result.layer_results
+                      if r.layer_name == "recovery")
+        assert result.details["chain_intact"] is False
+        assert result.action == "escalate"
+        assert adapter.get_summary()["chain_hash_linked"] is False
+
     def test_sustained_degradation_detected(self):
         # Scores that drop significantly
         history = [0.95, 0.93, 0.90, 0.88, 0.70, 0.65, 0.60, 0.55]

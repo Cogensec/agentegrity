@@ -493,6 +493,35 @@ class AttestationChain:
                 return False, i
         return True, None
 
+    def signature_status(self, trusted_keys: set[bytes] | None = None) -> str:
+        """Summarize who signed the chain, separately from whether it is hash-linked.
+
+        ``none`` for an empty chain, ``unsigned`` when no record is signed,
+        ``partially_signed`` when only some are, ``invalid`` when a signature
+        fails against its own key or has none, and ``unverifiable`` without the
+        ``cryptography`` package. When every record verifies: ``signed``
+        without ``trusted_keys`` (anyone can produce that, since records embed
+        their key), else ``trusted`` or ``untrusted``.
+        """
+        if not self._records:
+            return "none"
+        signed = [r for r in self._records if r.signature is not None]
+        if not signed:
+            return "unsigned"
+        if any(not r.public_key for r in signed):
+            return "invalid"
+        try:
+            if any(not r.verify() for r in signed):
+                return "invalid"
+        except ImportError:
+            return "unverifiable"
+        if len(signed) < len(self._records):
+            return "partially_signed"
+        if trusted_keys is None:
+            return "signed"
+        trusted = all(r.public_key in trusted_keys for r in signed)
+        return "trusted" if trusted else "untrusted"
+
     @property
     def records(self) -> list[ChainedRecord]:
         return list(self._records)
