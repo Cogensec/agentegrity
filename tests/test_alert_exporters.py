@@ -7,6 +7,7 @@ fail-open delivery, and flush-on-session-end.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import urllib.request
@@ -14,15 +15,20 @@ import urllib.request
 import pytest
 
 from agentegrity.adapters.base import FrameworkEvent
+from agentegrity.adapters.claude import ClaudeAdapter
 from agentegrity.core.evaluator import (
+    IntegrityEvaluator,
     IntegrityScore,
     LayerResult,
     PropertyScores,
 )
+from agentegrity.core.profile import AgentProfile
 from agentegrity.exporters.alerts import (
     SlackAlertExporter,
     WebhookAlertExporter,
 )
+
+from .test_framework_enforcement import _Verdict
 
 
 def _score(action: str, composite: float = 0.42) -> IntegrityScore:
@@ -46,13 +52,14 @@ def _score(action: str, composite: float = 0.42) -> IntegrityScore:
     )
 
 
-def _event(action: str, event_type: str = "pre_tool_use") -> FrameworkEvent:
+def _event(action: str, event_type: str = "pre_tool_use") -> dict:
+    """An event as adapters deliver it to exporters: ``FrameworkEvent.to_dict()``."""
     return FrameworkEvent(
         event_type=event_type,
         adapter_name="langchain",
         data={"tool_name": "payment_execute"},
         evaluation_result=_score(action),
-    )
+    ).to_dict()
 
 
 @pytest.fixture
@@ -70,20 +77,20 @@ def posts(monkeypatch):
 class TestAlertTriggering:
     def test_block_event_fires_alert(self, posts):
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event("s1", _event("block"))
+        asyncio.run(exporter.on_event("s1", _event("block")))
         exporter.flush()
         assert len(posts) == 1
 
     def test_escalate_event_fires_alert(self, posts):
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event("s1", _event("escalate"))
+        asyncio.run(exporter.on_event("s1", _event("escalate")))
         exporter.flush()
         assert len(posts) == 1
 
     def test_pass_and_alert_actions_silent_by_default(self, posts):
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event("s1", _event("pass"))
-        exporter.on_event("s1", _event("alert"))
+        asyncio.run(exporter.on_event("s1", _event("pass")))
+        asyncio.run(exporter.on_event("s1", _event("alert")))
         exporter.flush()
         assert posts == []
 
@@ -91,23 +98,41 @@ class TestAlertTriggering:
         exporter = WebhookAlertExporter(
             "https://hooks.example/x", alert_on={"alert", "block"}
         )
-        exporter.on_event("s1", _event("alert"))
+        asyncio.run(exporter.on_event("s1", _event("alert")))
         exporter.flush()
         assert len(posts) == 1
 
     def test_event_without_evaluation_is_silent(self, posts):
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event(
-            "s1", FrameworkEvent(event_type="stop", adapter_name="x")
-        )
+        asyncio.run(exporter.on_event(
+            "s1", FrameworkEvent(event_type="stop", adapter_name="x").to_dict()
+        ))
         exporter.flush()
         assert posts == []
+
+
+class TestThroughAnAdapter:
+    @pytest.mark.asyncio
+    async def test_a_blocked_tool_call_posts_an_alert(self, posts):
+        adapter = ClaudeAdapter(
+            profile=AgentProfile.default(name="t"),
+            evaluator=IntegrityEvaluator(layers=[_Verdict("block")]),
+            stream_from_env=False,
+        )
+        exporter = WebhookAlertExporter("https://hooks.example/x")
+        adapter.register_exporter(exporter)
+        await adapter.on_event("pre_tool_use", {"tool_name": "Bash",
+                                                "tool_input": {"command": "ls"}})
+        await asyncio.sleep(0)  # the adapter schedules exporter calls on the running loop
+        exporter.flush()
+        assert [body["action"] for _, body in posts] == ["block"]
+        assert posts[0][1]["tool_name"] == "Bash"
 
 
 class TestPayloadShapes:
     def test_json_payload_structure(self, posts):
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event("s1", _event("block"))
+        asyncio.run(exporter.on_event("s1", _event("block")))
         exporter.flush()
         _, body = posts[0]
         assert body["action"] == "block"
@@ -119,7 +144,7 @@ class TestPayloadShapes:
 
     def test_slack_payload_is_text(self, posts):
         exporter = SlackAlertExporter("https://hooks.slack.com/services/x")
-        exporter.on_event("s1", _event("block"))
+        asyncio.run(exporter.on_event("s1", _event("block")))
         exporter.flush()
         req, body = posts[0]
         assert set(body) == {"text"}
@@ -141,11 +166,11 @@ class TestFailureSemantics:
 
         monkeypatch.setattr(urllib.request, "urlopen", broken)
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event("s1", _event("block"))
+        asyncio.run(exporter.on_event("s1", _event("block")))
         exporter.flush()  # must not raise
 
     def test_session_end_flushes(self, posts):
         exporter = WebhookAlertExporter("https://hooks.example/x")
-        exporter.on_event("s1", _event("block"))
-        exporter.on_session_end("s1", {"evaluations": 3})
+        asyncio.run(exporter.on_event("s1", _event("block")))
+        asyncio.run(exporter.on_session_end("s1", {"evaluations": 3}))
         assert len(posts) == 1

@@ -346,7 +346,7 @@ marketplace ([Claude Code](integrations/claude-code/README.md),
 [Codex](integrations/codex/README.md)).
 
 ```bash
-pip install "agentegrity>=0.12.0"
+pip install "agentegrity[crypto]>=0.12.0"
 codex plugin marketplace add cogensec/agentegrity          # Codex
 # Claude Code: /plugin marketplace add cogensec/agentegrity
 ```

@@ -5,9 +5,16 @@ description: "Post a short alert to a webhook or Slack channel when an evaluatio
 
 `WebhookAlertExporter` posts a small JSON alert whenever an evaluated event's action is one you choose, by default `block` and `escalate`. `SlackAlertExporter` is the same exporter with the body shaped for Slack incoming webhooks. Both use only the standard library and are importable from `agentegrity` or `agentegrity.exporters.alerts`.
 
-<Warning>
-In 0.12.0, alerts are not delivered when the exporter is registered on an adapter. The adapter passes each event to `on_event` as a dict, while the alert exporters read it as a `FrameworkEvent` object, so every call fails with an `AttributeError` that the adapter catches and logs as `exporter WebhookAlertExporter.on_event raised synchronously`. The alert exporters also define their callbacks as plain functions, which the adapter tries to await and logs as a failure. The agent is unaffected. Until this is fixed, calling `on_event` directly with a `FrameworkEvent`, as in the example under [Using the exporter directly](#using-the-exporter-directly), is the path that delivers alerts.
-</Warning>
+Register one on an adapter and every evaluated event that reaches the configured action is posted:
+
+```python
+import os
+
+from agentegrity import SlackAlertExporter
+from agentegrity.langchain import register_exporter
+
+register_exporter(SlackAlertExporter(os.environ["SLACK_WEBHOOK_URL"]))
+```
 
 ## Constructor
 
@@ -76,23 +83,20 @@ Alerts go on a queue of up to 200 and are posted in order by one background daem
 
 `describe()` returns the exporter type and the URL with its query string removed, so a token passed as a query parameter does not appear in the session summary.
 
-## Using the exporter directly
+## Calling it directly
 
-`on_event` accepts a `FrameworkEvent`. Calling it yourself delivers alerts in 0.12.0:
+Like every exporter, the callbacks are coroutines and `on_event` takes an event in its dict form (`FrameworkEvent.to_dict()`), which is what adapters pass. To replay events an adapter already recorded:
 
 ```python
+import asyncio
 import os
 
 from agentegrity import SlackAlertExporter
 from agentegrity.langchain import adapter
 
 slack = SlackAlertExporter(os.environ["SLACK_WEBHOOK_URL"])
-
-# After a run, forward the events the default LangChain adapter recorded.
 ad = adapter()
 for event in ad.events:
-    slack.on_event(ad.session_id, event)
+    asyncio.run(slack.on_event(ad.session_id, event.to_dict()))
 slack.flush()
 ```
-
-`events` returns the `FrameworkEvent` objects the adapter has emitted, and `session_id` is the id registered exporters see. This runs after the fact, so it suits batch jobs and tests more than live alerting.

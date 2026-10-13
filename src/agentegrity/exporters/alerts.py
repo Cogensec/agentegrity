@@ -29,8 +29,6 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from agentegrity.adapters.base import FrameworkEvent
-
 logger = logging.getLogger("agentegrity.exporters.alerts")
 
 _QUEUE_MAX = 200
@@ -71,36 +69,36 @@ class WebhookAlertExporter:
 
     # --- SessionExporter protocol ---
 
-    def on_session_start(
+    async def on_session_start(
         self, session_id: str, adapter_name: str, profile: dict[str, Any]
     ) -> None:
         return None
 
-    def on_event(self, session_id: str, event: FrameworkEvent) -> None:
-        score = event.evaluation_result
-        if score is None or score.action not in self._alert_on:
+    async def on_event(self, session_id: str, event: dict[str, Any]) -> None:
+        score = event.get("evaluation_result")
+        if not score or score.get("action") not in self._alert_on:
             return
         alert = {
             "source": "agentegrity",
             "session_id": session_id,
-            "adapter": event.adapter_name,
-            "event_type": event.event_type,
-            "action": score.action,
-            "composite": round(score.composite, 4),
+            "adapter": event.get("adapter_name"),
+            "event_type": event.get("event_type"),
+            "action": score["action"],
+            "composite": round(score.get("composite", 0.0), 4),
             "failing_layers": [
-                r.layer_name for r in score.layer_results if not r.passed
+                r["layer_name"] for r in score.get("layer_results", []) if not r.get("passed")
             ],
-            "tool_name": event.data.get("tool_name"),
-            "timestamp": event.timestamp.isoformat(),
+            "tool_name": (event.get("data") or {}).get("tool_name"),
+            "timestamp": event.get("timestamp"),
         }
         try:
             self._queue.put_nowait(alert)
         except queue.Full:
-            logger.warning("alert queue full; dropping %s alert", score.action)
+            logger.warning("alert queue full; dropping %s alert", score["action"])
             return
         self._ensure_worker()
 
-    def on_session_end(self, session_id: str, summary: dict[str, Any]) -> None:
+    async def on_session_end(self, session_id: str, summary: dict[str, Any]) -> None:
         self.flush()
 
     # --- delivery ---

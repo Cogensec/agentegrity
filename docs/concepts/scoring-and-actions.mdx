@@ -109,9 +109,7 @@ options = ClaudeAgentOptions(hooks=adapter.create_hooks())
 
 The zero-config `hooks()` / `instrument()` functions do not take an approval handler, so construct the adapter class as above. `ClaudeAdapter`, `LangChainAdapter`, `OpenAIAgentsAdapter`, `CrewAIAdapter` and `AgnoAdapter` accept `approval_handler=`. `BedrockAgentsAdapter` does not, so on the enforcing Strands path every escalation is denied. Every consulted approval is appended to the chain as a `DecisionRecord` with `decision_point="approval"` and a reasoning chain of `outcome`, `approver`, `timed_out`, `requested_at`, `resolved_at` and, when given, `reason`. It is signed when the adapter has a signing key, and `agentegrity report` lists these records in its approvals table.
 
-<Warning>
-`IntegrityMonitor(approval_handler=...)` treats the handler's return value as a boolean. An `ApprovalDecision` object is always truthy there, so pass a plain function that returns `True` or `False` to the monitor, and use `ApprovalWorkflow` with adapters.
-</Warning>
+`IntegrityMonitor(approval_handler=...)` takes the same handlers, including `ApprovalWorkflow`, and its `@guard` decorator raises `IntegrityViolationError` when the handler denies.
 
 ## Drift
 

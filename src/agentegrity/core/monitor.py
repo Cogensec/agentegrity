@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from agentegrity.core._telemetry_props import lowest_property
+from agentegrity.core.approval import resolve_approval
 from agentegrity.core.attestation import (
     AttestationChain,
     build_attestation_record,
@@ -183,15 +184,11 @@ class IntegrityMonitor:
         if score.action == "block":
             return True
         if score.action == "escalate":
-            if self.approval_handler is not None:
-                try:
-                    if bool(self.approval_handler(self.profile, score, context)):
-                        return False
-                except Exception as exc:
-                    logger.warning(
-                        "approval_handler raised (%s); denying fail-closed", exc
-                    )
-            return True
+            if self.approval_handler is None:
+                return True
+            return not resolve_approval(
+                self.approval_handler, self.profile, score, context
+            ).approved
         return False
 
     def guard(self, func: Callable[..., Any]) -> Callable[..., Any]:

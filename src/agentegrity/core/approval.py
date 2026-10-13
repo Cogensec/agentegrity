@@ -54,6 +54,27 @@ class ApprovalDecision:
         return steps
 
 
+def resolve_approval(handler: Callable[..., Any],
+    profile: Any,
+    score: Any,
+    candidate_action: dict[str, Any],
+) -> ApprovalDecision:
+    """Consult an approval handler; a bool or a decision is normalised, a raise denies.
+
+    Callers read ``.approved``. An :class:`ApprovalDecision` is a dataclass
+    and is truthy even when it denies, so ``bool(handler(...))`` approves
+    every rich decision.
+    """
+    try:
+        raw = handler(profile, score, candidate_action)
+    except Exception as exc:
+        logger.warning("approval_handler raised (%s); denying fail-closed", exc)
+        return ApprovalDecision(approved=False, reason=f"handler raised {type(exc).__name__}")
+    if isinstance(raw, ApprovalDecision):
+        return raw
+    return ApprovalDecision(approved=bool(raw))
+
+
 class ApprovalWorkflow:
     """Timeout-bounded approval handler producing rich decisions.
 

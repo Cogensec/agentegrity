@@ -23,17 +23,17 @@ A `PreToolUse` verdict maps to Claude Code's permission decision: `block` become
 Verify a chain with:
 
 ```bash
-agentegrity verify-decisions ~/.agentegrity/claude-code/<session>.chain.json
+agentegrity verify-decisions --trusted-key ~/.agentegrity/keys/hook.pub ~/.agentegrity/claude-code/<session>.chain.json
 ```
 
-The chain is unsigned, so verification proves the records are intact and linked, not who wrote them. See [Attestation](/concepts/attestation).
+The hook runtime signs every record with an Ed25519 key it creates on first use at `<hook dir>/keys/hook.key` (mode 0600), and writes the public key beside it as `hook.pub`, which is what `--trusted-key` takes. Set `AGENTEGRITY_SIGNING_KEY_FILE` to use your own key. Signing needs the `[crypto]` extra; without it, or with a key file others can read, chains stay unsigned and the hook keeps working. The key sits on the same machine and under the same user as the agent, so a signature shows the chain was not changed afterward by someone without the key; it does not stop a process running as you from signing a forged one. See [Attestation](/concepts/attestation).
 
 ## Install
 
 Install the library so that the `python3` on your `PATH` can import it:
 
 ```bash
-pip install "agentegrity>=0.12.0"
+pip install "agentegrity[crypto]>=0.12.0"
 ```
 
 Then, inside Claude Code:
@@ -92,7 +92,8 @@ All variables are optional and shared with the [Codex plugin](/integrations/code
 | `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts in the chain but never denies or asks. Any other value means `enforce`. |
 | `AGENTEGRITY_HOOK_DISABLED` | unset | `1` disables the hook entirely. |
 | `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating: `low`, `medium`, `high` or `critical`. An invalid value falls back to `high`. |
-| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `<host>/<session>.chain.json`, `<session>.usage.json` and `<host>/baselines/`. |
+| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `<host>/<session>.chain.json`, `<session>.usage.json`, `<host>/baselines/` and `keys/`. |
+| `AGENTEGRITY_SIGNING_KEY_FILE` | `<hook dir>/keys/hook.key` | Ed25519 private key (PKCS8 PEM, mode 0600) that signs the chain. Created on first use when unset. |
 | `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | The daemon exits after this many seconds without a hook. |
 | `AGENTEGRITY_HOOK_TIMEOUT` | `10` | Seconds the hook waits for the daemon's reply before staying silent. |
 | `AGENTEGRITY_AGENT_ID` | `claude-code` | Agent id the console groups this host's sessions under. |
