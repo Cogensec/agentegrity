@@ -86,16 +86,13 @@ Read by `@agentegrity/client` and every `@agentegrity/<framework>` package.
 Every Python framework entry point accepts the same keyword options: `hooks()` in `agentegrity.claude`, `run_hooks()` in `agentegrity.openai_agents`, `instrument_chain()` and `instrument_graph()` in `agentegrity.langchain`, and `instrument()` in the CrewAI, Google ADK, AutoGen, Agno and Bedrock modules.
 
 <ParamField path="enforce" type="bool" default="False">
-When `True`, a `block` verdict denies the tool call, and an `escalate` verdict denies it unless an approval handler approves. When `False`, verdicts are recorded and nothing is blocked. The AutoGen and Google ADK adapters, and Bedrock's `wrap_client`, observe only; they record the decision but cannot stop the call.
+When `True`, a `block` verdict denies the tool call, and an `escalate` verdict denies it unless an approval handler approves. When `False`, verdicts are recorded and nothing is blocked. The AutoGen adapter and Bedrock's `wrap_client` observe only; they record the decision but cannot stop the call.
 </ParamField>
 <ParamField path="profile" type="AgentProfile | None" default="None">
 The agent profile to evaluate. Defaults to `AgentProfile.default()`: a tool-using cloud agent at medium risk.
 </ParamField>
 <ParamField path="client" type="AgentegrityClient | None" default="None">
 A client whose evaluator the adapter uses. Build one to change thresholds, weights or the policy set.
-</ParamField>
-<ParamField path="api_key" type="str | None" default="None">
-Stored on the adapter. No shipped adapter or layer reads it in 0.12.0; pass keys to the model-backed layers directly.
 </ParamField>
 
 <Warning>
@@ -121,14 +118,16 @@ AgentegrityClient(
     coherence_threshold=0.70,
     drift_tolerance=0.15,
     weights=None,
+    prefer_llm=False,
+    api_key=None,
 )
 ```
 
-The client builds the four default layers with these values. `client.create_adapter(name, profile, *, enforce=False, api_key=None)` returns an adapter for one of `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno` or `bedrock_agents`.
+The client builds the four default layers with these values. `prefer_llm=True` uses `AdversarialLLMLayer` and `CorticalLLMLayer` instead of their pattern-based parents, with `api_key` (or `ANTHROPIC_API_KEY`) as their key; see [Model-backed layers](#model-backed-layers). `client.create_adapter(name, profile, *, enforce=False)` returns an adapter for one of `claude`, `langchain`, `openai_agents`, `crewai`, `google_adk`, `autogen`, `agno` or `bedrock_agents`.
 
 ### Adapter classes
 
-To set a signing key or an approval handler, construct the adapter class directly. The Claude, LangChain, OpenAI Agents, CrewAI and Agno adapters accept:
+To set a signing key or an approval handler, construct the adapter class directly. Every adapter class accepts:
 
 | Argument | Default | Effect |
 |---|---|---|
@@ -139,8 +138,6 @@ To set a signing key or an approval handler, construct the adapter class directl
 | `approval_handler` | `None` | Called as `handler(profile, score, candidate_action)` when enforcement meets an `escalate`. Return `True` or an `ApprovalDecision` to allow. Without a handler, escalations are denied; a handler that raises denies. |
 | `chain` | new chain | An existing `AttestationChain` to continue. |
 | `stream_from_env` | `True` | `False` stops the adapter from attaching an `HTTPExporter` from the environment. |
-
-The AutoGen, Google ADK and Bedrock adapters accept only `profile`, `evaluator`, `enforce` and `api_key`.
 
 ## Evaluator and layer options
 
@@ -226,4 +223,6 @@ A broken attestation chain escalates.
 
 `AdversarialLLMLayer` (`agentegrity.layers.adversarial_llm`) and `CorticalLLMLayer` (`agentegrity.layers.cortical_llm`) need `pip install "agentegrity[llm]"` and take `api_key` and `model` (default `claude-haiku-4-5-20251001`). `AdversarialSLMLayer` (`agentegrity.layers.adversarial_slm`) takes `base_url`, `model`, `api_key`, `timeout` (8.0) and `max_tokens` (256). All three accept the `AdversarialLayer` or `CorticalLayer` options of the layer they extend, and all fail open on errors.
 
-These layers call their model only on the async path (`await layer.aevaluate(...)` or `AsyncIntegrityEvaluator` from `agentegrity.core.evaluator`). Synchronous `evaluate()` runs only the pattern checks, and the framework adapters evaluate synchronously. `default_layers(prefer_llm=True)` swaps in `CorticalLLMLayer`.
+These layers call their model only on the async path: `await layer.aevaluate(...)`, `await evaluator.aevaluate(...)` on an `IntegrityEvaluator`, or `AsyncIntegrityEvaluator`. Synchronous `evaluate()` runs only the pattern checks. `default_layers(prefer_llm=True)` and `AgentegrityClient(prefer_llm=True)` swap in both Claude-backed layers.
+
+Inside an adapter, the async path runs at every tool-call gate (`pre_tool_use`), the point where a verdict can stop the call. Other events (prompts, tool results, peer messages) stay on the sync, pattern-only path, and the text they add is classified at the next gate. Verdicts are cached by channel and content, so each piece of text is classified once. Only the adversarial classifiers call a model inside an adapter: `CorticalLLMLayer` checks the reasoning chain, memory reads and behavior descriptions, which adapters do not capture, so it skips its model calls there. Each gate waits for the classification. The Anthropic client retries a timed-out call twice, so one call can take about three times `timeout` (8 seconds by default) before the layer fails open, and a failed verdict is not cached, so during an outage every gate waits again. Async framework hooks await the check, so their event loop keeps running; sync hooks block their own thread. Other events are not held up: the adapter copies the context when the call arrives, classifies without holding its lock, and attests the verdict when the classification finishes, so with parallel tool calls a gate's record can land after events that arrived while it was classifying.

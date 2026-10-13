@@ -107,7 +107,7 @@ public_key = signing_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Ra
 adapter = ClaudeAdapter(profile=AgentProfile.default(), signing_key=signing_key)
 ```
 
-`IntegrityMonitor` and the `ClaudeAdapter`, `LangChainAdapter`, `OpenAIAgentsAdapter`, `CrewAIAdapter` and `AgnoAdapter` classes accept `signing_key=`. The `GoogleADKAdapter`, `AutoGenAdapter` and `BedrockAgentsAdapter` constructors take only `profile`, `evaluator`, `enforce` and `api_key`, so those adapters cannot sign yet. The zero-config `hooks()` and `instrument()` functions do not take a key either, so construct the class when you want signed records. Keep the private key out of the agent's reach: an agent that can read it can sign forged records.
+`IntegrityMonitor` and every adapter class accept `signing_key=`. The zero-config `hooks()` and `instrument()` functions do not take a key either, so construct the class when you want signed records. Keep the private key out of the agent's reach: an agent that can read it can sign forged records.
 
 ### Verifying signatures
 

@@ -319,9 +319,11 @@ class CorticalLLMLayer(CorticalLayer):
     * ``evaluate(profile, context)`` (synchronous) **remains
       pattern-based only** so callers that haven't opted into the
       async pipeline don't suddenly pay LLM latency or API spend.
-      The framework's ``IntegrityEvaluator`` is sync; the
-      ``AsyncIntegrityEvaluator`` and every adapter's async event-loop
-      path is what picks up the LLM checks.
+      ``IntegrityEvaluator.aevaluate`` and ``AsyncIntegrityEvaluator``
+      run the LLM checks. Adapters call ``aevaluate`` at every
+      tool-call gate, but they capture no reasoning chain, memory
+      reads or behavior descriptions, so each check returns neutral
+      there without calling Claude.
 
     * Fail-open semantics inherit from the underlying checkers — every
       LLM call returns a neutral assessment on network error / missing

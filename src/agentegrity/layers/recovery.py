@@ -177,14 +177,6 @@ class RecoveryLayer:
             },
         )
 
-    async def aevaluate(
-        self,
-        profile: AgentProfile,
-        context: dict[str, Any] | None = None,
-    ) -> LayerResult:
-        """Async wrapper around evaluate for use with AsyncIntegrityEvaluator."""
-        return self.evaluate(profile, context)
-
     def _assess_recovery(
         self,
         profile: AgentProfile,

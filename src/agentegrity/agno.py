@@ -63,16 +63,14 @@ def _resolve(
     profile: AgentProfile | None,
     client: AgentegrityClient | None,
     enforce: bool,
-    api_key: str | None,
 ) -> AgnoAdapter:
-    if profile is not None or client is not None or enforce or api_key is not None:
+    if profile is not None or client is not None or enforce:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
         ad: AgnoAdapter = effective_client.create_adapter(
             "agno",
             profile=effective_profile,
             enforce=enforce,
-            api_key=api_key,
         )
         return ad
     return _default_adapter()
@@ -84,10 +82,9 @@ def instrument(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
 ) -> Agent:
     """Attach agentegrity hooks to a single Agno agent. Returns the agent."""
-    ad = _resolve(profile, client, enforce, api_key)
+    ad = _resolve(profile, client, enforce)
     return ad.instrument(agent)
 
 
@@ -97,10 +94,9 @@ def instrument_team(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
 ) -> Team:
     """Attach agentegrity hooks across an Agno team and its members. Returns the team."""
-    ad = _resolve(profile, client, enforce, api_key)
+    ad = _resolve(profile, client, enforce)
     return ad.instrument_team(team)
 
 

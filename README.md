@@ -272,7 +272,7 @@ from agentegrity.google_adk import instrument, report
 instrument(agent); print(report())
 ```
 
-Every adapter uses the same default profile, evaluator, and attestation chain as the Claude path — pass `profile=`, `client=`, `enforce=True`, or `api_key=` to override.
+Every adapter uses the same default profile, evaluator, and attestation chain as the Claude path. Pass `profile=`, `client=`, or `enforce=True` to override.
 
 Quick sanity check from the terminal:
 
@@ -291,8 +291,7 @@ from agentegrity.agno import instrument_team, report
 team = instrument_team(team); team.run("..."); print(report())
 
 # CrewAI crew — instrument(crew) walks crew.agents → HUB_SPOKE / HIERARCHICAL_DAG
-# (v0.8 semantic fix: TaskStartedEvent → task_started, not subagent_start.
-#  Pass legacy_task_mapping=True for the v0.7 mapping with a DeprecationWarning.)
+# (TaskStartedEvent → task_started, not subagent_start.)
 from agentegrity.crewai import instrument, report
 instrument(crew); crew.kickoff(); print(report())
 

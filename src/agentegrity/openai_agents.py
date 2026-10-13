@@ -46,17 +46,15 @@ def run_hooks(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
 ) -> Any:
     """Return a ``RunHooks`` instance ready for ``Runner.run(..., hooks=...)``."""
-    if profile is not None or client is not None or enforce or api_key is not None:
+    if profile is not None or client is not None or enforce:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
         ad: OpenAIAgentsAdapter = effective_client.create_adapter(
             "openai_agents",
             profile=effective_profile,
             enforce=enforce,
-            api_key=api_key,
         )
     else:
         ad = _default_adapter()
