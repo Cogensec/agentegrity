@@ -12,20 +12,25 @@ const PROFILE: AgentProfile = {
   risk_tier: "low",
 };
 
+interface Sent {
+  calls: number;
+  headers: Record<string, string>;
+  init?: RequestInit;
+  errors: string[];
+}
+
 /**
- * Drive a single request through the reporter with a stub fetch and
- * return the headers it sent. Offline mode is disabled for the call so
- * post() actually runs the header logic.
+ * Drive a session start through the reporter with a stub fetch and return
+ * what it sent. Offline mode is disabled for the call so post() runs.
  */
-async function capturedHeaders(
-  baseUrl: string,
-  apiKey: string,
-): Promise<Record<string, string>> {
+async function send(baseUrl: string | undefined, apiKey?: string): Promise<Sent> {
   const prevOffline = process.env.AGENTEGRITY_OFFLINE;
   delete process.env.AGENTEGRITY_OFFLINE;
-  let headers: Record<string, string> = {};
+  const sent: Sent = { calls: 0, headers: {}, errors: [] };
   const fetchImpl = (async (_url: string, init?: RequestInit) => {
-    headers = (init?.headers as Record<string, string>) ?? {};
+    sent.calls += 1;
+    sent.init = init;
+    sent.headers = (init?.headers as Record<string, string>) ?? {};
     return { ok: true, status: 200 } as Response;
   }) as unknown as typeof fetch;
   try {
@@ -34,45 +39,46 @@ async function capturedHeaders(
       profile: PROFILE,
       apiKey,
       fetchImpl,
-      onError: () => {},
+      onError: (_e, step) => sent.errors.push(step),
     });
     await r.start();
   } finally {
     if (prevOffline === undefined) delete process.env.AGENTEGRITY_OFFLINE;
     else process.env.AGENTEGRITY_OFFLINE = prevOffline;
   }
-  return headers;
+  return sent;
 }
 
-// Audit L1: the Bearer token must never cross the network in cleartext.
+// Session data and the token travel only over HTTPS or stay on this machine.
 
-test("token is withheld over http:// to a remote host", async () => {
-  const h = await capturedHeaders("http://example.com:8787", "secret-token");
-  assert.equal(h.authorization, undefined);
+test("nothing is sent to http:// on a remote host", async () => {
+  const sent = await send("http://example.com:8787", "secret-token");
+  assert.equal(sent.calls, 0);
+  assert.deepEqual(sent.errors, ["config"]);
+});
+
+test("nothing is sent without a base URL", async () => {
+  const sent = await send(undefined, "secret-token");
+  assert.equal(sent.calls, 0);
+  assert.deepEqual(sent.errors, []);
 });
 
 test("token is sent over https://", async () => {
-  const h = await capturedHeaders("https://example.com", "secret-token");
-  assert.equal(h.authorization, "Bearer secret-token");
+  const sent = await send("https://example.com", "secret-token");
+  assert.equal(sent.headers.authorization, "Bearer secret-token");
 });
 
 test("token is sent over http://localhost (loopback)", async () => {
-  const h = await capturedHeaders("http://localhost:8787", "secret-token");
-  assert.equal(h.authorization, "Bearer secret-token");
+  const sent = await send("http://localhost:8787", "secret-token");
+  assert.equal(sent.headers.authorization, "Bearer secret-token");
 });
 
 test("token is sent over http://127.0.0.1 (loopback)", async () => {
-  const h = await capturedHeaders("http://127.0.0.1:8787", "secret-token");
-  assert.equal(h.authorization, "Bearer secret-token");
+  const sent = await send("http://127.0.0.1:8787", "secret-token");
+  assert.equal(sent.headers.authorization, "Bearer secret-token");
 });
 
-test("constructor warns once when apiKey is set on an unsafe URL", () => {
-  const errs: string[] = [];
-  new AgentegrityReporter({
-    baseUrl: "http://example.com",
-    profile: PROFILE,
-    apiKey: "secret-token",
-    onError: (_e, step) => errs.push(step),
-  });
-  assert.deepEqual(errs, ["config"]);
+test("redirects are refused, so the token never follows one", async () => {
+  const sent = await send("https://example.com", "secret-token");
+  assert.equal(sent.init?.redirect, "error");
 });

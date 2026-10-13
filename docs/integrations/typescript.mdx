@@ -35,14 +35,12 @@ Every framework package creates its adapter through `createDefaultAdapter()` in 
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AGENTEGRITY_URL` | `http://localhost:8787` | Backend origin. The package posts to `/sessions`, `/sessions/{id}/events` and `/sessions/{id}/end`. |
-| `AGENTEGRITY_TOKEN` | unset | Sent as `Authorization: Bearer`, only when the URL is HTTPS or a loopback host. Over plain HTTP to another host the token is withheld and a warning is logged. |
+| `AGENTEGRITY_URL` | unset | Backend origin. The package posts to `/sessions`, `/sessions/{id}/events` and `/sessions/{id}/end`. Unset means no requests. Must be HTTPS, or a loopback host (`localhost`, `*.localhost`, `127.0.0.1`, `::1`); any other URL is refused with one warning and nothing is sent. |
+| `AGENTEGRITY_TOKEN` | unset | Sent as `Authorization: Bearer`. Requests refuse redirects, so the token is never forwarded. |
 | `AGENTEGRITY_DISABLED` | unset | `1`, `true` or `TRUE` turns the adapter into a no-op: no requests, no exporter calls. |
 | `AGENTEGRITY_OFFLINE` | unset | `1`, `true` or `TRUE` skips every HTTP request but still calls registered exporters. The test suites use it. |
 
-<Warning>
-With nothing configured, a package posts every event to `http://localhost:8787`. Network failures and non-2xx responses are caught and logged with `console.warn`, so the agent keeps running, but you see a warning per request. Set `AGENTEGRITY_URL`, `AGENTEGRITY_OFFLINE=1`, or `AGENTEGRITY_DISABLED=1`.
-</Warning>
+With nothing configured, a package makes no requests and still calls the exporters you register. When a URL is set, network failures and non-2xx responses are caught and logged with `console.warn`, so the agent keeps running.
 
 `AGENTEGRITY_EXPORTER_URL`, which the Python library reads, is not read by the TypeScript packages.
 

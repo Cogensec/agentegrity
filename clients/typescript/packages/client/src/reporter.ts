@@ -25,9 +25,10 @@ import type {
 export interface ReporterOptions {
   /**
    * Base URL of the backend. The reporter appends `/sessions`,
-   * `/sessions/{id}/events`, and `/sessions/{id}/end`.
+   * `/sessions/{id}/events`, and `/sessions/{id}/end`. Must be HTTPS or a
+   * loopback address; anything else, or no URL, sends nothing.
    */
-  baseUrl: string;
+  baseUrl?: string;
   /** Agent profile, forwarded verbatim in the session_start call. */
   profile: AgentProfile;
   /** Adapter name. Defaults to "typescript". */
@@ -41,13 +42,12 @@ export interface ReporterOptions {
 }
 
 /**
- * Whether a Bearer token may be sent to `baseUrl` without crossing the
- * network in cleartext. True for HTTPS, or loopback hosts (traffic never
- * leaves the machine). Everything else — including a parse failure — is
- * unsafe, so a misconfigured `http://remote` endpoint never leaks the
- * credential.
+ * Whether session data and a Bearer token may be sent to `baseUrl`: HTTPS,
+ * or a loopback host whose traffic never leaves the machine. Anything else,
+ * including a URL that does not parse, is refused. The Python exporter
+ * applies the same rule.
  */
-function isCredentialSafe(baseUrl: string): boolean {
+function isTransportSafe(baseUrl: string): boolean {
   try {
     const u = new URL(baseUrl);
     if (u.protocol === "https:") return true;
@@ -81,19 +81,18 @@ function randomHex32(): string {
 export class AgentegrityReporter {
   readonly sessionId: string;
   readonly adapterName: string;
-  private readonly baseUrl: string;
+  private readonly baseUrl?: string;
   private readonly profile: AgentProfile;
   private readonly apiKey?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly onError: (err: unknown, step: string) => void;
-  private readonly credentialSafe: boolean;
   private started = false;
   private ended = false;
 
   constructor(opts: ReporterOptions) {
     this.sessionId = randomHex32();
     this.adapterName = opts.adapterName ?? "typescript";
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    const baseUrl = opts.baseUrl?.replace(/\/+$/, "");
     this.profile = opts.profile;
     this.apiKey = opts.apiKey;
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -103,19 +102,18 @@ export class AgentegrityReporter {
         // eslint-disable-next-line no-console
         console.warn(`agentegrity reporter ${step} failed:`, err);
       });
-    this.credentialSafe = isCredentialSafe(this.baseUrl);
-    if (this.apiKey && !this.credentialSafe) {
-      // Surface the misconfiguration once at construction: the token
-      // will be withheld from requests (see post()) rather than sent
-      // in cleartext to a non-loopback http:// endpoint.
+    if (baseUrl !== undefined && !isTransportSafe(baseUrl)) {
+      // Reported once; with no usable URL the reporter sends nothing.
       this.onError(
         new Error(
-          `apiKey will NOT be sent: baseUrl ${this.baseUrl} is not HTTPS ` +
-            `or loopback. Use https:// to transmit the Authorization header.`,
+          `nothing will be sent: ${baseUrl} is neither HTTPS nor a loopback ` +
+            `address. Session data and the token are only sent over HTTPS or ` +
+            `to this machine.`,
         ),
         "config",
       );
     }
+    this.baseUrl = baseUrl !== undefined && isTransportSafe(baseUrl) ? baseUrl : undefined;
   }
 
   /** Open the session. Idempotent — subsequent calls are no-ops. */
@@ -180,6 +178,7 @@ export class AgentegrityReporter {
     step: string,
     body: unknown,
   ): Promise<void> {
+    if (this.baseUrl === undefined) return;
     // Offline mode: skip the network entirely but keep exporter fan-out.
     // Used by the test suite so CI runs don't pay ECONNREFUSED round-trips.
     const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -189,16 +188,16 @@ export class AgentegrityReporter {
       const headers: Record<string, string> = {
         "content-type": "application/json",
       };
-      // Only attach the Bearer token over a credential-safe transport
-      // (HTTPS or loopback). Never leak it in cleartext to a remote
-      // http:// endpoint.
-      if (this.apiKey && this.credentialSafe) {
+      if (this.apiKey) {
         headers.authorization = `Bearer ${this.apiKey}`;
       }
+      // A redirect fails the request instead of carrying the token to
+      // wherever the Location header points.
       const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        redirect: "error",
       });
       if (!res.ok) {
         this.onError(

@@ -30,6 +30,7 @@ import os
 import queue
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -42,6 +43,38 @@ _FLUSH_DEADLINE_SECONDS = 5.0
 ENV_TOKEN = "AGENTEGRITY_TOKEN"
 ENV_URL = "AGENTEGRITY_EXPORTER_URL"
 ENV_URL_ALIAS = "AGENTEGRITY_URL"
+
+# Hosts whose traffic never leaves the machine; the TypeScript reporter uses the same set.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def transport_problem(url: str) -> str | None:
+    """Why ``url`` may not receive session data and a token, or ``None`` for HTTPS or loopback."""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme == "https" and host:
+        return None
+    if parts.scheme == "http" and (host in _LOOPBACK_HOSTS or host.endswith(".localhost")):
+        return None
+    return (
+        f"{url} is neither HTTPS nor a loopback address; session data and the "
+        "ingest token are only sent over HTTPS or to this machine"
+    )
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib copies the Authorization header to any redirect target."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def open_without_redirects(request: urllib.request.Request, timeout: float) -> Any:
+    """Send a token-bearing request; a 3xx answer raises ``HTTPError`` instead of being followed."""
+    return _OPENER.open(request, timeout=timeout)
 
 
 class HTTPExporter:
@@ -61,9 +94,14 @@ class HTTPExporter:
 
     Usually unnecessary: an adapter self-attaches one when ``AGENTEGRITY_TOKEN``
     and ``AGENTEGRITY_EXPORTER_URL`` are set in the environment.
+
+    Raises ``ValueError`` when ``base_url`` is neither HTTPS nor loopback.
     """
 
     def __init__(self, base_url: str, token: str, *, timeout: float = 5.0) -> None:
+        problem = transport_problem(base_url)
+        if problem is not None:
+            raise ValueError(problem)
         self.base = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
@@ -162,7 +200,7 @@ class HTTPExporter:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout):
+            with open_without_redirects(request, self.timeout):
                 pass
         except urllib.error.HTTPError as exc:
             detail = ""
@@ -199,10 +237,15 @@ def from_env() -> HTTPExporter | None:
 
     Reads ``AGENTEGRITY_TOKEN`` plus ``AGENTEGRITY_EXPORTER_URL`` (or its alias
     ``AGENTEGRITY_URL``). Both must be present; otherwise nothing is attached
-    and the SDK stays fully local.
+    and the SDK stays fully local. A URL that is neither HTTPS nor loopback is
+    refused with a warning.
     """
     token = os.environ.get(ENV_TOKEN)
     base = os.environ.get(ENV_URL) or os.environ.get(ENV_URL_ALIAS)
     if not token or not base:
+        return None
+    problem = transport_problem(base)
+    if problem is not None:
+        logger.warning("agentegrity exporter not attached: %s", problem)
         return None
     return HTTPExporter(base, token)

@@ -66,9 +66,7 @@ The exporter never sends from the agent's thread. Each callback puts a request o
 
 **Framework label.** If the profile's `framework` field is empty, `on_session_start` fills it with the adapter name (for example `langchain`) in the copy it sends, so the backend can group agents by framework. Your profile object is not modified.
 
-<Warning>
-The Python exporter sends the Bearer token to whatever URL you configure, including plain `http://` URLs. Use HTTPS for any backend that is not on the same machine.
-</Warning>
+**Transport.** The URL must be HTTPS, or a loopback host (`localhost`, `*.localhost`, `127.0.0.1`, `::1`). `HTTPExporter` raises `ValueError` for any other URL, and with the environment variables the adapter attaches nothing and logs a warning instead, because events carry prompts and tool output as well as the token. Redirects are not followed: a 3xx answer is logged as an error, since `urllib` would otherwise send the `Authorization` header to the redirect target.
 
 ## The agentegrity pro command
 
@@ -89,7 +87,7 @@ agentegrity pro --ingest-token agk_live_... --url https://your-backend.example.c
 | `--push` | After a successful check, print the variables to set and a reminder to pass a command. It does not stream anything by itself. |
 | `-- <command> ...` | Everything after `--` is the command to run. |
 
-The command first sends `GET <url>/ingest/verify` with the token and prints `connected to <url> (workspace: <name>)`. A `401` means the token was rejected; a `404` means the URL does not serve `/ingest/verify`. Either error, or an unreachable URL, exits with status 1 before anything runs. Missing token or URL exits with status 2.
+The command first sends `GET <url>/ingest/verify` with the token and prints `connected to <url> (workspace: <name>)`. A `401` means the token was rejected; a `404` means the URL does not serve `/ingest/verify`. Either error, a redirect (which is not followed), or an unreachable URL exits with status 1 before anything runs. A missing token or URL, or a URL that is neither HTTPS nor loopback, exits with status 2.
 
 With a command, it sets `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` and replaces itself with your command (`execvp`). Adapters constructed inside that process attach the `HTTPExporter` from the environment. A command that cannot be found exits with status 127.
 
@@ -101,14 +99,12 @@ The `@agentegrity/<framework>` packages send every session through the `Agentegr
 
 | Variable | Effect |
 |---|---|
-| `AGENTEGRITY_URL` | Backend origin. Default `http://localhost:8787`. `AGENTEGRITY_EXPORTER_URL` is not read. |
-| `AGENTEGRITY_TOKEN` | Bearer token. Sent only when the URL is HTTPS or a loopback host (`localhost`, `*.localhost`, `127.0.0.1`, `::1`); otherwise it is withheld and a configuration error is reported once. |
+| `AGENTEGRITY_URL` | Backend origin. Unset means nothing is sent. Must be HTTPS, or a loopback host (`localhost`, `*.localhost`, `127.0.0.1`, `::1`); any other URL is refused with a configuration error reported once, and nothing is sent. `AGENTEGRITY_EXPORTER_URL` is not read. |
+| `AGENTEGRITY_TOKEN` | Bearer token, sent with every request. |
 | `AGENTEGRITY_DISABLED` | `1`, `true` or `TRUE` turns the adapter off: no events, no requests, no exporter callbacks. |
 | `AGENTEGRITY_OFFLINE` | `1`, `true` or `TRUE` skips the HTTP requests while still calling registered exporters. |
 
-<Warning>
-The TypeScript reporter is always on. With no variables set, each package POSTs every payload to `http://localhost:8787`. Set `AGENTEGRITY_OFFLINE=1` or `AGENTEGRITY_DISABLED=1` if nothing should be sent.
-</Warning>
+Requests use `redirect: "error"`, so a redirect fails the request instead of carrying the token to another address.
 
 The adapter awaits each request before it calls registered exporters and returns. A failed request is passed to `onError` (by default `console.warn`) and dropped. There is no queue and no retry. You can pass `baseUrl`, `apiKey`, `fetchImpl` and `onError` through `reporterOptions` when you build an adapter with `createDefaultAdapter` from `@agentegrity/client`.
 

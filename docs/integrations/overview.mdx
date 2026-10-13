@@ -55,11 +55,7 @@ Every adapter works with no arguments. What "no arguments" means differs by lang
 
 A Python adapter builds a default `AgentProfile` and a local four-layer evaluator, and sends nothing over the network. It attaches the built-in `HTTPExporter` only when both `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` are set (`AGENTEGRITY_URL` is accepted as an alias for the URL). The hook runtime behind both coding-agent plugins uses the same rule.
 
-A TypeScript package reads `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` when its adapter is created. If `AGENTEGRITY_URL` is unset, it posts to `http://localhost:8787`. It does not read `AGENTEGRITY_EXPORTER_URL`.
-
-<Warning>
-The TypeScript packages send every event over HTTP by default, to `http://localhost:8787` when nothing is configured. Failures are caught and logged as warnings. Set `AGENTEGRITY_URL` to your backend, or set `AGENTEGRITY_DISABLED=1` to turn a package off.
-</Warning>
+A TypeScript package reads `AGENTEGRITY_URL` and `AGENTEGRITY_TOKEN` when its adapter is created and sends nothing over the network unless `AGENTEGRITY_URL` is set. It does not read `AGENTEGRITY_EXPORTER_URL`. In both languages the URL must be HTTPS or a loopback address; any other URL is refused.
 
 ### Kill switch
 

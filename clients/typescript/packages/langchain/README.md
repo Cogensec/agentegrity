@@ -34,7 +34,7 @@ Environment variables:
 
 | Var | Default | What |
 |---|---|---|
-| `AGENTEGRITY_URL` | `http://localhost:8787` | Exporter backend URL |
+| `AGENTEGRITY_URL` | _(unset: nothing is sent)_ | Exporter backend URL; HTTPS or a loopback address |
 | `AGENTEGRITY_TOKEN` | _(none)_ | Bearer token |
 | `AGENTEGRITY_DISABLED` | _(unset)_ | Set to `1` to no-op the handler |
 

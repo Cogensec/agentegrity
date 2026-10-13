@@ -44,7 +44,7 @@ made by agents run as tools share that `Usage` and are counted too.
 
 Same as every `@agentegrity/*` adapter:
 
-- `AGENTEGRITY_URL` (default `http://localhost:8787`)
+- `AGENTEGRITY_URL` (unset: nothing is sent; must be HTTPS or a loopback address)
 - `AGENTEGRITY_TOKEN`
 - `AGENTEGRITY_DISABLED=1` — no-op every hook
 

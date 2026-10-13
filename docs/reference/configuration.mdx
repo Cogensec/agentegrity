@@ -75,14 +75,11 @@ Read by `@agentegrity/client` and every `@agentegrity/<framework>` package.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AGENTEGRITY_URL` | `http://localhost:8787` | Backend origin for the built-in reporter. `AGENTEGRITY_EXPORTER_URL` is not read. |
-| `AGENTEGRITY_TOKEN` | unset | Bearer token. Sent only to HTTPS or loopback URLs. |
+| `AGENTEGRITY_URL` | unset | Backend origin for the built-in reporter; unset means no requests. Must be HTTPS or loopback, or nothing is sent. `AGENTEGRITY_EXPORTER_URL` is not read. |
+| `AGENTEGRITY_TOKEN` | unset | Bearer token, sent with every request. |
 | `AGENTEGRITY_DISABLED` | unset | `1`, `true` or `TRUE` turns the adapter off completely. |
 | `AGENTEGRITY_OFFLINE` | unset | `1`, `true` or `TRUE` skips HTTP requests but still calls registered exporters. |
 
-<Warning>
-The TypeScript reporter sends every payload to `AGENTEGRITY_URL` even when you set nothing, which means `http://localhost:8787`. Set `AGENTEGRITY_OFFLINE=1` if no request should be made.
-</Warning>
 
 ## Entry point options
 
