@@ -31,7 +31,8 @@ Read by `agentegrity hook` and the per-session daemon that serve the Claude Code
 | `AGENTEGRITY_AGENT_ID` | the host name | Profile `agent_id` (`claude-code` or `codex` when unset). |
 | `AGENTEGRITY_AGENT_NAME` | the host name | Profile name. |
 | `AGENTEGRITY_MODEL_ID` | unset | Profile `model_id`. Hosts let users switch models mid-session, so this records the configured model. |
-| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Where decision chains are written, as `<dir>/<host>/<session>.chain.json`. |
+| `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Where decision chains are written, as `<dir>/<host>/<session>.chain.json`, and where the hook signing key is created (`<dir>/keys/hook.key`). |
+| `AGENTEGRITY_SIGNING_KEY_FILE` | unset | Ed25519 private key that signs coding-agent hook chains, instead of the per-machine key. |
 | `AGENTEGRITY_HOOK_IDLE_SECONDS` | `1800` | A daemon exits after this many seconds without a hook call. |
 | `AGENTEGRITY_HOOK_TIMEOUT` | `10` | Seconds the hook waits for the daemon's answer before staying silent (fail-open). |
 

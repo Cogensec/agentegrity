@@ -107,7 +107,7 @@ File containing one raw Ed25519 public key as hex. Repeat to pin several keys. R
 | 1 | Any check fails, including any unsigned record |
 | 2 | The file cannot be read or parsed, a key file cannot be read, or no path was given |
 
-Hash linkage alone does not prove a chain was not edited: the hashes are unkeyed SHA-256, so whoever edits a record can recompute them. That is why a clean exit requires signatures. Records are signed only when the adapter has a `signing_key`, and the coding-agent hook runtime does not sign its chains in 0.12.0, so this command exits 1 on hook chains. Use `report` to inspect those.
+Hash linkage alone does not prove a chain was not edited: the hashes are unkeyed SHA-256, so whoever edits a record can recompute them. That is why a clean exit requires signatures. Records are signed only when the adapter has a `signing_key`. The coding-agent hook runtime signs with a per-machine key whose public half is `~/.agentegrity/keys/hook.pub` ([Claude Code](/integrations/claude-code)); chains written by 0.12.0 hooks, and the records a resumed session wrote before signing was available, are unsigned, so this command exits 1 on them. Use `report` to inspect those.
 
 ```bash
 agentegrity verify-decisions --trusted-key agent.pub.hex chain.json

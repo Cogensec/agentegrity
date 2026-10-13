@@ -33,7 +33,7 @@ daemon for the session, so the layers see the whole conversation:
 - **Decision chain** at `~/.agentegrity/codex/<session>.chain.json`:
 
   ```bash
-  agentegrity verify-decisions ~/.agentegrity/codex/<session>.chain.json
+  agentegrity verify-decisions --trusted-key ~/.agentegrity/keys/hook.pub ~/.agentegrity/codex/<session>.chain.json
   ```
 
 Codex enforces only `deny` (it parses `ask` but does not prompt), so
@@ -43,7 +43,7 @@ shown.
 ## Install
 
 ```bash
-pip install "agentegrity>=0.12.0"   # must be importable by python3 on PATH
+pip install "agentegrity[crypto]>=0.12.0"   # must be importable by python3 on PATH
 codex plugin marketplace add cogensec/agentegrity
 ```
 

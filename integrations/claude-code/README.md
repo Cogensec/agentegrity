@@ -37,13 +37,13 @@ time:
   Verify it with:
 
   ```bash
-  agentegrity verify-decisions ~/.agentegrity/claude-code/<session>.chain.json
+  agentegrity verify-decisions --trusted-key ~/.agentegrity/keys/hook.pub ~/.agentegrity/claude-code/<session>.chain.json
   ```
 
 ## Install
 
 ```bash
-pip install "agentegrity>=0.12.0"   # must be importable by the python3 on PATH
+pip install "agentegrity[crypto]>=0.12.0"   # must be importable by the python3 on PATH
 ```
 
 The plugin version matches the library version it needs. If the hook cannot run (library

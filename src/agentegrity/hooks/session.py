@@ -60,8 +60,9 @@ class HookSession:
         agent_id: str | None = None,
         agent_name: str | None = None,
         model_id: str | None = None,
+        signing_key: Any | None = None,
     ) -> None:
-        """Build the session, resuming the chain persisted at ``chain_path``."""
+        """Build the session, resuming the chain at ``chain_path``; ``signing_key`` signs it."""
         self.host = host
         self.session_id = session_id
         self.chain_path = chain_path
@@ -80,7 +81,7 @@ class HookSession:
         evaluator = IntegrityEvaluator(layers=default_layers(baseline_store=store))
         self._adapter = ADAPTERS_BY_HOST[host](
             profile=profile, evaluator=evaluator, chain=_load_chain(chain_path),
-            stream_from_env=stream,
+            stream_from_env=stream, signing_key=signing_key,
         )
         self._written = AdversarialLayer(
             patterns=[

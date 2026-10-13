@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import socket
@@ -42,9 +43,12 @@ try:
 except ImportError:  # Windows: no daemon, calls are evaluated in-process
     fcntl = None  # type: ignore[assignment]
 
+from agentegrity.core.keys import load_or_create_signing_key
 from agentegrity.core.profile import RiskTier
 from agentegrity.hooks.protocol import HOSTS, parse_payload
 from agentegrity.hooks.session import HookSession
+
+logger = logging.getLogger("agentegrity.hooks")
 
 _DEFAULT_IDLE_SECONDS = 1800
 _DEFAULT_REPLY_TIMEOUT = 10.0
@@ -175,7 +179,26 @@ def _new_session(
         agent_id=env.get("AGENTEGRITY_AGENT_ID"),
         agent_name=env.get("AGENTEGRITY_AGENT_NAME"),
         model_id=env.get("AGENTEGRITY_MODEL_ID"),
+        signing_key=_signing_key(host, env),
     )
+
+
+def _signing_key(host: str, env: Mapping[str, str]) -> Any | None:
+    """The key that signs hook chains: ``AGENTEGRITY_SIGNING_KEY_FILE``, else one per machine.
+
+    The per-machine key lives in ``<hook dir>/keys/hook.key`` and is created
+    on first use. Without ``cryptography`` installed, or with a key file that
+    cannot be used, chains stay unsigned and the hook keeps working.
+    """
+    configured = env.get("AGENTEGRITY_SIGNING_KEY_FILE")
+    path = Path(configured) if configured else state_dir(host, env).parent / "keys" / "hook.key"
+    try:
+        return load_or_create_signing_key(path)
+    except ImportError:
+        logger.warning("hook chains are unsigned: install agentegrity[crypto] to sign them")
+    except (OSError, ValueError) as exc:
+        logger.warning("hook chains are unsigned: %s", exc)
+    return None
 
 
 def _spawn(host: str, session_id: str, path: Path) -> None:
