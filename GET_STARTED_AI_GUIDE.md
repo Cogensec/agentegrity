@@ -61,8 +61,9 @@ agentegrity doctor
 
 Then run the user's normal workload once and print the session
 summary: `runtime.report()`. Confirm `evaluations > 0` and
-`chain_hash_linked: true`. Confirm `exporters` is an empty list —
-that is the proof the session stayed local.
+`chain_hash_linked: true`. Expect `chain_signatures: "unsigned"`
+unless a signing key was configured. Confirm `exporters` is an empty
+list: that is the proof the session stayed local.
 
 ## 5. Offer the next steps — do not apply them unasked
 

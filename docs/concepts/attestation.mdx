@@ -81,7 +81,7 @@ chain.verify_chain_detailed()   # (ok, broken_index, broken_record_kind)
 chain.verify_decision_links()   # every decision Evidence points at an earlier, unaltered decision
 ```
 
-The session summary reports the first check as `chain_hash_linked`.
+The session summary reports the first check as `chain_hash_linked`, and who signed the chain as `chain_signatures` (`unsigned` unless the adapter has a `signing_key`; see [the summary fields](/reference/events#session-summary)). `chain.signature_status(trusted_keys)` returns the same value.
 
 <Warning>
 Hash linkage catches corruption and a missing record. It does not stop an attacker who holds the serialized chain: `content_hash` is an unkeyed SHA-256, so anyone who edits a record can recompute every link after it. Tamper evidence needs signatures checked against a key you trust.

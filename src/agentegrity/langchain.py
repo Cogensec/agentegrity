@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from agentegrity.adapters.base import empty_summary
 from agentegrity.core.profile import AgentProfile
 from agentegrity.sdk.client import AgentegrityClient
 
@@ -105,16 +106,7 @@ def callback_handler(
 def report() -> dict[str, Any]:
     global _default
     if _default is None:
-        return {
-            "adapter": "langchain",
-            "agent_id": None,
-            "evaluations": 0,
-            "events": 0,
-            "attestation_records": 0,
-            "chain_hash_linked": True,
-            "enforce_mode": False,
-            "exporters": [],
-        }
+        return empty_summary("langchain")
     return _default.get_summary()
 
 

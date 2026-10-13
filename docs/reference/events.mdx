@@ -103,6 +103,7 @@ Sent once, when the adapter is closed.
     "decision_records": 1,
     "chain_records": 2,
     "chain_hash_linked": true,
+    "chain_signatures": "unsigned",
     "enforce_mode": false,
     "exporters": [{ "type": "HTTPExporter", "target": "https://ingest.example.com" }],
     "credentials": []
@@ -178,7 +179,8 @@ The `summary` in the session end payload is the adapter's `get_summary()`, the s
 | `evaluations` | Yes | Number of evaluations run |
 | `events` | Yes | Number of events emitted |
 | `attestation_records` | Yes | Attestation records in the chain |
-| `chain_hash_linked` | Yes | Whether every record links to the hash of the one before it |
+| `chain_hash_linked` | Yes | Whether every record links to the hash of the one before it; `null` when there is no chain |
+| `chain_signatures` | No | Who signed the chain: `none`, `unsigned`, `partially_signed`, `invalid`, `unverifiable`, `signed`, `trusted` or `untrusted`. See below. |
 | `enforce_mode` | Yes | Whether enforcement was on |
 | `decision_records` | No | Decision records in the chain (Python) |
 | `chain_records` | No | All records in the chain (Python) |
@@ -186,7 +188,20 @@ The `summary` in the session end payload is the adapter's `get_summary()`, the s
 | `credentials` | No | Declared credentials as `provider`, `label` and HMAC-SHA256 `fingerprint`. Python only. |
 | `usage` | No | Final token usage, present when any was recorded |
 
-`chain_hash_linked` shows the records are linked, which anyone holding the chain can recompute; it is not a signature check. Use [`agentegrity verify-decisions`](/reference/cli#verify-decisions) for that.
+`chain_hash_linked` shows the records are linked, which anyone holding the chain can recompute; it is not a signature check. `chain_signatures` is:
+
+| Value | Meaning |
+|---|---|
+| `none` | No chain: the session has no records, or the runtime keeps no chain (TypeScript) |
+| `unsigned` | No record is signed. This is the default: adapters sign only when given a `signing_key`. |
+| `partially_signed` | Some records are signed and some are not |
+| `invalid` | A signed record fails verification against its own key, or carries a signature without a key |
+| `unverifiable` | Records are signed but the `cryptography` package is not installed, so nothing was checked |
+| `signed` | Every record verifies against the public key it embeds. Anyone can produce this with their own key, so it shows the chain was not edited after signing, not who signed it. |
+| `trusted` | Every record is signed by a key passed as `get_summary(trusted_keys=...)` |
+| `untrusted` | Every record verifies, but at least one key is not in `trusted_keys` |
+
+Only `trusted` shows who produced the chain. [`agentegrity verify-decisions --trusted-key`](/reference/cli#verify-decisions) runs the same check on a saved chain.
 
 ### Usage
 

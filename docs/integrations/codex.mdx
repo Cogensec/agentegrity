@@ -11,7 +11,7 @@ The plugin registers `python3 -m agentegrity hook --host codex` on eight Codex h
 
 Two things differ from Claude Code:
 
-- **Verdicts.** Codex parses an `ask` decision but only enforces `deny`, so the runtime maps both `block` and `escalate` to `deny`, with the reason shown. Anything that would ask for approval on Claude Code is denied on Codex.
+- **Verdicts.** Codex parses an `ask` decision but only enforces `deny`, so the runtime maps both `block` and `escalate` to `deny`, with the reason shown. Anything that would ask for approval on Claude Code is denied on Codex. That includes GOV-002: a command that gives an interpreter a program inline (`python -c`, `node -e`, a heredoc into `python`) is denied, while `bash -lc '…'` is judged by the command inside it. `AGENTEGRITY_SANDBOXED=1` turns this off.
 - **Failures.** Codex has no separate failure event. A `PostToolUse` whose `tool_response.exit_code` is a non-zero integer is recorded as `post_tool_use_failure`, with the exit code and the last 500 characters of the command's output as the error.
 
 What the runtime checks:
@@ -52,6 +52,7 @@ Codex reads the same environment variables as Claude Code. `AGENTEGRITY_AGENT_ID
 | Variable | Default | Effect |
 |---|---|---|
 | `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts in the chain but never denies. Any other value means `enforce`. |
+| `AGENTEGRITY_SANDBOXED` | unset | `1` or `true` declares that Codex's commands run in a sandbox, which turns off GOV-002 and stops the denials of inline code described above. Set it when Codex's own sandbox is on. |
 | `AGENTEGRITY_HOOK_DISABLED` | unset | `1` disables the hook entirely. |
 | `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating: `low`, `medium`, `high` or `critical`. An invalid value falls back to `high`. |
 | `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `codex/<session>.chain.json`, `codex/<session>.usage.json`, `codex/baselines/` and `keys/`. |

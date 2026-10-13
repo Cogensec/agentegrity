@@ -262,6 +262,21 @@ def _denial_reason(decision: dict[str, Any]) -> str | None:
     return str(output.get("permissionDecisionReason") or "Agentegrity denied this tool call")
 
 
+def empty_summary(adapter: str) -> dict[str, Any]:
+    """The report of an entry module before its first session: no chain, nothing signed."""
+    return {
+        "adapter": adapter,
+        "agent_id": None,
+        "evaluations": 0,
+        "events": 0,
+        "attestation_records": 0,
+        "chain_hash_linked": None,
+        "chain_signatures": "none",
+        "enforce_mode": False,
+        "exporters": [],
+    }
+
+
 async def _safe_await(coro: Any, method_name: str) -> None:
     """Await a coroutine, logging and swallowing any exception."""
     try:
@@ -1380,7 +1395,8 @@ class _BaseAdapter:
         self._emit_event("task_started", data)
         return {}
 
-    def get_summary(self) -> dict[str, Any]:
+    def get_summary(self, *, trusted_keys: set[bytes] | None = None) -> dict[str, Any]:
+        """The session summary; ``trusted_keys`` checks the signatures against pinned keys."""
         records = self._chain.records
         attestation_count = sum(
             1 for r in records if r.record_kind == "attestation"
@@ -1396,7 +1412,10 @@ class _BaseAdapter:
             "attestation_records": attestation_count,
             "decision_records": decision_count,
             "chain_records": len(records),
-            "chain_hash_linked": self._chain.verify_chain(),
+            # Hash linkage is not proof: anyone who edits a record can recompute
+            # the links. chain_signatures says whether, and by whom, it is signed.
+            "chain_hash_linked": self._chain.verify_chain() if records else None,
+            "chain_signatures": self._chain.signature_status(trusted_keys),
             "enforce_mode": self._enforce,
             # Which network sinks (if any) this session streamed to. Empty is
             # the proof a run stayed local.

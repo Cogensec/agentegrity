@@ -41,7 +41,7 @@ Every layer implements `evaluate(profile, context) -> LayerResult`. A `LayerResu
 
 - **Pattern scan.** 32 default patterns across nine threat types: `prompt_injection`, `jailbreak`, `role_confusion`, `system_prompt_extraction`, `data_exfiltration`, `prompt_obfuscation`, `action_injection`, `tool_poisoning` and `peer_coercion`. It reads `input`, `reasoning_chain`, `memory_reads`, `tool_outputs`, `tool_definitions`, `retrieved_documents`, `peer_messages`, and the `shared_memory` and `broadcast_messages` lists under `topology_context`. Matches are grouped into one threat per channel and threat type. Add patterns with `extra_patterns=` or replace the set with `patterns=`.
 - **Tool errors.** Each `tool_outputs` entry with an `error` adds a low-severity (0.30) `tool_manipulation` threat.
-- **`ToolArgumentDetector`.** Reads the categories `classify_tool_call()` assigned to the current call. `remote_code_exec` raises a 0.95 threat and `log_tamper` a 0.90 threat, so both block under the default `block_on_critical=True`. `obfuscated_command` raises 0.70 and alerts.
+- **`ToolArgumentDetector`.** Reads the categories `classify_tool_call()` assigned to the current call. `remote_code_exec` raises a 0.95 threat and `log_tamper` a 0.90 threat, so both block under the default `block_on_critical=True`. `obfuscated_command` raises 0.70 and alerts. `runs_inline_code` raises no threat; GOV-002 acts on it.
 - **`ToolSequenceDetector`.** Flags a sensitive read followed later in the session by an external send, matched by tool name or by argument category. A shell `cat ~/.aws/credentials` followed by a `curl -X POST` counts.
 - **Peer authority.** When a topology is declared, a peer message or broadcast from a sender outside it raises a `peer_authority` threat. See [Multi-agent systems](/concepts/multi-agent).
 
@@ -64,12 +64,12 @@ Drift above `drift_tolerance` alerts. Drift above twice the tolerance also alert
 | Rule | Fires when | Decision |
 |---|---|---|
 | GOV-001 | A `high` or `critical` risk agent calls a sensitive tool (`database_write`, `file_delete`, `payment_execute`, `admin_api` by default; exact, glob or MCP-suffix match) | Require approval |
-| GOV-002 | `action["type"] == "code_execution"` and `context["sandbox"]` is not set | Require approval |
-| GOV-003 | `action["type"] == "financial"` and `action["arguments"]["amount"]` exceeds `context["financial_threshold"]` (default 1000) | Require approval |
+| GOV-002 | The call runs code the agent wrote, and the deployment is not declared sandboxed: a shell call tagged `runs_inline_code`, a code-runner tool (a name such as `execute_code`, `run_python`, `python_repl` or `code_interpreter`, or one you register), or an action passed with `type: "code_execution"` | Require approval |
+| GOV-003 | A payment tool (a name with a word such as `payment`, `transfer`, `refund`, `charge` or `payout`, or one you register), or an action with `type: "financial"`, whose numeric `amount` argument exceeds the threshold (default 1000, in the tool's own unit) | Require approval |
 | GOV-004 | The declared topology has more than three members | Require approval |
 | GOV-005 | The current call sends data externally and any call in the session (including this one) read sensitive data | Require approval |
 
-A `DENY` rule produces `block`, a `REQUIRE_APPROVAL` rule produces `escalate`, and a `CONDITIONAL` rule produces `alert`. A rule whose condition raises counts as `REQUIRE_APPROVAL`. No shipped adapter emits a `code_execution` action, so GOV-002 does not fire from adapter traffic. Other policy sets are `minimal` (no rules) and `strict` (every tool call requires approval). Add rules with `custom_rules=[PolicyRule(...)]` from `agentegrity.layers.governance`.
+A `DENY` rule produces `block`, a `REQUIRE_APPROVAL` rule produces `escalate`, and a `CONDITIONAL` rule produces `alert`. A rule whose condition raises counts as `REQUIRE_APPROVAL`. GOV-002 and GOV-003 decide which calls count from the trusted tool name and the classifier's categories, never from fields the agent puts in its arguments. Routine commands (`ls`, `git`, `pytest`, `python script.py`) do not trigger GOV-002, and a payment call without a numeric `amount`, such as a status lookup, does not trigger GOV-003. Other policy sets are `minimal` (no rules) and `strict` (every tool call requires approval). Add rules with `custom_rules=[PolicyRule(...)]` from `agentegrity.layers.governance`.
 
 ### Recovery layer
 
@@ -165,7 +165,7 @@ Not every event triggers an evaluation:
 
 The full payload of each event is in the [event reference](/reference/events).
 
-Session state lives on the adapter. `get_summary()` (what each module's `report()` returns) gives the evaluation and record counts, `chain_hash_linked`, `enforce_mode`, the attached `exporters`, declared `credentials` and, when any source reported it, `usage`. `close()` ends the session: it teaches the drift baseline when the session ended without `block` or `escalate`, then sends `on_session_end` to exporters.
+Session state lives on the adapter. `get_summary()` (what each module's `report()` returns) gives the evaluation and record counts, `chain_hash_linked`, `chain_signatures`, `enforce_mode`, the attached `exporters`, declared `credentials` and, when any source reported it, `usage`. `close()` ends the session: it teaches the drift baseline when the session ended without `block` or `escalate`, then sends `on_session_end` to exporters.
 
 <Note>
 The shipped adapters fill the latest prompt, tool outputs and errors, tool-call history and categories, and the action and tool-usage counts. They do not fill `memory_reads`, `retrieved_documents`, `tool_definitions`, `goals`, `instructions` or `reasoning_chain`, so the memory, reasoning-conflict and those pattern-scan channels only run when you call the evaluator with a context that contains them.

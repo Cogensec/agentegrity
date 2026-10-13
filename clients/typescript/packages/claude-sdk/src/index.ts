@@ -30,6 +30,7 @@
 
 import type { HookCallback, HookCallbackMatcher, HookEvent } from "@anthropic-ai/claude-agent-sdk";
 import {
+  emptySummary,
   createDefaultAdapter,
   type AdapterConfig,
   type AgentProfile,
@@ -152,15 +153,7 @@ export function observe(message: unknown, ad: DefaultAdapter = defaultAdapter())
 /** Snapshot of the current session summary. */
 export async function report(): Promise<SessionSummary> {
   if (_default === null) {
-    return {
-      adapter: ADAPTER_NAME,
-      agent_id: null,
-      evaluations: 0,
-      events: 0,
-      attestation_records: 0,
-      chain_hash_linked: true,
-      enforce_mode: false,
-    };
+    return emptySummary(ADAPTER_NAME);
   }
   return _default.getSummary();
 }

@@ -35,6 +35,10 @@ class ToolCallCategory(str, Enum):
     REMOTE_CODE_EXEC = "remote_code_exec"
     LOG_TAMPER = "log_tamper"
     OBFUSCATED_COMMAND = "obfuscated_command"
+    # An interpreter given a program inline (`python -c`, `node -e`, `eval`,
+    # stdin, a heredoc): code the agent wrote, as opposed to a script on disk.
+    # `bash -c 'cmd'` is not tagged; its command string is classified as shell.
+    RUNS_INLINE_CODE = "runs_inline_code"
 
 
 _COMMAND_KEYS = ("command", "cmd", "script", "commands")
@@ -76,6 +80,26 @@ _INTERPRETERS = {
     "sh", "bash", "zsh", "dash", "ksh", "fish",
     "python", "python2", "python3", "perl", "ruby", "node", "php", "pwsh",
 }
+# Short-flag letters that make an interpreter run code given on the command
+# line. They count anywhere in a cluster: `python -Ic`, `perl -ne`.
+_INLINE_CODE_LETTERS = {
+    "python": "c",
+    "node": "ep",
+    "perl": "eE",
+    "ruby": "e",
+    "php": "r",
+}
+_INLINE_CODE_LONG = {"node": {"--eval", "--print"}}
+# Short options whose value is the next argument (or the rest of the cluster).
+_VALUE_LETTERS = {"python": "WX", "node": "r", "perl": "IM", "ruby": "Ir"}
+# Short options after which the next argument is not code: `python -m pytest`.
+_STOP_LETTERS = {"python": "m"}
+# PowerShell's -Command is its `bash -c`; only an encoded command is opaque.
+_PWSH_ENCODED = {"-encodedcommand", "-ec", "-e", "-enc"}
+_POSIX_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish"}
+# Shell options that take the next argument as a value: `bash -o pipefail -c`.
+_SHELL_VALUE_OPTIONS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+_HEREDOC_TOKENS = {"<<", "<<-", "<<<"}
 _RAW_SOCKET_TOOLS = {"nc", "ncat", "netcat", "socat", "telnet"}
 _REMOTE_COPY_TOOLS = {"scp", "sftp", "rsync"}
 _LOG_DESTROYERS = {"rm", "shred", "truncate", "unlink"}
@@ -122,7 +146,9 @@ def classify_tool_call(
     for key in _COMMAND_KEYS:
         value = arguments.get(key)
         if isinstance(value, list):
-            value = "\n".join(str(v) for v in value)
+            # `commands` is a list of commands; any other list is one argv.
+            parts = [str(v) for v in value]
+            value = "\n".join(parts) if key == "commands" else shlex.join(parts)
         if not isinstance(value, str) or not value.strip():
             continue
         if PATCH_MARKER in value:
@@ -157,6 +183,8 @@ def _classify_shell(command: str) -> set[ToolCallCategory]:
         categories |= _classify_segment(segment)
     if _pipes_fetched_code_to_interpreter(segments, connectors):
         categories.add(ToolCallCategory.REMOTE_CODE_EXEC)
+    if _pipes_code_to_interpreter(segments, connectors):
+        categories.add(ToolCallCategory.RUNS_INLINE_CODE)
     if _SUBSTITUTED_FETCH.search(" ".join(tokens)):
         categories.add(ToolCallCategory.REMOTE_CODE_EXEC)
     return categories
@@ -322,10 +350,17 @@ def _executable(segment: list[str]) -> tuple[str, list[str]]:
         token = segment[index]
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", token):
             index += 1
-        elif os.path.basename(token) in _WRAPPERS:
+        elif os.path.basename(token) in _WRAPPERS or (
+            os.path.basename(token) == "env" and _env_runs_command(segment[index + 1:])
+        ):
             index += 1
             while index < len(segment) and segment[index].startswith("-"):
                 index += 1
+        elif os.path.basename(token) == "timeout":
+            index += 1
+            while index < len(segment) and segment[index].startswith("-"):
+                index += 1
+            index += 1  # the duration
         else:
             return os.path.basename(token), segment[index + 1:]
     return "", []
@@ -359,7 +394,96 @@ def _classify_segment(segment: list[str]) -> set[ToolCallCategory]:
 
     if _tampers_with_logs(exe, args, overwrite_targets):
         categories.add(ToolCallCategory.LOG_TAMPER)
+    if _runs_inline_code(exe, args):
+        categories.add(ToolCallCategory.RUNS_INLINE_CODE)
+    script = _shell_command_string(exe, args)
+    if script is not None:
+        categories |= _classify_shell(script)
     return categories
+
+
+def _shell_command_string(exe: str, args: list[str]) -> str | None:
+    """The command string of `bash -c '…'` (or `-lc`, `-o pipefail -c`), which runs as shell."""
+    if exe not in _POSIX_SHELLS:
+        return None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg.startswith("--command="):
+            return arg.split("=", 1)[1]
+        if arg in _SHELL_VALUE_OPTIONS:
+            index += 2
+            continue
+        if not arg.startswith(("-", "+")):
+            return None
+        if arg == "--command" or (not arg.startswith("--") and "c" in arg[1:]):
+            return args[index + 1] if index + 1 < len(args) else None
+        index += 1
+    return None
+
+
+def _interpreter(exe: str) -> str:
+    """The interpreter family of an executable (`python3.12`, `pwsh.exe`), or ''."""
+    exe = exe.lower().removesuffix(".exe")
+    if re.fullmatch(r"python[\d.]*", exe):
+        return "python"
+    if exe in ("powershell", "pwsh"):
+        return "pwsh"
+    if exe in _INLINE_CODE_LETTERS or exe in _POSIX_SHELLS:
+        return exe
+    return ""
+
+
+def _runs_inline_code(exe: str, args: list[str]) -> bool:
+    """True when an interpreter is given its program inline: a code flag, `eval`, or a heredoc."""
+    if exe == "eval":
+        return bool(args)
+    kind = _interpreter(exe)
+    if not kind or kind in _POSIX_SHELLS:
+        # A shell's -c string and heredoc are shell, classified as such.
+        return False
+    if kind == "pwsh":
+        return any(a.lower() in _PWSH_ENCODED for a in args)
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _HEREDOC_TOKENS:
+            return True
+        if arg == "-":
+            # The program comes from stdin: a heredoc or a pipe (see below).
+            return any(a in _HEREDOC_TOKENS for a in args[index + 1:])
+        if not arg.startswith("-"):
+            # A script on disk; what follows is its arguments and stdin.
+            return False
+        if arg.startswith("--"):
+            if arg.split("=", 1)[0] in _INLINE_CODE_LONG.get(kind, ()):
+                return True
+        else:
+            for position, letter in enumerate(arg[1:]):
+                if letter in _INLINE_CODE_LETTERS[kind]:
+                    return True
+                if letter in _STOP_LETTERS.get(kind, ""):
+                    return False
+                if letter in _VALUE_LETTERS.get(kind, ""):
+                    if position == len(arg) - 2:
+                        index += 1  # the value is the next argument
+                    break
+        index += 1
+    return False
+
+
+def _pipes_code_to_interpreter(
+    segments: list[list[str]],
+    connectors: list[str],
+) -> bool:
+    """True for `… | python` and `… | bash`: an interpreter reading its program from stdin."""
+    for i, connector in enumerate(connectors):
+        if connector not in _PIPE_OPS:
+            continue
+        exe, args = _executable(segments[i + 1])
+        if _interpreter(exe) and all(a.startswith("-") for a in args):
+            return True
+    return False
 
 
 def _env_runs_command(args: list[str]) -> bool:

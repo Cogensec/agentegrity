@@ -18,6 +18,7 @@
  */
 
 import {
+  emptySummary,
   AgentMember,
   AgentRole,
   AgentTopology,
@@ -61,15 +62,7 @@ export function instrument(options: InstrumentOptions = {}): AgentegrityLangChai
 
 export async function report(): Promise<SessionSummary> {
   if (_default === null) {
-    return {
-      adapter: "langchain",
-      agent_id: null,
-      evaluations: 0,
-      events: 0,
-      attestation_records: 0,
-      chain_hash_linked: true,
-      enforce_mode: false,
-    };
+    return emptySummary("langchain");
   }
   return _default.getSummary();
 }

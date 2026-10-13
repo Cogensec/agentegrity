@@ -73,14 +73,39 @@ export interface FrameworkEvent {
   evaluation_result?: IntegrityScore | null;
 }
 
+/**
+ * Who signed a session's attestation chain, reported apart from hash linkage.
+ * TypeScript keeps no chain, so its sessions report `"none"`; the other values
+ * come from Python sessions (see the session summary reference).
+ */
+export type ChainSignatures =
+  | "none"
+  | "unsigned"
+  | "partially_signed"
+  | "invalid"
+  | "unverifiable"
+  | "signed"
+  | "trusted"
+  | "untrusted";
+
+/** A sink a session sends to: its kind and, when it has one, the destination origin. */
+export interface ExporterDescription {
+  type: string;
+  target?: string;
+}
+
 export interface SessionSummary {
   adapter: string;
   agent_id: string | null;
   evaluations: number;
   events: number;
   attestation_records: number;
-  chain_hash_linked: boolean;
+  /** Whether the records are hash-linked; `null` when there is no chain. */
+  chain_hash_linked: boolean | null;
+  chain_signatures?: ChainSignatures;
   enforce_mode: boolean;
+  /** Sinks this session sends to. Empty means nothing left the process. Never holds credentials. */
+  exporters?: ExporterDescription[];
   [extra: string]: unknown;
 }
 
@@ -107,6 +132,8 @@ export interface SessionEndPayload {
  * exporter must never break the instrumented agent.
  */
 export interface SessionExporter {
+  /** How this sink appears in the session summary's `exporters`. Never include credentials. */
+  describe?(): ExporterDescription;
   on_session_start?(
     session_id: string,
     adapter_name: string,

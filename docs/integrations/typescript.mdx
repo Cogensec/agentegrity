@@ -3,7 +3,7 @@ title: "TypeScript frameworks"
 description: "The seven @agentegrity npm packages: install commands, each package's entry point, runtime requirements and environment variables."
 ---
 
-The TypeScript packages map a framework's lifecycle onto Agentegrity's canonical events and send them to a backend over the [Exporter HTTP API](https://github.com/Cogensec/agentegrity/blob/main/schemas/openapi.yaml), and to any exporters you register. They do not run the evaluation layers, keep an attestation chain, or enforce anything: events carry `evaluation_result: null`, and the session summary reports `evaluations: 0`, `attestation_records: 0` and `enforce_mode: false`. Scoring happens in whatever backend receives the events. For in-process evaluation and enforcement, use a [Python adapter](/integrations/python).
+The TypeScript packages map a framework's lifecycle onto Agentegrity's canonical events and send them to a backend over the [Exporter HTTP API](https://github.com/Cogensec/agentegrity/blob/main/schemas/openapi.yaml), and to any exporters you register. They do not run the evaluation layers, keep an attestation chain, or enforce anything: events carry `evaluation_result: null`, and the session summary reports `evaluations: 0`, `attestation_records: 0`, `chain_hash_linked: null`, `chain_signatures: "none"` and `enforce_mode: false`. Its `exporters` list names where the session goes: the HTTP reporter by origin when `AGENTEGRITY_URL` is set (and not in offline mode), plus every registered exporter, using its `describe()` when it has one. An empty list means nothing left the process. Scoring happens in whatever backend receives the events. For in-process evaluation and enforcement, use a [Python adapter](/integrations/python).
 
 ## Packages
 

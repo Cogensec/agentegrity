@@ -304,10 +304,15 @@ class OTelSessionExporter:
             root = state.root_span
             # Hash linkage only — NOT tamper-evidence, so it never sets an
             # error status by itself (see module docstring).
-            root.set_attribute(
-                "agentegrity.chain.hash_linked",
-                bool(summary.get("chain_hash_linked", False)),
-            )
+            # A session with no chain reports null; omit rather than stamp "false".
+            if summary.get("chain_hash_linked") is not None:
+                root.set_attribute(
+                    "agentegrity.chain.hash_linked", bool(summary["chain_hash_linked"])
+                )
+            if summary.get("chain_signatures") is not None:
+                root.set_attribute(
+                    "agentegrity.chain.signatures", str(summary["chain_signatures"])
+                )
             root.set_attribute("agentegrity.evaluations", int(summary.get("evaluations", 0)))
             root.set_attribute(
                 "agentegrity.attestation_records",

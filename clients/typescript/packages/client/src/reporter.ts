@@ -17,6 +17,7 @@
 import type {
   AgentProfile,
   EventType,
+  ExporterDescription,
   FrameworkEvent,
   IntegrityScore,
   SessionSummary,
@@ -39,6 +40,17 @@ export interface ReporterOptions {
   fetchImpl?: typeof fetch;
   /** Called when a request fails. Defaults to `console.warn`. */
   onError?: (err: unknown, step: string) => void;
+}
+
+/**
+ * Offline mode skips the network but keeps exporter fan-out. The test suite
+ * uses it so CI runs don't pay ECONNREFUSED round-trips.
+ */
+function isOffline(): boolean {
+  const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env;
+  const off = env?.AGENTEGRITY_OFFLINE;
+  return off === "1" || off === "true" || off === "TRUE";
 }
 
 /**
@@ -169,7 +181,8 @@ export class AgentegrityReporter {
       evaluations: 0,
       events: 0,
       attestation_records: 0,
-      chain_hash_linked: true,
+      chain_hash_linked: null,
+      chain_signatures: "none",
       enforce_mode: false,
       ...summary,
     };
@@ -180,17 +193,21 @@ export class AgentegrityReporter {
     );
   }
 
+  /**
+   * The HTTP destination for the session summary, by origin only, or `null`
+   * when nothing is sent: no URL, an unsafe URL, or offline mode.
+   */
+  describe(): ExporterDescription | null {
+    if (this.baseUrl === undefined || isOffline()) return null;
+    return { type: "AgentegrityReporter", target: new URL(this.baseUrl).origin };
+  }
+
   private async post(
     path: string,
     step: string,
     body: unknown,
   ): Promise<void> {
-    if (this.baseUrl === undefined) return;
-    // Offline mode: skip the network entirely but keep exporter fan-out.
-    // Used by the test suite so CI runs don't pay ECONNREFUSED round-trips.
-    const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-    const off = env?.AGENTEGRITY_OFFLINE;
-    if (off === "1" || off === "true" || off === "TRUE") return;
+    if (this.baseUrl === undefined || isOffline()) return;
     try {
       const headers: Record<string, string> = {
         "content-type": "application/json",

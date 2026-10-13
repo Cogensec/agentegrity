@@ -50,6 +50,7 @@ def default_layers(
     prefer_llm: bool = False,
     api_key: str | None = None,
     baseline_store: BaselineStore | None = None,
+    sandboxed: bool = False,
 ) -> list[Layer]:
     """Build the default four-layer integrity pipeline.
 
@@ -74,12 +75,15 @@ def default_layers(
     baseline_store : BaselineStore, optional
         Persists the cortical layer's behavioral baseline so drift is
         measured against earlier sessions, not only this process.
+    sandboxed : bool
+        Declare that the agent's code runs in a sandbox, which turns off
+        GOV-002 (approval for code the agent writes and runs).
     """
     if not prefer_llm:
         return [
             AdversarialLayer(coherence_threshold=coherence_threshold),
             CorticalLayer(drift_tolerance=drift_tolerance, baseline_store=baseline_store),
-            GovernanceLayer(policy_set=policy_set),
+            GovernanceLayer(policy_set=policy_set, sandboxed=sandboxed),
             RecoveryLayer(),
         ]
     # The LLM layers import anthropic on their first call, so probe for it here
@@ -93,7 +97,7 @@ def default_layers(
         AdversarialLLMLayer(coherence_threshold=coherence_threshold, api_key=api_key),
         CorticalLLMLayer(drift_tolerance=drift_tolerance, api_key=api_key,
                          baseline_store=baseline_store),
-        GovernanceLayer(policy_set=policy_set),
+        GovernanceLayer(policy_set=policy_set, sandboxed=sandboxed),
         RecoveryLayer(),
     ]
 

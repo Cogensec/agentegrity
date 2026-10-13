@@ -226,7 +226,25 @@
           "minimum": 0
         },
         "chain_hash_linked": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether every record links to the hash of the one before it; null when the session has no chain. Not proof on its own: anyone who edits a record can recompute the links. See chain_signatures."
+        },
+        "chain_signatures": {
+          "type": "string",
+          "enum": [
+            "none",
+            "unsigned",
+            "partially_signed",
+            "invalid",
+            "unverifiable",
+            "signed",
+            "trusted",
+            "untrusted"
+          ],
+          "description": "Who signed the chain. 'signed' means every record verifies against the key it embeds, which anyone can produce; only 'trusted' means the signatures were checked against pinned keys. 'none' when there is no chain."
         },
         "enforce_mode": {
           "type": "boolean"

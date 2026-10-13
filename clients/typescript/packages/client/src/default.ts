@@ -24,12 +24,43 @@ import {
 import type {
   AgentProfile,
   EventType,
+  ExporterDescription,
   FrameworkEvent,
   IntegrityScore,
   SessionExporter,
   SessionSummary,
 } from "./types.js";
 import { UsageLedger, type RecordOptions, type TokenUsage } from "./usage.js";
+
+/**
+ * The summary of a session with no events yet. TypeScript adapters capture and
+ * stream events but run no local evaluation and keep no attestation chain, so
+ * every summary reports no chain (`chain_hash_linked: null`) and nothing signed.
+ * `evaluations` counts only scores a caller attaches to events.
+ */
+export function emptySummary(adapterName: string): SessionSummary {
+  return {
+    adapter: adapterName,
+    agent_id: null,
+    evaluations: 0,
+    events: 0,
+    attestation_records: 0,
+    chain_hash_linked: null,
+    chain_signatures: "none",
+    enforce_mode: false,
+    exporters: [],
+  };
+}
+
+function describeExporter(exporter: SessionExporter): ExporterDescription {
+  try {
+    if (exporter.describe) return exporter.describe();
+  } catch {
+    // A sink that cannot describe itself is still listed, by its class.
+  }
+  const name: unknown = Object.getPrototypeOf(exporter)?.constructor?.name;
+  return { type: typeof name === "string" && name !== "Object" ? name : "SessionExporter" };
+}
 
 export interface AdapterConfig {
   /** Adapter name (e.g. "langchain"). Sent as `adapter_name` on the wire. */
@@ -326,14 +357,13 @@ export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
     },
 
     getSummary(): SessionSummary {
+      const http = reporter.describe();
       return {
-        adapter: adapterName,
+        ...emptySummary(adapterName),
         agent_id: profile.agent_id,
         evaluations: evaluationCount,
         events: eventCount,
-        attestation_records: 0,
-        chain_hash_linked: true,
-        enforce_mode: false,
+        exporters: [...(http === null ? [] : [http]), ...exporters.map(describeExporter)],
         ...(usage.empty ? {} : { usage: usage.toDict() }),
       };
     },

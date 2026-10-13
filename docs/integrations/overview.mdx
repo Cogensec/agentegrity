@@ -87,7 +87,7 @@ Every adapter maps its framework onto the same canonical event types: `user_prom
 
 ### Argument classification
 
-In Python, every `pre_tool_use` is tagged by `classify_tool_call()` with the categories its arguments show: `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper`, `obfuscated_command`. A generic shell tool is judged by the command it runs, not by its name.
+In Python, every `pre_tool_use` is tagged by `classify_tool_call()` with the categories its arguments show: `reads_sensitive`, `sends_external`, `remote_code_exec`, `log_tamper`, `obfuscated_command`, `runs_inline_code`. A generic shell tool is judged by the command it runs, not by its name. `runs_inline_code` marks an interpreter given a program inline (`python -c`, `node -e`, `perl -e`, `eval`, code on stdin or in a heredoc); the command string of `bash -c '…'` is classified as shell instead.
 
 The classifier reads command keys (`command`, `cmd`, `script`, `commands`) and path keys (`file_path`, `path`, `filename`, `notebook_path`) in the argument dict, so it only sees what the adapter receives:
 

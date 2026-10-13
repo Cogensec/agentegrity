@@ -36,6 +36,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  emptySummary,
   createDefaultAdapter,
   type AgentProfile,
   type DefaultAdapter,
@@ -334,15 +335,7 @@ export async function flush(): Promise<void> {
 
 export async function report(): Promise<SessionSummary> {
   if (_default === null) {
-    return {
-      adapter: ADAPTER_NAME,
-      agent_id: null,
-      evaluations: 0,
-      events: 0,
-      attestation_records: 0,
-      chain_hash_linked: true,
-      enforce_mode: false,
-    };
+    return emptySummary(ADAPTER_NAME);
   }
   await flush();
   return _default.getSummary();

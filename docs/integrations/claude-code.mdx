@@ -91,6 +91,7 @@ All variables are optional and shared with the [Codex plugin](/integrations/code
 |---|---|---|
 | `AGENTEGRITY_HOOK_MODE` | `enforce` | `alert` records verdicts in the chain but never denies or asks. Any other value means `enforce`. |
 | `AGENTEGRITY_HOOK_DISABLED` | unset | `1` disables the hook entirely. |
+| `AGENTEGRITY_SANDBOXED` | unset | `1` or `true` declares that the agent's commands run in a sandbox, which turns off GOV-002, the approval for code the agent writes and runs (`python -c`, `node -e`, a heredoc into an interpreter). |
 | `AGENTEGRITY_RISK_TIER` | `high` | Profile risk tier for governance gating: `low`, `medium`, `high` or `critical`. An invalid value falls back to `high`. |
 | `AGENTEGRITY_HOOK_DIR` | `~/.agentegrity` | Root for `<host>/<session>.chain.json`, `<session>.usage.json`, `<host>/baselines/` and `keys/`. |
 | `AGENTEGRITY_SIGNING_KEY_FILE` | `<hook dir>/keys/hook.key` | Ed25519 private key (PKCS8 PEM, mode 0600) that signs the chain. Created on first use when unset. |
