@@ -133,7 +133,7 @@ class OpenAIAgentsAdapter(_BaseAdapter):
                 self, context: Any, agent: Any, tool: Any
             ) -> None:
                 tool_name = getattr(tool, "name", str(tool))
-                reason = adapter._tool_call_denial(tool_name, _tool_arguments(context))
+                reason = await adapter._atool_call_denial(tool_name, _tool_arguments(context))
                 if reason is not None:
                     raise _denial_error()(reason)
 

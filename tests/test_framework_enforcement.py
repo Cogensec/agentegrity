@@ -36,6 +36,21 @@ class _Verdict:
                            passed=passed, action=self._action)
 
 
+class _Semantic(_Verdict):
+    """A layer that passes on the sync path and returns its action on the async path.
+
+    It stands in for the LLM and SLM layers, which only call a model from ``aevaluate``.
+    """
+
+    name = "semantic"
+
+    def evaluate(self, profile: Any, context: dict[str, Any] | None = None) -> LayerResult:
+        return LayerResult(layer_name=self.name, score=1.0, passed=True, action="pass")
+
+    async def aevaluate(self, profile: Any, context: dict[str, Any] | None = None) -> LayerResult:
+        return super().evaluate(profile, context)
+
+
 class _Crash:
     """A layer whose evaluation raises."""
 
@@ -46,7 +61,12 @@ class _Crash:
 
 
 def _evaluator(action: str) -> IntegrityEvaluator:
-    return IntegrityEvaluator(layers=[_Crash() if action == "crash" else _Verdict(action)])
+    """``"semantic-block"`` blocks only on the async path; ``"crash"`` raises."""
+    if action == "crash":
+        return IntegrityEvaluator(layers=[_Crash()])
+    if action.startswith("semantic-"):
+        return IntegrityEvaluator(layers=[_Semantic(action.removeprefix("semantic-"))])
+    return IntegrityEvaluator(layers=[_Verdict(action)])
 
 
 def _kwargs(action: str, enforce: bool) -> dict[str, Any]:
@@ -73,6 +93,10 @@ class TestEvaluationFailure:
     @pytest.mark.asyncio
     async def test_crash_allows_without_enforcement(self) -> None:
         assert await _pre_tool(ClaudeAdapter(**_kwargs("crash", enforce=False))) == {}
+
+    @pytest.mark.asyncio
+    async def test_a_semantic_block_denies_the_claude_hook(self) -> None:
+        assert _denied(await _pre_tool(ClaudeAdapter(**_kwargs("semantic-block", enforce=True))))
 
     @pytest.mark.asyncio
     async def test_crash_outside_a_tool_call_never_denies(self) -> None:
@@ -120,6 +144,18 @@ class TestLangChain:
         ran: list[str] = []
         with pytest.raises(IntegrityViolationError, match="escalate"):
             self._instrumented("escalate", True, ran).invoke({"command": "ls"})
+        assert ran == []
+
+    def test_a_semantic_block_stops_the_tool(self) -> None:
+        ran: list[str] = []
+        with pytest.raises(IntegrityViolationError, match="block"):
+            self._instrumented("semantic-block", True, ran).invoke({"command": "ls"})
+        assert ran == []
+
+    def test_a_semantic_block_stops_the_tool_on_the_async_path(self) -> None:
+        ran: list[str] = []
+        with pytest.raises(IntegrityViolationError, match="block"):
+            asyncio.run(self._instrumented("semantic-block", True, ran).ainvoke({"command": "ls"}))
         assert ran == []
 
     def test_pass_runs_the_tool(self) -> None:
@@ -189,6 +225,12 @@ class TestOpenAIAgents:
             self._run("block", True, ran)
         assert ran == []
 
+    def test_a_semantic_block_stops_the_tool(self) -> None:
+        ran: list[str] = []
+        with pytest.raises(IntegrityViolationError, match="block"):
+            self._run("semantic-block", True, ran)
+        assert ran == []
+
     def test_pass_runs_the_tool(self) -> None:
         ran: list[str] = []
         _, result = self._run("pass", True, ran)
@@ -256,6 +298,11 @@ class TestCrewAI:
         self._kickoff("block", True, ran)
         assert ran == []
 
+    def test_a_semantic_block_stops_the_tool(self) -> None:
+        ran: list[str] = []
+        self._kickoff("semantic-block", True, ran)
+        assert ran == []
+
     def test_pass_runs_the_tool_and_evaluates_it_once(self) -> None:
         ran: list[str] = []
         adapter = self._kickoff("pass", True, ran)
@@ -289,6 +336,33 @@ class TestCrewAI:
         finally:
             adapter.close()
         assert ran == ["ls"]
+
+    def test_subscribing_twice_handles_each_event_once(self) -> None:
+        from crewai.events import crewai_event_bus
+
+        from agentegrity.adapters.crewai import CrewAIAdapter
+
+        crew = self._crew([])
+        adapter = CrewAIAdapter(**_kwargs("pass", True))
+        adapter.subscribe(crew)
+        adapter.subscribe(crew)
+        try:
+            crew.kickoff()
+            crewai_event_bus.flush()
+        finally:
+            adapter.close()
+        kinds = [e.event_type for e in adapter.events]
+        assert [kinds.count(k) for k in ("user_prompt_submit", "pre_tool_use", "post_tool_use")] \
+            == [1, 1, 1]
+
+    def test_close_removes_the_bus_handlers(self) -> None:
+        from crewai.events import crewai_event_bus
+
+        adapter = self._kickoff("pass", True, [], scoped=False)
+        handled = len(adapter.events)
+        self._crew([]).kickoff()
+        crewai_event_bus.flush()
+        assert len(adapter.events) == handled
 
     def test_close_removes_the_hook(self) -> None:
         ran: list[str] = []
@@ -352,6 +426,12 @@ class TestGoogleADK:
     def test_block_stops_the_tool_and_tells_the_model(self) -> None:
         ran: list[str] = []
         results = self._run("block", True, ran)
+        assert ran == []
+        assert "block" in results[0]["error"]
+
+    def test_a_semantic_block_stops_the_tool_and_tells_the_model(self) -> None:
+        ran: list[str] = []
+        results = self._run("semantic-block", True, ran)
         assert ran == []
         assert "block" in results[0]["error"]
 

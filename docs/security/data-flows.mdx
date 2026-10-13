@@ -59,7 +59,7 @@ These layers send content to a model to classify it. You turn them on by constru
 | `CorticalLLMLayer` | Anthropic's API | The reasoning chain with goals and instructions, memory reads, and baseline and current behavior descriptions for drift |
 | `AdversarialSLMLayer` | `<base_url>/chat/completions`, from `base_url=` or `AGENTEGRITY_SLM_BASE_URL`, default `http://localhost:11434/v1` | The same content as `AdversarialLLMLayer` |
 
-All three call their model only on the async path: `await layer.aevaluate(...)`, or an `AsyncIntegrityEvaluator`. Synchronous `evaluate()` runs only the pattern checks, and the framework adapters evaluate synchronously, so these layers make no calls when used inside an adapter. The SLM layer makes no calls when no model name is configured.
+All three call their model only on the async path: `await layer.aevaluate(...)`, `IntegrityEvaluator.aevaluate()` or an `AsyncIntegrityEvaluator`. Synchronous `evaluate()` runs only the pattern checks. Inside an adapter, the async path runs at every tool-call gate, so an adapter built with `AdversarialLLMLayer` or `AdversarialSLMLayer` sends the content above at each tool call, once per distinct piece of text. `CorticalLLMLayer` sends nothing from inside an adapter, because adapters do not capture the reasoning chain, memory reads or behavior descriptions it checks. The SLM layer makes no calls when no model name is configured.
 
 ## KMS checkpoints
 

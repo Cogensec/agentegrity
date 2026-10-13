@@ -22,7 +22,7 @@ Event mapping:
     post_hook  (standalone / team leader)  ->  stop
     post_hook  (any)                       ->  token usage (run_output.metrics)
 
-Notes on Agno 2.x specifics:
+Notes on Agno specifics (3.1 or later):
 
 * ``tool_hooks`` is re-propagated from ``agent.tool_hooks`` onto every
   tool at run setup, not at construction. Tools added after
@@ -30,7 +30,10 @@ Notes on Agno 2.x specifics:
   still covered — no construction-time wrapping needed.
 * Hooks are registered as **synchronous** callables. Agno runs sync
   hooks under both ``run()`` and ``arun()``; async hooks are skipped
-  under sync ``run()``. Sync hooks are the portable choice.
+  under sync ``run()``. Sync hooks are the portable choice. Under
+  ``arun()`` the tool hook receives a coroutine function and returns a
+  coroutine, which Agno awaits, so the gate and the tool both run on
+  Agno's event loop.
 
 Enforcement: under ``enforce=True`` the ``tool_hook`` evaluates the
 ``pre_tool_use`` event synchronously and, on a block decision, raises
@@ -55,6 +58,7 @@ Usage::
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -232,30 +236,49 @@ class AgnoAdapter(_BaseAdapter):
                     output = str(getattr(run_output, "content", "") or "")
                 adapter._dispatch("stop", {"output": output})
 
+        def _deny(reason: str) -> Any:
+            # StopAgentRun (an AgentRunException subclass) is the only
+            # exception FunctionCall.execute() re-raises to halt the run;
+            # a plain Exception or InputCheckError would be swallowed into
+            # a failure result. Imported lazily so the adapter stays
+            # importable without agno installed.
+            from agno.exceptions import StopAgentRun
+
+            return StopAgentRun(reason)
+
+        def _ran(name: str, result: Any) -> Any:
+            adapter._dispatch("post_tool_use", {"tool_name": name, "tool_response": str(result)})
+            return result
+
+        def _failed(name: str, exc: Exception) -> None:
+            adapter._dispatch("post_tool_use_failure", {"tool_name": name, "error": str(exc)})
+
+        async def _tool_async(name: str, func: Any, arguments: dict[str, Any]) -> Any:
+            reason = await adapter._atool_call_denial(name, arguments)
+            if reason is not None:
+                raise _deny(reason)
+            try:
+                result = await func(**arguments)
+            except Exception as exc:
+                _failed(name, exc)
+                raise
+            return _ran(name, result)
+
         def _tool(name: str, func: Any, arguments: dict[str, Any]) -> Any:
+            # Agno's async chain (arun) passes a coroutine function as ``func``
+            # and awaits what a sync hook returns. Handing it a coroutine keeps
+            # the gate, and the tool's real result, on its event loop.
+            if inspect.iscoroutinefunction(func):
+                return _tool_async(name, func, arguments)
             reason = adapter._tool_call_denial(name, arguments)
             if reason is not None:
-                # StopAgentRun (an AgentRunException subclass) is the only
-                # exception FunctionCall.execute() re-raises to halt the run;
-                # a plain Exception or InputCheckError would be swallowed into
-                # a failure result. Imported lazily so the adapter stays
-                # importable without agno installed.
-                from agno.exceptions import StopAgentRun
-
-                raise StopAgentRun(reason)
+                raise _deny(reason)
             try:
                 result = func(**arguments)
             except Exception as exc:
-                adapter._dispatch(
-                    "post_tool_use_failure",
-                    {"tool_name": name, "error": str(exc)},
-                )
+                _failed(name, exc)
                 raise
-            adapter._dispatch(
-                "post_tool_use",
-                {"tool_name": name, "tool_response": str(result)},
-            )
-            return result
+            return _ran(name, result)
 
         _append_hook(target, "pre_hooks", _pre)
         _append_hook(target, "post_hooks", _post)

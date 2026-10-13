@@ -62,16 +62,14 @@ def _resolve(
     profile: AgentProfile | None,
     client: AgentegrityClient | None,
     enforce: bool,
-    api_key: str | None,
 ) -> BedrockAgentsAdapter:
-    if profile is not None or client is not None or enforce or api_key is not None:
+    if profile is not None or client is not None or enforce:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
         ad: BedrockAgentsAdapter = effective_client.create_adapter(
             "bedrock_agents",
             profile=effective_profile,
             enforce=enforce,
-            api_key=api_key,
         )
         return ad
     return _default_adapter()
@@ -83,10 +81,9 @@ def instrument_strands(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
 ) -> StrandsAgent:
     """Register agentegrity hooks on a Strands Agent. Returns the agent."""
-    ad = _resolve(profile, client, enforce, api_key)
+    ad = _resolve(profile, client, enforce)
     return ad.instrument_strands(agent)
 
 
@@ -96,7 +93,6 @@ def wrap_client(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
     force_trace: bool = True,
 ) -> Any:
     """Wrap a bedrock-agent-runtime boto3 client's invoke_agent.
@@ -105,7 +101,7 @@ def wrap_client(
     consumed and re-yielded so the caller's streaming consumption is
     unchanged.
     """
-    ad = _resolve(profile, client, enforce, api_key)
+    ad = _resolve(profile, client, enforce)
     return ad.wrap_client(boto3_client, force_trace=force_trace)
 
 

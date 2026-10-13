@@ -6,16 +6,13 @@ framework primitive and call set_topology() so the chain commits to
 the structure via Evidence(evidence_type="topology") and the layers
 see the topology in their context.
 
-CrewAI gets a behavioral-change test: tasks no longer map to
-subagent_start (they map to task_started), and legacy_task_mapping=True
-restores the v0.7 behavior with a DeprecationWarning.
+CrewAI tasks map to task_started, not subagent_start.
 """
 
 from __future__ import annotations
 
 import sys
 import types
-import warnings
 from typing import Any
 
 import pytest
@@ -159,6 +156,9 @@ def stub_crewai_events(monkeypatch: pytest.MonkeyPatch):
                 return fn
             return deco
 
+        def off(self, cls, fn):
+            self.handlers[cls].remove(fn)
+
         def emit(self, source, event):
             for cls, fns in self.handlers.items():
                 if isinstance(event, cls):
@@ -298,31 +298,3 @@ class TestCrewAITaskSemanticFix:
         assert len(sub_starts) == 1
         assert sub_starts[0].data["agent_id"] == "researcher"
         assert len(sub_stops) == 1
-
-    def test_legacy_task_mapping_emits_deprecation_warning(self, stub_crewai_events):
-        adapter = CrewAIAdapter(profile=_profile())
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            adapter.subscribe(legacy_task_mapping=True)
-        deprecation = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        assert len(deprecation) == 1
-        assert "subagent_start" in str(deprecation[0].message)
-
-    def test_legacy_task_mapping_restores_v07_behavior(self, stub_crewai_events):
-        bus, events = stub_crewai_events
-        adapter = CrewAIAdapter(profile=_profile())
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            adapter.subscribe(legacy_task_mapping=True)
-
-        task_event = events.TaskStartedEvent()
-        task_event.task_id = "task-1"  # type: ignore[attr-defined]
-        bus.emit(None, task_event)
-
-        # v0.7 behavior: TaskStartedEvent → subagent_start
-        sub_events = [e for e in adapter.events if e.event_type == "subagent_start"]
-        assert len(sub_events) == 1
-        assert sub_events[0].data["agent_id"] == "task-1"
-        # task_started is NOT emitted in legacy mode.
-        task_events = [e for e in adapter.events if e.event_type == "task_started"]
-        assert task_events == []

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib
 import time
-from typing import Any
+from typing import Any, TypeVar
 
 from agentegrity.core._telemetry_props import (
     adapter_shape,
@@ -22,10 +22,12 @@ from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, Prope
 from agentegrity.core.monitor import IntegrityMonitor, ViolationAction
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.core.telemetry import scoped_telemetry, telemetry_capture, telemetry_tag
+from agentegrity.layers import default_layers
 from agentegrity.layers.adversarial import AdversarialLayer
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.governance import GovernanceLayer
-from agentegrity.layers.recovery import RecoveryLayer
+
+_LayerT = TypeVar("_LayerT")
 
 # Maps adapter name → (module path, class name). Lazy: the framework
 # module is imported only when the adapter is actually requested, so
@@ -61,6 +63,13 @@ class AgentegrityClient:
         Behavioral drift tolerance. Default 0.15.
     weights : PropertyWeights, optional
         Custom property weights for composite scoring.
+    prefer_llm : bool
+        Use the Claude-backed adversarial and cortical layers. Adapters
+        from :meth:`create_adapter` then classify at every tool-call gate.
+        See :func:`agentegrity.layers.default_layers`. Default False.
+    api_key : str, optional
+        Anthropic API key for those layers. Falls back to
+        ``ANTHROPIC_API_KEY``.
 
     Examples
     --------
@@ -82,16 +91,17 @@ class AgentegrityClient:
         coherence_threshold: float = 0.70,
         drift_tolerance: float = 0.15,
         weights: PropertyWeights | None = None,
+        prefer_llm: bool = False,
+        api_key: str | None = None,
     ):
-        self._adversarial = AdversarialLayer(coherence_threshold=coherence_threshold)
-        self._cortical = CorticalLayer(drift_tolerance=drift_tolerance)
-        self._governance = GovernanceLayer(policy_set=policy_set)
-        self._recovery = RecoveryLayer()
-
-        self._evaluator = IntegrityEvaluator(
-            layers=[self._adversarial, self._cortical, self._governance, self._recovery],
-            weights=weights,
+        layers = default_layers(
+            coherence_threshold=coherence_threshold,
+            drift_tolerance=drift_tolerance,
+            policy_set=policy_set,
+            prefer_llm=prefer_llm,
+            api_key=api_key,
         )
+        self._evaluator = IntegrityEvaluator(layers=layers, weights=weights)
 
     def create_profile(
         self,
@@ -228,7 +238,6 @@ class AgentegrityClient:
         profile: AgentProfile,
         *,
         enforce: bool = False,
-        api_key: str | None = None,
     ) -> Any:
         """Create a framework adapter wired to this client's evaluator.
 
@@ -245,8 +254,6 @@ class AgentegrityClient:
             calls when the integrity score's action is ``"block"``.
             Observation-only adapters (OTel-based) log this flag but
             cannot enforce; they will emit a runtime warning.
-        api_key : str, optional
-            Forwarded to the adapter for framework-specific auth needs.
         """
         try:
             module_path, class_name = _ADAPTER_REGISTRY[name]
@@ -264,7 +271,6 @@ class AgentegrityClient:
                 profile=profile,
                 evaluator=self._evaluator,
                 enforce=enforce,
-                api_key=api_key,
             )
         except ImportError:
             # Framework not installed — still the highest-value signal we have.
@@ -285,15 +291,19 @@ class AgentegrityClient:
 
     @property
     def adversarial_layer(self) -> AdversarialLayer:
-        return self._adversarial
+        return self._layer(AdversarialLayer)
 
     @property
     def cortical_layer(self) -> CorticalLayer:
-        return self._cortical
+        return self._layer(CorticalLayer)
 
     @property
     def governance_layer(self) -> GovernanceLayer:
-        return self._governance
+        return self._layer(GovernanceLayer)
+
+    def _layer(self, kind: type[_LayerT]) -> _LayerT:
+        """The evaluator's layer of one kind; the LLM variants subclass the base layers."""
+        return next(layer for layer in self._evaluator.layers if isinstance(layer, kind))
 
     def __repr__(self) -> str:
         return f"AgentegrityClient(evaluator={self._evaluator})"

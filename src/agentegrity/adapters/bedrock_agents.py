@@ -54,9 +54,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
-from agentegrity.core.evaluator import IntegrityEvaluator
 from agentegrity.core.monitor import IntegrityViolationError
-from agentegrity.core.profile import AgentProfile
 from agentegrity.core.usage import TokenUsage
 
 if TYPE_CHECKING:
@@ -76,14 +74,8 @@ class BedrockAgentsAdapter(_BaseAdapter):
 
     _name = "bedrock_agents"
 
-    def __init__(
-        self,
-        profile: AgentProfile,
-        evaluator: IntegrityEvaluator | None = None,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> None:
-        super().__init__(profile, evaluator, enforce, api_key)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         # Foundation model per trace id, from invocation inputs that name it.
         self._trace_models: dict[str, str] = {}
 
@@ -332,7 +324,9 @@ class _StrandsHookProvider:
     # and gives the model that message as the result.
     async def _on_before_tool_call(self, event: Any) -> None:
         tool_use = getattr(event, "tool_use", {}) or {}
-        reason = self._adapter._tool_call_denial(tool_use.get("name", ""), tool_use.get("input"))
+        reason = await self._adapter._atool_call_denial(
+            tool_use.get("name", ""), tool_use.get("input")
+        )
         if reason is None:
             return
         try:

@@ -56,7 +56,6 @@ def instrument(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
     set_global: bool = True,
 ) -> AutoGenAdapter:
     """Install agentegrity's SpanProcessor on the global OTel TracerProvider.
@@ -64,14 +63,13 @@ def instrument(
     Returns the wired adapter for the caller to keep references to (for
     ``register_exporter``, custom reads of ``adapter.events``, etc.).
     """
-    if profile is not None or client is not None or enforce or api_key is not None:
+    if profile is not None or client is not None or enforce:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
         ad: AutoGenAdapter = effective_client.create_adapter(
             "autogen",
             profile=effective_profile,
             enforce=enforce,
-            api_key=api_key,
         )
     else:
         ad = _default_adapter()

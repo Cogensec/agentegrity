@@ -13,6 +13,8 @@ delegate to it so every "zero-config" entry point evaluates the same
 four layers.
 """
 
+from importlib.util import find_spec
+
 from agentegrity.core.evaluator import Layer
 from agentegrity.layers.adversarial import (
     AdversarialLayer,
@@ -20,6 +22,7 @@ from agentegrity.layers.adversarial import (
     ToolCategories,
     ToolSequenceDetector,
 )
+from agentegrity.layers.adversarial_llm import AdversarialLLMLayer
 from agentegrity.layers.baseline_store import (
     BaselineStore,
     FileBaselineStore,
@@ -34,6 +37,7 @@ from agentegrity.layers.checkpoint import (
     SqliteCheckpoint,
 )
 from agentegrity.layers.cortical import CorticalLayer
+from agentegrity.layers.cortical_llm import CorticalLLMLayer
 from agentegrity.layers.governance import GovernanceLayer
 from agentegrity.layers.recovery import RecoveryLayer
 
@@ -56,46 +60,39 @@ def default_layers(
     Parameters
     ----------
     prefer_llm : bool
-        When True, swap the pattern-based :class:`CorticalLayer` for
-        :class:`CorticalLLMLayer` — the LLM-backed sibling that adds
-        Claude-driven semantic checks on the async evaluation path.
+        When True, use :class:`AdversarialLLMLayer` and
+        :class:`CorticalLLMLayer`, which add Claude-backed classification
+        on the async path. Adapters run that path at every tool-call gate,
+        so each gate waits on Claude for text it has not classified yet.
         Requires ``pip install agentegrity[llm]``; raises
         :class:`ImportError` if ``anthropic`` isn't installed. Default
-        ``False`` so callers don't accidentally pay LLM latency / API
-        spend on every evaluation.
+        ``False`` so callers don't pay LLM latency or API spend by accident.
     api_key : str, optional
-        Anthropic API key for the LLM checkers. When omitted, the
-        underlying checkers fall back to ``ANTHROPIC_API_KEY`` from the
-        environment and fail open if it's also unset.
+        Anthropic API key for both LLM layers. When omitted they read
+        ``ANTHROPIC_API_KEY`` and fail open (pattern checks only) if it is
+        also unset.
     baseline_store : BaselineStore, optional
         Persists the cortical layer's behavioral baseline so drift is
         measured against earlier sessions, not only this process.
     """
-    cortical: Layer
-    if prefer_llm:
-        # cortical_llm imports anthropic lazily on the first LLM call,
-        # so a missing dependency wouldn't surface here without a
-        # second check. Probe for anthropic directly so the operator
-        # gets a clear error at construction time rather than a
-        # confusing runtime failure on the first evaluate().
-        try:
-            import anthropic  # noqa: F401
-        except ImportError as exc:
-            raise ImportError(
-                "default_layers(prefer_llm=True) requires the 'anthropic' "
-                "package. Install with: pip install agentegrity[llm]"
-            ) from exc
-        from agentegrity.layers.cortical_llm import CorticalLLMLayer
-        cortical = CorticalLLMLayer(
-            drift_tolerance=drift_tolerance, api_key=api_key,
-            baseline_store=baseline_store,
+    if not prefer_llm:
+        return [
+            AdversarialLayer(coherence_threshold=coherence_threshold),
+            CorticalLayer(drift_tolerance=drift_tolerance, baseline_store=baseline_store),
+            GovernanceLayer(policy_set=policy_set),
+            RecoveryLayer(),
+        ]
+    # The LLM layers import anthropic on their first call, so probe for it here
+    # to fail at construction instead of failing open on every evaluation.
+    if find_spec("anthropic") is None:
+        raise ImportError(
+            "default_layers(prefer_llm=True) requires the 'anthropic' "
+            "package. Install with: pip install agentegrity[llm]"
         )
-    else:
-        cortical = CorticalLayer(drift_tolerance=drift_tolerance, baseline_store=baseline_store)
-
     return [
-        AdversarialLayer(coherence_threshold=coherence_threshold),
-        cortical,
+        AdversarialLLMLayer(coherence_threshold=coherence_threshold, api_key=api_key),
+        CorticalLLMLayer(drift_tolerance=drift_tolerance, api_key=api_key,
+                         baseline_store=baseline_store),
         GovernanceLayer(policy_set=policy_set),
         RecoveryLayer(),
     ]
@@ -103,10 +100,12 @@ def default_layers(
 
 __all__ = [
     "AdversarialLayer",
+    "AdversarialLLMLayer",
     "ToolArgumentDetector",
     "ToolCategories",
     "ToolSequenceDetector",
     "CorticalLayer",
+    "CorticalLLMLayer",
     "GovernanceLayer",
     "RecoveryLayer",
     "default_layers",

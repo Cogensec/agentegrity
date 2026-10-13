@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, TypeVar
 from uuid import uuid4
 
+from agentegrity.adapters import _background
 from agentegrity.adapters.transcripts import TranscriptUsage
 from agentegrity.core.approval import resolve_approval
 from agentegrity.core.attestation import (
@@ -193,7 +194,7 @@ class _ContextBuffer:
                 o for o in self.tool_outputs
                 if "error" not in o or o["call_index"] > recent_from
             ],
-            "reasoning_chain": self.reasoning_chain,
+            "reasoning_chain": list(self.reasoning_chain),
             "goals": [],
             "instructions": [],
             "memory_reads": [],
@@ -212,7 +213,7 @@ class _ContextBuffer:
             "tool_call_categories": [
                 c.get("categories", []) for c in self.tool_calls
             ],
-            "peer_messages": self.peer_messages,
+            "peer_messages": list(self.peer_messages),
         }
         if (
             self.topology is not None
@@ -233,9 +234,32 @@ class _ContextBuffer:
                 "shared_memory": list(self.shared_memory),
                 "broadcast_messages": list(self.broadcast_messages),
                 "peer_attestations": list(self.peer_attestations),
-                "peer_score_history": dict(self.peer_score_history),
+                "peer_score_history": {
+                    peer: list(scores) for peer, scores in self.peer_score_history.items()
+                },
             }
         return base
+
+
+@dataclass(frozen=True)
+class _ToolCall:
+    """A buffered tool call waiting for its score."""
+
+    data: dict[str, Any]
+    tool_name: str
+    tool_input: dict[str, Any]
+    # The inputs the score is computed on, captured when the call is buffered.
+    decision_inputs: list[DecisionInput]
+    # The buffered ``tool_calls`` entry, or None when the buffer was full.
+    entry: dict[str, Any] | None
+
+
+def _denial_reason(decision: dict[str, Any]) -> str | None:
+    """The reason a hook decision denies a tool call, or None when it allows it."""
+    output = decision.get("hookSpecificOutput", {})
+    if output.get("permissionDecision") != "deny":
+        return None
+    return str(output.get("permissionDecisionReason") or "Agentegrity denied this tool call")
 
 
 async def _safe_await(coro: Any, method_name: str) -> None:
@@ -279,7 +303,6 @@ class _BaseAdapter:
         profile: AgentProfile,
         evaluator: IntegrityEvaluator | None = None,
         enforce: bool = False,
-        api_key: str | None = None,
         signing_key: Any | None = None,
         approval_handler: Callable[..., bool] | None = None,
         chain: AttestationChain | None = None,
@@ -287,7 +310,6 @@ class _BaseAdapter:
     ) -> None:
         self._profile = profile
         self._enforce = enforce
-        self._api_key = api_key
         self._signing_key = signing_key
         # Called when enforce=True and an action escalates (governance
         # require-approval, cortical drift, recovery chain-tamper).
@@ -613,16 +635,28 @@ class _BaseAdapter:
             )
         return event
 
-    def _run_evaluation(
-        self, context: dict[str, Any] | None = None
-    ) -> IntegrityScore:
+    @property
+    def _has_async_layers(self) -> bool:
+        """Whether tool-call gates wait on async layer checks (LLM or SLM classifiers)."""
+        return bool(getattr(self._evaluator, "has_async_layers", False))
+
+    def _evaluation_context(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The context to score: ``context`` or a copy of the buffers, plus the drift baseline."""
         ctx = context or self._buffer.to_evaluation_context()
         role = (ctx.get("topology_context") or {}).get("role")
         for cortical in self._layers_of(CorticalLayer):
             baseline = cortical.load_baseline(self._profile, role)
             if baseline.sample_count and "behavioral_baseline" not in ctx:
                 ctx = {**ctx, "behavioral_baseline": baseline.to_dict()}
-        score = self._evaluator.evaluate(self._profile, ctx)
+        return ctx
+
+    def _run_evaluation(self, context: dict[str, Any] | None = None) -> IntegrityScore:
+        """Score the context with the sync layers and attest the result."""
+        score = self._evaluator.evaluate(self._profile, self._evaluation_context(context))
+        return self._record_evaluation(score)
+
+    def _record_evaluation(self, score: IntegrityScore) -> IntegrityScore:
+        """Feed a score to the stateful layers and append its attestation record."""
         self._evaluation_count += 1
         for recovery in self._layers_of(RecoveryLayer):
             recovery.record_score(score.composite)
@@ -791,11 +825,11 @@ class _BaseAdapter:
     ) -> dict[str, Any]:
         """Async entry point required by the ``FrameworkAdapter`` Protocol.
 
-        The handlers do no I/O, so the real work is synchronous. This
-        is a thin wrapper over ``_evaluate_sync`` so async callbacks can
-        ``await on_event(...)`` while sync callbacks call
-        ``_evaluate_sync(...)`` directly.
+        Handlers are synchronous. A tool-call gate with async layer checks
+        awaits them, so the caller's event loop keeps serving other tasks.
         """
+        if event_type == "pre_tool_use" and self._has_async_layers:
+            return await self._gate_async(event_data)
         return self._evaluate_sync(event_type, event_data)
 
     def _evaluate_sync(
@@ -826,6 +860,8 @@ class _BaseAdapter:
             "task_started": self._handle_task_started,
             "credential_declared": self._handle_credential_declared,
         }
+        if event_type == "pre_tool_use" and self._has_async_layers:
+            return self._gate_sync(event_data)
         handler = handlers.get(event_type)
         with self._lock:
             try:
@@ -833,20 +869,67 @@ class _BaseAdapter:
                     self._usage_reader.note(event_data)
                 return handler(event_data) if handler is not None else {}
             except Exception as exc:
-                logger.warning(
-                    "%s handler %s failed: %s",
-                    self.name,
-                    event_type,
-                    exc,
-                    exc_info=True,
-                )
-                # A call that could not be evaluated is not known to be safe.
-                if self._enforce and event_type == "pre_tool_use":
-                    return self._deny_payload(
-                        f"Agentegrity could not evaluate this tool call "
-                        f"({type(exc).__name__}), so enforcement denies it"
-                    )
-                return {}
+                return self._evaluation_failed(event_type, exc)
+
+    def _evaluation_failed(self, event_type: str, exc: Exception) -> dict[str, Any]:
+        """Log a failed evaluation; under enforcement a tool call that failed is denied."""
+        logger.warning(
+            "%s handler %s failed: %s",
+            self.name,
+            event_type,
+            exc,
+            exc_info=True,
+        )
+        # A call that could not be evaluated is not known to be safe.
+        if self._enforce and event_type == "pre_tool_use":
+            return self._deny_payload(
+                f"Agentegrity could not evaluate this tool call "
+                f"({type(exc).__name__}), so enforcement denies it"
+            )
+        return {}
+
+    # --- Tool-call gates with async layer checks ---
+    #
+    # The adapter lock is held to buffer the call and copy the context, and
+    # again to attest the score, but not while a model classifies. Other
+    # events keep flowing meanwhile, and the gate's verdict is on the context
+    # as the call arrived. Its record lands on the chain when it finishes.
+
+    def _gate_sync(self, data: dict[str, Any]) -> dict[str, Any]:
+        """A gate from a sync hook: block this thread on the background loop."""
+        try:
+            call, ctx = self._open_gate(data)
+            score = _background.run(self._evaluator.aevaluate(self._profile, ctx))
+            return self._close_gate(call, score)
+        except Exception as exc:
+            return self._evaluation_failed("pre_tool_use", exc)
+
+    async def _gate_async(self, data: dict[str, Any]) -> dict[str, Any]:
+        """A gate from an async hook: await the background loop, leaving this loop free."""
+        try:
+            call, ctx = self._open_gate(data)
+        except Exception as exc:
+            return self._evaluation_failed("pre_tool_use", exc)
+        try:
+            score = await asyncio.wrap_future(
+                _background.submit(self._evaluator.aevaluate(self._profile, ctx))
+            )
+            return self._close_gate(call, score)
+        except asyncio.CancelledError:
+            self._unbuffer_tool_call(call)
+            raise
+        except Exception as exc:
+            return self._evaluation_failed("pre_tool_use", exc)
+
+    def _open_gate(self, data: dict[str, Any]) -> tuple[_ToolCall, dict[str, Any]]:
+        with self._lock:
+            if self._usage_reader is not None:
+                self._usage_reader.note(data)
+            return self._buffer_tool_call(data), self._evaluation_context()
+
+    def _close_gate(self, call: _ToolCall, score: IntegrityScore) -> dict[str, Any]:
+        with self._lock:
+            return self._decide_tool_call(call, self._record_evaluation(score))
 
     def _tool_call_denial(self,
         tool_name: str,
@@ -858,13 +941,18 @@ class _BaseAdapter:
         copied and anything else is wrapped, inside the evaluation that
         fails closed, so malformed arguments cannot skip enforcement.
         """
-        decision = self._evaluate_sync(
+        return _denial_reason(self._evaluate_sync(
             "pre_tool_use", {"tool_name": tool_name, "tool_input": tool_input}
-        )
-        output = decision.get("hookSpecificOutput", {})
-        if output.get("permissionDecision") != "deny":
-            return None
-        return str(output.get("permissionDecisionReason") or "Agentegrity denied this tool call")
+        ))
+
+    async def _atool_call_denial(self,
+        tool_name: str,
+        tool_input: Any,
+    ) -> str | None:
+        """:meth:`_tool_call_denial` for async hooks, without blocking their event loop."""
+        return _denial_reason(await self.on_event(
+            "pre_tool_use", {"tool_name": tool_name, "tool_input": tool_input}
+        ))
 
     def _enforce_tool_call(self,
         tool_name: str,
@@ -963,51 +1051,65 @@ class _BaseAdapter:
     # --- Framework-agnostic event handlers ---
 
     def _handle_pre_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
+        call = self._buffer_tool_call(data)
+        return self._decide_tool_call(call, self._run_evaluation())
+
+    def _buffer_tool_call(self, data: dict[str, Any]) -> _ToolCall:
+        """Add a tool call to the buffers before it is scored."""
         tool_name = data.get("tool_name", "")
         tool_input = _arguments(data.get("tool_input"))
         data = {**data, "tool_input": tool_input}
 
-        self._append_capped(
-            self._buffer.tool_calls,
-            # Agent-supplied arguments are untrusted and live under
-            # "arguments" — never spread flat, or an argument named
-            # "tool"/"type" would shadow the fields governance rules
-            # (GOV-001's sensitive-tool gate) match on. Mirrors the
-            # nesting the decision-record path already uses.
-            {
-                "tool": tool_name,
-                "type": "tool_call",
-                "arguments": tool_input,
-                # Derived by the adapter (trusted), top-level like "tool".
-                "categories": sorted(
-                    c.value for c in classify_tool_call(tool_name, tool_input)
-                ),
-            },
-            "tool_calls",
-        )
+        # Agent-supplied arguments are untrusted and live under
+        # "arguments", never spread flat, or an argument named
+        # "tool"/"type" would shadow the fields governance rules
+        # (GOV-001's sensitive-tool gate) match on. Mirrors the
+        # nesting the decision-record path already uses.
+        entry = {
+            "tool": tool_name,
+            "type": "tool_call",
+            "arguments": tool_input,
+            # Derived by the adapter (trusted), top-level like "tool".
+            "categories": sorted(
+                c.value for c in classify_tool_call(tool_name, tool_input)
+            ),
+        }
+        buffered = self._append_capped(self._buffer.tool_calls, entry, "tool_calls")
         self._buffer.tool_usage[tool_name] += 1
         self._buffer.action_distribution["tool_call"] += 1
+        return _ToolCall(data=data, tool_name=tool_name, tool_input=tool_input,
+                         decision_inputs=self._collect_decision_inputs(),
+                         entry=entry if buffered else None)
 
-        score = self._run_evaluation()
+    def _unbuffer_tool_call(self, call: _ToolCall) -> None:
+        """Take back a tool call whose gate was cancelled, since it never ran."""
+        with self._lock:
+            calls = self._buffer.tool_calls
+            if call.entry is not None:
+                for i in range(len(calls) - 1, -1, -1):
+                    if calls[i] is call.entry:
+                        del calls[i]
+                        break
+            for counts, key in ((self._buffer.tool_usage, call.tool_name),
+                                (self._buffer.action_distribution, "tool_call")):
+                counts[key] -= 1
+                if counts[key] <= 0:
+                    del counts[key]
+
+    def _decide_tool_call(self, call: _ToolCall, score: IntegrityScore) -> dict[str, Any]:
+        """Record the decision on a scored tool call and return the hook verdict."""
+        candidate_action = {
+            "type": "tool_call",
+            "tool_name": call.tool_name,
+            "arguments": call.tool_input,
+        }
         self.record_decision(
             decision_point="pre_tool_use",
-            candidate_action={
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "arguments": tool_input,
-            },
-            decision_inputs=self._collect_decision_inputs(),
+            candidate_action=candidate_action,
+            decision_inputs=call.decision_inputs,
         )
-        self._emit_event("pre_tool_use", data, score)
-
-        return self._enforcement_decision(
-            score,
-            {
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "arguments": tool_input,
-            },
-        )
+        self._emit_event("pre_tool_use", call.data, score)
+        return self._enforcement_decision(score, dict(candidate_action))
 
     def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
         tool_response = data.get("tool_response", "")

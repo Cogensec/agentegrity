@@ -281,14 +281,6 @@ class CorticalLayer:
             },
         )
 
-    async def aevaluate(
-        self,
-        profile: AgentProfile,
-        context: dict[str, Any] | None = None,
-    ) -> LayerResult:
-        """Async wrapper around evaluate for use with AsyncIntegrityEvaluator."""
-        return self.evaluate(profile, context)
-
     def _validate_reasoning(
         self,
         profile: AgentProfile,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,10 +26,15 @@ def test_adapter_name() -> None:
 
 def test_before_tool_returns_the_denial_under_enforcement() -> None:
     ad = GoogleADKAdapter(profile=AgentProfile.default(), enforce=True)
-    ad._tool_call_denial = lambda name, args: "denied"  # type: ignore[method-assign]
+
+    async def deny(name: str, args: Any) -> str:
+        return "denied"
+
+    ad._atool_call_denial = deny  # type: ignore[method-assign]
     agent = _FakeAgent()
     ad.instrument(agent)
-    assert agent.before_tool_callback(SimpleNamespace(name="t"), {}, None) == {"error": "denied"}
+    result = asyncio.run(agent.before_tool_callback(SimpleNamespace(name="t"), {}, None))
+    assert result == {"error": "denied"}
 
 
 @pytest.mark.asyncio
@@ -54,9 +60,29 @@ def test_instrument_before_tool_fires_event() -> None:
     ad.instrument(agent)
 
     tool = type("T", (), {"name": "search"})()
-    agent.before_tool_callback(tool, {"q": "llm"}, object())
+    asyncio.run(agent.before_tool_callback(tool, {"q": "llm"}, object()))
     ctx = ad.get_collected_context()
     assert ctx["tool_usage"]["search"] == 1
+
+
+@pytest.mark.parametrize("user_is_async", [False, True])
+def test_before_tool_runs_the_users_callback_after_an_allow(user_is_async: bool) -> None:
+    ad = GoogleADKAdapter(profile=AgentProfile.default(), enforce=True)
+    called: list[str] = []
+
+    def user_sync(tool: Any, args: Any, ctx: Any) -> dict[str, str]:
+        called.append("user")
+        return {"cached": "yes"}
+
+    async def user_async(tool: Any, args: Any, ctx: Any) -> dict[str, str]:
+        return user_sync(tool, args, ctx)
+
+    agent = _FakeAgent()
+    agent.before_tool_callback = user_async if user_is_async else user_sync
+    ad.instrument(agent)
+    result = asyncio.run(agent.before_tool_callback(SimpleNamespace(name="t"), {}, None))
+    assert result == {"cached": "yes"}
+    assert called == ["user"]
 
 
 def test_instrument_chains_existing_callback() -> None:

@@ -56,7 +56,7 @@ from agentegrity.google_adk import instrument, report
 instrument(agent); runner.run(...); print(report())
 ```
 
-Each module exposes the same `report()` / `reset()` / `adapter()` surface as `agentegrity.claude`, with `AgentProfile.default()` and the full four-layer evaluator. Pass `profile=`, `client=`, `enforce=True`, or `api_key=` to any of the entry points to override.
+Each module exposes the same `report()` / `reset()` / `adapter()` surface as `agentegrity.claude`, with `AgentProfile.default()` and the full four-layer evaluator. Pass `profile=`, `client=`, or `enforce=True` to any of the entry points to override.
 
 ## 1c. Export session data to a dashboard or external sink
 

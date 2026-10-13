@@ -29,16 +29,10 @@ def test_create_adapter_wires_clients_evaluator() -> None:
     assert adapter._evaluator is client.evaluator
 
 
-def test_create_adapter_forwards_enforce_and_api_key() -> None:
+def test_create_adapter_forwards_enforce() -> None:
     client = AgentegrityClient()
-    adapter = client.create_adapter(
-        "claude",
-        profile=AgentProfile.default(),
-        enforce=True,
-        api_key="sk-test",
-    )
+    adapter = client.create_adapter("claude", profile=AgentProfile.default(), enforce=True)
     assert adapter._enforce is True
-    assert adapter._api_key == "sk-test"
 
 
 def test_create_adapter_unknown_name_raises_with_valid_options() -> None:

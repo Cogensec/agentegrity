@@ -15,16 +15,20 @@ Skipped when ``agno`` is not installed.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
 
 pytest.importorskip("agno")
 
+from agno.exceptions import StopAgentRun
 from agno.tools.function import Function, FunctionCall
 
 from agentegrity.adapters.agno import AgnoAdapter
 from agentegrity.core.profile import AgentProfile
+
+from .test_framework_enforcement import _evaluator
 
 
 def _profile() -> AgentProfile:
@@ -165,8 +169,6 @@ def test_tool_hook_enforce_block_raises_stop_agent_run(
     tool executes; FunctionCall.execute re-raises it (it's an
     AgentRunException subclass), so the run stops rather than continuing
     with a swallowed failure result."""
-    from agno.exceptions import StopAgentRun
-
     adapter = AgnoAdapter(profile=_profile(), enforce=True)
     target = _HookTarget("solo")
     _instrument_target(adapter, target, member=False)
@@ -189,6 +191,61 @@ def test_tool_hook_enforce_block_raises_stop_agent_run(
     with pytest.raises(StopAgentRun, match="triggered block action"):
         _run_tool(adapter, target, add, {"a": 1, "b": 2})
     assert ran["tool"] is False
+
+
+def test_tool_hook_a_semantic_block_raises_stop_agent_run() -> None:
+    """A verdict that only the async (LLM/SLM) path reaches still halts the run."""
+    adapter = AgnoAdapter(profile=_profile(), evaluator=_evaluator("semantic-block"),
+                          enforce=True)
+    target = _HookTarget("solo")
+    _instrument_target(adapter, target, member=False)
+    ran = {"tool": False}
+
+    def add(a: int, b: int) -> int:
+        ran["tool"] = True
+        return a + b
+
+    with pytest.raises(StopAgentRun, match="block"):
+        _run_tool(adapter, target, add, {"a": 1, "b": 2})
+    assert ran["tool"] is False
+
+
+def _arun_tool(adapter: AgnoAdapter, target: _HookTarget, fn: Any,
+               arguments: dict[str, Any]) -> Any:
+    """Run the tool through Agno's async chain, as ``arun()`` does."""
+    f = Function.from_callable(fn)
+    f.tool_hooks = list(target.tool_hooks)
+    f._agent = None
+    return asyncio.run(FunctionCall(function=f, arguments=arguments).aexecute())
+
+
+def test_async_chain_a_semantic_block_raises_stop_agent_run() -> None:
+    adapter = AgnoAdapter(profile=_profile(), evaluator=_evaluator("semantic-block"),
+                          enforce=True)
+    target = _HookTarget("solo")
+    _instrument_target(adapter, target, member=False)
+    ran = {"tool": False}
+
+    async def add(a: int, b: int) -> int:
+        ran["tool"] = True
+        return a + b
+
+    with pytest.raises(StopAgentRun, match="block"):
+        _arun_tool(adapter, target, add, {"a": 1, "b": 2})
+    assert ran["tool"] is False
+
+
+def test_async_chain_records_the_tools_result() -> None:
+    adapter = AgnoAdapter(profile=_profile())
+    target = _HookTarget("solo")
+    _instrument_target(adapter, target, member=False)
+
+    async def add(a: int, b: int) -> int:
+        return a + b
+
+    assert _arun_tool(adapter, target, add, {"a": 2, "b": 3}).result == 5
+    post = next(e for e in adapter.events if e.event_type == "post_tool_use")
+    assert post.data["tool_response"] == "5"
 
 
 def test_instrument_team_marks_members_as_subagents() -> None:

@@ -31,6 +31,8 @@ from strands.hooks.events import (
 from agentegrity.adapters.bedrock_agents import BedrockAgentsAdapter
 from agentegrity.core.profile import AgentProfile
 
+from .test_framework_enforcement import _evaluator
+
 
 def _profile() -> AgentProfile:
     return AgentProfile.default()
@@ -173,6 +175,22 @@ def test_strands_enforce_true_writes_cancel_tool_on_block(monkeypatch: pytest.Mo
     _drive_registry(agent.hooks, event)
 
     assert event.cancel_tool == "test block"
+
+
+def test_strands_a_semantic_block_writes_cancel_tool() -> None:
+    """A verdict that only the async (LLM/SLM) path reaches still cancels the tool."""
+    adapter = BedrockAgentsAdapter(profile=_profile(), evaluator=_evaluator("semantic-block"),
+                                   enforce=True)
+    agent = _FakeAgent()
+    adapter.instrument_strands(agent)  # type: ignore[arg-type]
+    event = BeforeToolCallEvent(
+        agent=agent,  # type: ignore[arg-type]
+        selected_tool=None,
+        tool_use={"toolUseId": "t4", "name": "dangerous", "input": {}},
+        invocation_state={},
+    )
+    _drive_registry(agent.hooks, event)
+    assert "block" in event.cancel_tool
 
 
 # ----- boto3 path -----

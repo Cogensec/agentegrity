@@ -21,7 +21,7 @@ pip install "agentegrity[claude]"
 | `crewai` | `crewai>=1.15.0` |
 | `google-adk` | `google-adk>=1.18.0` |
 | `autogen` | `autogen-agentchat>=0.7.0`, `autogen-core>=0.7.0`, `opentelemetry-sdk>=1.20` |
-| `agno` | `agno>=2.0` |
+| `agno` | `agno>=3.1` |
 | `bedrock-agents` | `boto3>=1.34`, `strands-agents>=1.0` |
 
 The `crewai` and `google-adk` floors are the first releases with the APIs the token usage code reads (`UsageMetrics.from_provider_dict` and `LlmResponse.model_version`). An older CrewAI installed outside the extra still runs the adapter; it reports lifecycle events and no usage. The `langchain` extra installs `langchain-core` only; install LangGraph yourself if you use it.
@@ -231,7 +231,7 @@ team.run("...")
 print(report())
 ```
 
-**Hooks into:** Agno 2.x `pre_hooks`, `post_hooks` and `tool_hooks`, appended to any hooks already set. The pre-hook becomes `user_prompt_submit` (or `subagent_start` on a team member), the post-hook becomes `stop` (or `subagent_stop`), and the tool hook wraps every tool call. Agno re-applies `tool_hooks` to every tool at run setup, so tools added after `instrument()` are covered.
+**Hooks into:** Agno 3.1+ `pre_hooks`, `post_hooks` and `tool_hooks`, appended to any hooks already set. The pre-hook becomes `user_prompt_submit` (or `subagent_start` on a team member), the post-hook becomes `stop` (or `subagent_stop`), and the tool hook wraps every tool call. Agno re-applies `tool_hooks` to every tool at run setup, so tools added after `instrument()` are covered. Under `arun()` the tool hook awaits the gate and the tool on Agno's event loop.
 
 **Enforcement:** under `enforce=True` the tool hook evaluates `pre_tool_use` before the tool runs and, on a deny decision, raises `agno.exceptions.StopAgentRun`, the exception family Agno re-raises to halt the run.
 
@@ -267,19 +267,16 @@ print(report())
 
 ## Explicit configuration
 
-Every entry point (`hooks()`, `instrument_chain()`, `instrument_graph()`, `callback_handler()`, `run_hooks()`, `instrument()`, `instrument_team()`, `instrument_strands()`, `wrap_client()`) accepts four keyword arguments:
+Every entry point (`hooks()`, `instrument_chain()`, `instrument_graph()`, `callback_handler()`, `run_hooks()`, `instrument()`, `instrument_team()`, `instrument_strands()`, `wrap_client()`) accepts three keyword arguments:
 
 <ParamField path="profile" type="AgentProfile">
   The profile to evaluate against instead of `AgentProfile.default()`.
 </ParamField>
 <ParamField path="client" type="AgentegrityClient">
-  A client with custom thresholds, weights or policy set.
+  A client with custom thresholds, weights or policy set. `AgentegrityClient(prefer_llm=True)` adds the Claude-backed classifiers at every tool-call gate.
 </ParamField>
 <ParamField path="enforce" type="bool" default="False">
   Deny tool calls on adapters with a blocking surface.
-</ParamField>
-<ParamField path="api_key" type="str">
-  Anthropic API key for LLM-backed checks.
 </ParamField>
 
 Passing any of them builds a new adapter instead of using the module global, so the module's `report()`, `register_exporter()` and `adapter()` do not see it. To keep a handle on that adapter, create it through the client:

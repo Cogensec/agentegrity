@@ -17,31 +17,22 @@ Event mapping:
     ToolUsageFinishedEvent        -> post_tool_use
     ToolUsageErrorEvent           -> post_tool_use_failure
     LLMCallCompletedEvent         -> token usage (per call_id)
-    TaskStartedEvent              -> task_started (v0.8+; was
-                                     subagent_start pre-v0.8)
-    AgentExecutionStartedEvent    -> subagent_start (v0.8+; new)
-    AgentExecutionCompletedEvent  -> subagent_stop (v0.8+; new)
+    TaskStartedEvent              -> task_started
+    AgentExecutionStartedEvent    -> subagent_start
+    AgentExecutionCompletedEvent  -> subagent_stop
     CrewKickoffCompletedEvent     -> stop
 
-v0.8 semantic fix: tasks are NOT subagents in CrewAI's data model.
-Pre-v0.8 the adapter mapped ``TaskStartedEvent → subagent_start``
-which counted tasks as subagents. v0.8 maps ``TaskStartedEvent`` to
-the new ``task_started`` canonical event and adds the real agent
-boundaries via ``AgentExecutionStartedEvent`` and
-``AgentExecutionCompletedEvent``.
-
-Backward compat: pass ``legacy_task_mapping=True`` to
-``subscribe()`` to keep the v0.7 behavior (TaskStartedEvent →
-subagent_start, no AgentExecution events). The legacy escape hatch
-ships for one cycle (v0.8 only) and is removed in v0.9. Operators
-hitting the deprecation warning should migrate their consumers
-toward the corrected event shape.
+Tasks are not subagents in CrewAI's data model, so ``TaskStartedEvent``
+maps to ``task_started`` and agent boundaries come from the
+``AgentExecution*`` events.
 
 Enforcement: CrewAI skips a tool when a before-tool-call hook returns
 ``False`` and gives the agent "Tool execution blocked by hook" as the
 result. Under ``enforce=True`` the hook returns ``False`` for a denied
-call, so the tool never runs and the crew continues. ``close()`` removes
-the hook.
+call, so the tool never runs and the crew continues.
+
+``subscribe()`` replaces this adapter's earlier subscription, and
+``close()`` removes the hook and every bus handler.
 
 Topology: when ``subscribe(crew=...)`` is called with a non-None
 ``crew``, the adapter constructs an :class:`AgentTopology` from
@@ -62,7 +53,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import Any, Callable
 
 from agentegrity.adapters.base import _BaseAdapter
@@ -79,14 +69,11 @@ class CrewAIAdapter(_BaseAdapter):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._tool_hook: Callable[[Any], bool | None] | None = None
+        # (event class, handler) pairs on the bus, so a resubscribe or close can remove them.
+        self._bus_handlers: list[tuple[Any, Callable[[Any, Any], None]]] = []
 
-    def subscribe(
-        self,
-        crew: Any | None = None,
-        *,
-        legacy_task_mapping: bool = False,
-    ) -> None:
-        """Subscribe to the CrewAI event bus.
+    def subscribe(self, crew: Any | None = None) -> None:
+        """Subscribe to the CrewAI event bus, replacing any earlier subscription.
 
         If ``crew`` is None, subscribes globally (all crews in the
         process). Otherwise tool calls are evaluated only for the given
@@ -100,11 +87,6 @@ class CrewAIAdapter(_BaseAdapter):
             is read at subscribe time to construct an
             :class:`AgentTopology` and declare it via
             ``set_topology()``.
-        legacy_task_mapping : bool
-            v0.7 behavior shim. When True, ``TaskStartedEvent`` is
-            mapped to ``subagent_start`` (the v0.7 semantic bug) and
-            ``AgentExecution*`` events are NOT subscribed. Removed in
-            v0.9. Emits a ``DeprecationWarning`` at subscribe time.
         """
         try:
             from crewai.events import (
@@ -125,17 +107,6 @@ class CrewAIAdapter(_BaseAdapter):
             ) from None
 
         adapter = self
-
-        if legacy_task_mapping:
-            warnings.warn(
-                "legacy_task_mapping=True maps TaskStartedEvent to "
-                "subagent_start (v0.7 behavior). This shim is removed "
-                "in v0.9; migrate consumers to handle the corrected "
-                "subagent_start (from AgentExecutionStartedEvent) and "
-                "the new task_started event separately.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         def _on_kickoff_start(source_: Any, event: Any) -> None:
             adapter._dispatch(
@@ -172,15 +143,7 @@ class CrewAIAdapter(_BaseAdapter):
                 },
             )
 
-        def _on_task_start_legacy(source_: Any, event: Any) -> None:
-            # v0.7 behavior: TaskStartedEvent → subagent_start
-            adapter._dispatch(
-                "subagent_start",
-                {"agent_id": getattr(event, "task_id", "") or str(id(event))},
-            )
-
-        def _on_task_start_v08(source_: Any, event: Any) -> None:
-            # v0.8: tasks are tasks, not subagents.
+        def _on_task_start(source_: Any, event: Any) -> None:
             adapter._dispatch(
                 "task_started",
                 {
@@ -232,40 +195,46 @@ class CrewAIAdapter(_BaseAdapter):
             except Exception as exc:
                 logger.warning("usage capture failed: %s", exc)
 
+        handlers: list[tuple[Any, Callable[[Any, Any], None]]] = [
+            (CrewKickoffStartedEvent, _on_kickoff_start),
+            (CrewKickoffCompletedEvent, _on_kickoff_end),
+            (ToolUsageFinishedEvent, _on_tool_end),
+            (ToolUsageErrorEvent, _on_tool_error),
+            (TaskStartedEvent, _on_task_start),
+            (AgentExecutionStartedEvent, _on_agent_start),
+            (AgentExecutionCompletedEvent, _on_agent_end),
+        ]
         if llm_call_event is not None:
-            crewai_event_bus.on(llm_call_event)(_on_llm_call)
-        crewai_event_bus.on(CrewKickoffStartedEvent)(_on_kickoff_start)
-        crewai_event_bus.on(CrewKickoffCompletedEvent)(_on_kickoff_end)
-        crewai_event_bus.on(ToolUsageFinishedEvent)(_on_tool_end)
-        crewai_event_bus.on(ToolUsageErrorEvent)(_on_tool_error)
+            handlers.append((llm_call_event, _on_llm_call))
 
-        self._remove_tool_hook()
+        self._unsubscribe()
+        for event_class, handler in handlers:
+            crewai_event_bus.on(event_class)(handler)
+        self._bus_handlers = handlers
         register_before_tool_call_hook(_before_tool_call)
         self._tool_hook = _before_tool_call
 
-        if legacy_task_mapping:
-            crewai_event_bus.on(TaskStartedEvent)(_on_task_start_legacy)
-        else:
-            crewai_event_bus.on(TaskStartedEvent)(_on_task_start_v08)
-            crewai_event_bus.on(AgentExecutionStartedEvent)(_on_agent_start)
-            crewai_event_bus.on(AgentExecutionCompletedEvent)(_on_agent_end)
-
-        # v0.8: declare the topology when we know the crew.
         if crew is not None:
             self._declare_topology(crew)
 
     def close(self) -> None:
-        """End the session and remove the before-tool-call hook."""
-        self._remove_tool_hook()
+        """End the session and remove the hook and bus handlers."""
+        self._unsubscribe()
         super().close()
 
-    def _remove_tool_hook(self) -> None:
-        if self._tool_hook is None:
-            return
-        from crewai.hooks import unregister_before_tool_call_hook
+    def _unsubscribe(self) -> None:
+        """Remove what the last ``subscribe()`` registered."""
+        if self._bus_handlers:
+            from crewai.events import crewai_event_bus
 
-        unregister_before_tool_call_hook(self._tool_hook)
-        self._tool_hook = None
+            for event_class, handler in self._bus_handlers:
+                crewai_event_bus.off(event_class, handler)
+            self._bus_handlers = []
+        if self._tool_hook is not None:
+            from crewai.hooks import unregister_before_tool_call_hook
+
+            unregister_before_tool_call_hook(self._tool_hook)
+            self._tool_hook = None
 
     def _record_llm_call(self, event: Any) -> None:
         """Count one LLM call; CrewAI's normalizer makes the input count include the cache."""

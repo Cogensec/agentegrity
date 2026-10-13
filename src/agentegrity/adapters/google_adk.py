@@ -33,13 +33,12 @@ Usage:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
-from agentegrity.core.evaluator import IntegrityEvaluator
-from agentegrity.core.profile import AgentProfile
 from agentegrity.core.usage import TokenUsage
 
 logger = logging.getLogger("agentegrity.adapters.google_adk")
@@ -50,14 +49,8 @@ class GoogleADKAdapter(_BaseAdapter):
 
     _name = "google_adk"
 
-    def __init__(
-        self,
-        profile: AgentProfile,
-        evaluator: IntegrityEvaluator | None = None,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> None:
-        super().__init__(profile, evaluator, enforce, api_key)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         self._instrumented: list[Any] = []
 
     def instrument(self, agent: Any) -> Any:
@@ -108,8 +101,9 @@ class GoogleADKAdapter(_BaseAdapter):
             else:
                 adapter._dispatch("subagent_stop", {"agent_id": name})
 
-        def _before_tool(tool: Any, args: Any, tool_context: Any) -> dict[str, str] | None:
-            reason = adapter._tool_call_denial(getattr(tool, "name", str(tool)), args)
+        # Async, so a gate waiting on an LLM or SLM check leaves ADK's event loop free.
+        async def _before_tool(tool: Any, args: Any, tool_context: Any) -> dict[str, str] | None:
+            reason = await adapter._atool_call_denial(getattr(tool, "name", str(tool)), args)
             return {"error": reason} if reason is not None else None
 
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
@@ -209,7 +203,16 @@ def _count(source: Any, name: str) -> int:
 
 
 def _safe(fn: Any) -> Any:
-    """Run an agentegrity callback without ever failing the agent's run."""
+    """Run an agentegrity callback, sync or async, without ever failing the agent's run."""
+    if inspect.iscoroutinefunction(fn):
+        async def _async_callback(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as exc:
+                logger.warning("google_adk agentegrity callback failed: %s", exc)
+                return None
+        return _async_callback
+
     def _callback(*args: Any, **kwargs: Any) -> Any:
         try:
             return fn(*args, **kwargs)
@@ -230,6 +233,16 @@ def _prepend(existing: Any, fn: Any) -> Any:
         return ours
     if isinstance(existing, (list, tuple)):
         return [ours, *existing]
+
+    if inspect.iscoroutinefunction(ours):
+        # ADK awaits a callback's result when it is awaitable, whichever callback returned it.
+        async def _async_chained(*args: Any, **kwargs: Any) -> Any:
+            result = await ours(*args, **kwargs)
+            if result is not None:
+                return result
+            result = existing(*args, **kwargs)
+            return await result if inspect.isawaitable(result) else result
+        return _async_chained
 
     def _chained(*args: Any, **kwargs: Any) -> Any:
         result = ours(*args, **kwargs)

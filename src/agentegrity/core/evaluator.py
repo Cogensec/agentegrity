@@ -215,26 +215,54 @@ class IntegrityEvaluator:
             if self.fail_fast and result.action == "block":
                 break
 
-        # Compute property scores from layer results
-        properties = self._compute_property_scores(layer_results)
+        return self._score(layer_results, start)
 
-        # Composite score
+    @property
+    def has_async_layers(self) -> bool:
+        """Whether a layer checks more on its async path (the LLM and SLM classifiers)."""
+        return any(hasattr(layer, "aevaluate") for layer in self.layers)
+
+    async def aevaluate(
+        self,
+        profile: Any,
+        context: dict[str, Any] | None = None,
+    ) -> IntegrityScore:
+        """Like :meth:`evaluate`, but uses each layer's ``aevaluate`` when it has one."""
+        start = time.perf_counter()
+        layer_results: list[LayerResult] = []
+        ctx = context or {}
+
+        for layer in self.layers:
+            layer_start = time.perf_counter()
+            aevaluate = getattr(layer, "aevaluate", None)
+            if aevaluate is not None:
+                result = await aevaluate(profile, ctx)
+            else:
+                result = layer.evaluate(profile, ctx)
+            result.latency_ms = (time.perf_counter() - layer_start) * 1000
+            layer_results.append(result)
+
+            if self.fail_fast and result.action == "block":
+                break
+
+        return self._score(layer_results, start)
+
+    def _score(self, layer_results: list[LayerResult], start: float) -> IntegrityScore:
+        """Combine layer results into the composite score."""
+        properties = self._compute_property_scores(layer_results)
         composite = (
             self.weights.adversarial_coherence * properties.adversarial_coherence
             + self.weights.environmental_portability * properties.environmental_portability
             + self.weights.verifiable_assurance * properties.verifiable_assurance
             + self.weights.recovery_integrity * properties.recovery_integrity
         )
-
-        total_latency = (time.perf_counter() - start) * 1000
-
         return IntegrityScore(
             composite=round(composite, 4),
             properties=properties,
             layer_results=layer_results,
             confidence=self._compute_confidence(layer_results),
             evaluator_version=self._version,
-            total_latency_ms=round(total_latency, 2),
+            total_latency_ms=round((time.perf_counter() - start) * 1000, 2),
         )
 
     def _compute_property_scores(self, results: list[LayerResult]) -> PropertyScores:

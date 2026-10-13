@@ -28,7 +28,7 @@ layers = default_layers(
     coherence_threshold=0.70,      # AdversarialLayer
     drift_tolerance=0.15,          # CorticalLayer
     policy_set="enterprise-default",  # GovernanceLayer
-    prefer_llm=False,              # True swaps in CorticalLLMLayer (needs [llm])
+    prefer_llm=False,              # True swaps in both Claude-backed layers (needs [llm])
     baseline_store=None,           # persists the drift baseline across processes
 )
 ```
@@ -121,7 +121,7 @@ With `fail_fast=True` (the default), a `block` from one layer skips the layers a
 
 `AsyncIntegrityEvaluator` (in `agentegrity.core.evaluator`) has the same constructor and an `async evaluate()`. It calls a layer's `aevaluate()` when it has one and runs sync layers with `asyncio.to_thread`. With `fail_fast=False` all layers run concurrently through `asyncio.gather`; with `fail_fast=True` they run one after another so a block can stop the rest.
 
-The model-backed layers only do model work on this async path. `CorticalLLMLayer`, `AdversarialLLMLayer` and `AdversarialSLMLayer` keep their sync `evaluate()` pattern-based, and call the model in `aevaluate()`. Adapters evaluate synchronously, so inside an adapter these layers behave like their pattern-based parents.
+`IntegrityEvaluator.aevaluate()` does the same with `fail_fast` ordering, and is what adapters use. The model-backed layers only do model work on the async path. `CorticalLLMLayer`, `AdversarialLLMLayer` and `AdversarialSLMLayer` keep their sync `evaluate()` pattern-based, and call the model in `aevaluate()`. An adapter runs the async path at each tool-call gate and the sync path for every other event, so text from a tool result or a peer message is classified at the next gate, before the next call can run. Adapters do not capture the reasoning chain, memory reads or behavior descriptions that `CorticalLLMLayer` checks, so inside an adapter only the adversarial classifiers call a model.
 
 ## From framework hooks to evaluated events
 
@@ -185,7 +185,7 @@ The shipped adapters fill the latest prompt, tool outputs and errors, tool-call 
 
 `ToolSequenceDetector` adds behavioral evidence that phrasing cannot hide, but it does not change those numbers. The full method and caveats are in [STATUS.md](https://github.com/Cogensec/agentegrity/blob/main/STATUS.md#detection-benchmark-numbers).
 
-**Model-backed layers are opt-in and send content out.** `AdversarialLLMLayer` and `CorticalLLMLayer` need `pip install "agentegrity[llm]"` and send the text they classify to Anthropic's API. `AdversarialSLMLayer` sends it to `AGENTEGRITY_SLM_BASE_URL` (a local Ollama server by default). All three fail open on errors, run their model checks only through `AsyncIntegrityEvaluator`, and have no published detection numbers. Because the LLM and SLM classifiers can block on a model verdict of severity 0.90 or more, measure them on your own traffic before you enforce with them.
+**Model-backed layers are opt-in and send content out.** `AdversarialLLMLayer` and `CorticalLLMLayer` need `pip install "agentegrity[llm]"` and send the text they classify to Anthropic's API. `AdversarialSLMLayer` sends it to `AGENTEGRITY_SLM_BASE_URL` (a local Ollama server by default). All three fail open on errors, run their model checks only on the async path (in an adapter, at each tool-call gate), and have no published detection numbers. Because the LLM and SLM classifiers can block on a model verdict of severity 0.90 or more, measure them on your own traffic before you enforce with them.
 
 **Command analysis is static.** `classify_tool_call()` reads what a command says. Anything the shell computes at runtime (variable-built paths, command substitution, `$IFS` splicing) is tagged `obfuscated_command`, not resolved. On Codex, `write_stdin`, still-running commands and hosted tools are not visible to a hook.
 

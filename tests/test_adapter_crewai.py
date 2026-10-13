@@ -29,6 +29,9 @@ class _FakeBus:
 
         return register
 
+    def off(self, event_class: type, cb: Callable[[Any, Any], None]) -> None:
+        self.handlers[event_class].remove(cb)
+
     def emit(self, source: Any, event: Any) -> None:
         for cb in self.handlers.get(type(event), []):
             cb(source, event)

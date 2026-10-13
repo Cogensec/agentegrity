@@ -20,13 +20,15 @@ Example
 ``hooks()`` lazily constructs a process-global
 :class:`~agentegrity.adapters.claude.ClaudeAdapter` backed by an
 :class:`~agentegrity.sdk.client.AgentegrityClient` with default
-three-layer configuration and an :meth:`AgentProfile.default`
+four-layer configuration and an :meth:`AgentProfile.default`
 profile. ``report()`` returns that adapter's current session
 summary. Call ``reset()`` between sessions (or in tests) to
 discard the global.
 
 Power users who need explicit configuration can pass
-``profile=``, ``client=``, ``enforce=``, or ``api_key=`` — in
+``profile=``, ``client=``, or ``enforce=``. Pass
+``client=AgentegrityClient(prefer_llm=True)`` to add the
+Claude-backed classifiers at every tool-call gate. In
 that case ``hooks()`` still returns hook matchers but no global
 state is touched, and ``report()`` will only see activity from
 the default adapter.
@@ -67,13 +69,12 @@ def hooks(
     profile: AgentProfile | None = None,
     client: AgentegrityClient | None = None,
     enforce: bool = False,
-    api_key: str | None = None,
 ) -> dict[str, list[Any]]:
     """Return Claude Agent SDK hook matchers wired to an agentegrity adapter.
 
     Zero-config: calling ``hooks()`` with no arguments lazily creates
     a process-global default adapter (``AgentProfile.default()`` + the
-    standard three-layer ``AgentegrityClient``) and returns its hook
+    standard four-layer ``AgentegrityClient``) and returns its hook
     matchers. Subsequent calls reuse the same adapter so that
     ``report()`` can summarize the whole session.
 
@@ -91,23 +92,19 @@ def hooks(
         If True, the returned hooks will deny tool calls whose
         pre-check produces ``action == "block"`` or ``"escalate"``.
         Default False (measure-only).
-    api_key : str, optional
-        Anthropic API key for LLM-backed cortical checks. Falls back
-        to ``ANTHROPIC_API_KEY``.
 
     Returns
     -------
     dict[str, list]
         A hook matcher dict ready for ``ClaudeAgentOptions(hooks=...)``.
     """
-    if profile is not None or client is not None or enforce or api_key is not None:
+    if profile is not None or client is not None or enforce:
         effective_client = client or AgentegrityClient()
         effective_profile = profile or AgentProfile.default()
         ad: ClaudeAdapter = effective_client.create_adapter(
             "claude",
             profile=effective_profile,
             enforce=enforce,
-            api_key=api_key,
         )
     else:
         ad = _default_adapter()

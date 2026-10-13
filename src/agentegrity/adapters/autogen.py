@@ -58,8 +58,6 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agentegrity.adapters.base import _BaseAdapter
-from agentegrity.core.evaluator import IntegrityEvaluator
-from agentegrity.core.profile import AgentProfile
 from agentegrity.core.usage import TokenUsage
 
 if TYPE_CHECKING:
@@ -122,15 +120,9 @@ class AutoGenAdapter(_BaseAdapter):
 
     _name = "autogen"
 
-    def __init__(
-        self,
-        profile: AgentProfile,
-        evaluator: IntegrityEvaluator | None = None,
-        enforce: bool = False,
-        api_key: str | None = None,
-    ) -> None:
-        super().__init__(profile, evaluator, enforce, api_key)
-        if enforce:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self._enforce:
             warnings.warn(
                 "AutoGenAdapter observes OpenTelemetry spans; enforce=True "
                 "records block decisions in the attestation chain but cannot "
