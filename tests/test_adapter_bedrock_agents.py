@@ -28,6 +28,7 @@ from strands.hooks.events import (
     BeforeToolCallEvent,
 )
 
+from agentegrity import IntegrityViolationError
 from agentegrity.adapters.bedrock_agents import BedrockAgentsAdapter
 from agentegrity.core.profile import AgentProfile
 
@@ -191,6 +192,21 @@ def test_strands_a_semantic_block_writes_cancel_tool() -> None:
     )
     _drive_registry(agent.hooks, event)
     assert "block" in event.cancel_tool
+
+
+def test_strands_on_deny_raise_ends_the_run() -> None:
+    adapter = BedrockAgentsAdapter(profile=_profile(), evaluator=_evaluator("block"),
+                                   enforce=True, on_deny="raise")
+    agent = _FakeAgent()
+    adapter.instrument_strands(agent)  # type: ignore[arg-type]
+    event = BeforeToolCallEvent(
+        agent=agent,  # type: ignore[arg-type]
+        selected_tool=None,
+        tool_use={"toolUseId": "t5", "name": "dangerous", "input": {}},
+        invocation_state={},
+    )
+    with pytest.raises(IntegrityViolationError, match="agentegrity.denied:block"):
+        _drive_registry(agent.hooks, event)
 
 
 # ----- boto3 path -----

@@ -65,6 +65,7 @@ class CrewAIAdapter(_BaseAdapter):
     """Instruments a CrewAI crew with agentegrity evaluation."""
 
     _name = "crewai"
+    _can_raise_on_deny = False
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)

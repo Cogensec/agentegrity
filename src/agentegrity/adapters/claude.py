@@ -55,6 +55,7 @@ class ClaudeAdapter(_BaseAdapter):
     """Instruments a Claude Agent SDK agent with agentegrity evaluation."""
 
     _name = "claude"
+    _can_raise_on_deny = False
     _usage_reader_type = ClaudeTranscriptUsage
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

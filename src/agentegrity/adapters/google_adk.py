@@ -17,17 +17,21 @@ to another agent, so a run that ends in a transfer reports no ``stop``.
 
 Enforcement: ADK skips a tool when a before-tool callback returns a
 dict, and passes that dict to the model as the tool's result. Under
-``enforce=True`` a denied call returns ``{"error": <reason>}``, so the
-tool never runs and the model sees why. Tool nodes in an ADK workflow graph
-run only plugin callbacks, not agent callbacks, so they are not evaluated.
+``enforce=True`` a denied call returns ``{"error": <denial code>}``, so the
+tool never runs, the model sees the denial and the run continues.
+
+Tool nodes in an ADK workflow graph run only plugin callbacks. Pass the
+``Runner`` or the ``App`` to ``instrument()`` to also register an ADK plugin,
+which gates every tool call in the app, workflow tool nodes included. Agent
+callbacks then leave the calls the plugin has seen to it. Instrument an
+``App`` before building its ``Runner``, which copies the app's plugins.
 
 Usage:
     from google.adk.agents import LlmAgent
+    from google.adk.runners import InMemoryRunner
     from agentegrity.google_adk import instrument, report
 
-    agent = LlmAgent(name="my-agent", ...)
-    instrument(agent)
-    # run via google.adk.runners.Runner
+    runner = instrument(InMemoryRunner(agent=LlmAgent(name="my-agent", ...)))
     print(report())
 """
 
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from contextvars import ContextVar
 from typing import Any
 from uuid import uuid4
 
@@ -42,28 +47,39 @@ from agentegrity.adapters.base import _BaseAdapter
 from agentegrity.core.usage import TokenUsage
 
 logger = logging.getLogger("agentegrity.adapters.google_adk")
+PLUGIN_NAME = "agentegrity"
+# The tool call the plugin has just handled. ADK runs plugin callbacks before
+# the agent's, in the same task, with the same ToolContext, so agent callbacks
+# skip a call whose context matches instead of evaluating it twice.
+_PLUGIN_HANDLED: ContextVar[Any] = ContextVar("agentegrity_adk_plugin_handled", default=None)
+# The ToolContext of the call this task last denied. ADK still runs after-tool
+# callbacks on the denial it handed the model; that is not a tool result.
+_DENIED: ContextVar[Any] = ContextVar("agentegrity_adk_denied", default=None)
 
 
 class GoogleADKAdapter(_BaseAdapter):
     """Instruments a Google ADK agent with agentegrity evaluation."""
 
     _name = "google_adk"
+    _can_raise_on_deny = False
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._instrumented: list[Any] = []
 
-    def instrument(self, agent: Any) -> Any:
-        """Attach agentegrity callbacks to a Google ADK agent.
+    def instrument(self, target: Any) -> Any:
+        """Attach agentegrity to a Google ADK agent, ``Runner`` or ``App``; returns ``target``.
 
         Callbacks go on the agent and on every agent reachable from it
         (``sub_agents``, and agents wrapped in an ``AgentTool``), ahead of
         any callbacks already set. ADK stops at the first callback that
         returns a value. These return nothing except when enforcement denies
         a tool call, so otherwise the user's callbacks still run and decide.
-        Instrumenting an agent again is a no-op. Returns the agent for
-        chaining.
+        Given a ``Runner`` or an ``App``, the plugin from :meth:`plugin` is
+        registered as well, so workflow tool nodes are gated too.
+        Instrumenting again is a no-op.
         """
+        agent = self._register_plugin(target)
         try:
             for reached in _reachable(agent):
                 # ADK agents are unhashable, so instrumented agents are matched by identity.
@@ -81,7 +97,24 @@ class GoogleADKAdapter(_BaseAdapter):
         # ParallelAgent / LoopAgent), declare a HIERARCHICAL_DAG
         # topology. Plain Agent without sub_agents stays single-agent.
         self._maybe_declare_workflow_topology(agent)
-        return agent
+        return target
+
+    def _register_plugin(self, target: Any) -> Any:
+        """Register the plugin on a ``Runner`` or ``App``; return the agent to instrument."""
+        try:
+            from google.adk.apps import App
+            from google.adk.runners import Runner
+        except ImportError:
+            return target
+        if isinstance(target, Runner):
+            if target.plugin_manager.get_plugin(PLUGIN_NAME) is None:
+                target.plugin_manager.register_plugin(self.plugin())
+            return target.agent
+        if isinstance(target, App):
+            if not any(p.name == PLUGIN_NAME for p in target.plugins):
+                target.plugins.append(self.plugin())
+            return target.root_agent
+        return target
 
     def _attach(self, agent: Any, is_root: bool) -> None:
         """Put this adapter's callbacks first on one agent."""
@@ -103,22 +136,22 @@ class GoogleADKAdapter(_BaseAdapter):
 
         # Async, so a gate waiting on an LLM or SLM check leaves ADK's event loop free.
         async def _before_tool(tool: Any, args: Any, tool_context: Any) -> dict[str, str] | None:
-            reason = await adapter._atool_call_denial(getattr(tool, "name", str(tool)), args)
-            return {"error": reason} if reason is not None else None
+            if adapter._plugin_handled(tool_context):
+                return None
+            return await adapter._gate_tool(tool, args, tool_context)
 
         def _after_tool(tool: Any, args: Any, tool_context: Any, tool_response: Any) -> None:
-            adapter._dispatch("post_tool_use", {
-                "tool_name": getattr(tool, "name", str(tool)),
-                "tool_response": str(tool_response),
-            })
+            if not adapter._plugin_handled(tool_context):
+                adapter._record_tool_result(tool, tool_response, tool_context)
 
         def _after_model(callback_context: Any, llm_response: Any) -> None:
             adapter._record_model_response(agent, llm_response)
 
-        agent.before_agent_callback = _prepend(
-            getattr(agent, "before_agent_callback", None), _before_agent)
-        agent.after_agent_callback = _prepend(
-            getattr(agent, "after_agent_callback", None), _after_agent)
+        # A workflow graph (``Workflow``) has no agent callbacks; the plugin covers its tools.
+        if hasattr(agent, "before_agent_callback"):
+            agent.before_agent_callback = _prepend(agent.before_agent_callback, _before_agent)
+            agent.after_agent_callback = _prepend(
+                getattr(agent, "after_agent_callback", None), _after_agent)
         # Workflow agents have no tool or model callbacks and reject unknown fields.
         if hasattr(agent, "before_tool_callback"):
             agent.before_tool_callback = _prepend(agent.before_tool_callback, _before_tool)
@@ -126,6 +159,59 @@ class GoogleADKAdapter(_BaseAdapter):
                 getattr(agent, "after_tool_callback", None), _after_tool)
         if hasattr(agent, "after_model_callback"):
             agent.after_model_callback = _prepend(agent.after_model_callback, _after_model)
+
+    async def _gate_tool(self,
+        tool: Any,
+        args: Any,
+        tool_context: Any,
+    ) -> dict[str, str] | None:
+        """``{"error": <denial>}`` for a denied call, which ADK hands the model as the result."""
+        reason = await self._atool_call_denial(getattr(tool, "name", str(tool)), args)
+        if reason is None:
+            return None
+        _DENIED.set(tool_context)
+        return {"error": reason}
+
+    def _record_tool_result(self, tool: Any, response: Any, tool_context: Any) -> None:
+        """Record a tool's result, unless it is the denial handed back for a call that never ran."""
+        if _DENIED.get() is tool_context:
+            return
+        self._dispatch("post_tool_use", {
+            "tool_name": getattr(tool, "name", str(tool)),
+            "tool_response": str(response),
+        })
+
+    def _plugin_handled(self, tool_context: Any) -> bool:
+        """Whether this adapter's plugin already handled the call with this context."""
+        handled = _PLUGIN_HANDLED.get()
+        return handled is not None and handled[0] is self and handled[1] is tool_context
+
+    def plugin(self) -> Any:
+        """Return an ADK plugin that gates every tool call in the app it is registered on."""
+        try:
+            from google.adk.plugins.base_plugin import BasePlugin
+        except ImportError:
+            raise ImportError(
+                "google-adk is required for the Google ADK adapter. "
+                "Install it with: pip install agentegrity[google-adk]"
+            ) from None
+        adapter = self
+
+        class AgentegrityPlugin(BasePlugin):  # type: ignore[misc, unused-ignore]
+            """Gates tool calls for every agent and workflow tool node in the app."""
+
+            async def before_tool_callback(self, *, tool: Any, tool_args: dict[str, Any],
+                                           tool_context: Any) -> dict[str, Any] | None:
+                _PLUGIN_HANDLED.set((adapter, tool_context))
+                return await adapter._gate_tool(tool, tool_args, tool_context)
+
+            async def after_tool_callback(self, *, tool: Any, tool_args: dict[str, Any],
+                                          tool_context: Any, result: Any) -> None:
+                _PLUGIN_HANDLED.set((adapter, tool_context))
+                adapter._record_tool_result(tool, result, tool_context)
+                return None
+
+        return AgentegrityPlugin(name=PLUGIN_NAME)
 
     def _record_model_response(self, agent: Any, response: Any) -> None:
         """Count one model call from its final response; streamed partials are skipped.

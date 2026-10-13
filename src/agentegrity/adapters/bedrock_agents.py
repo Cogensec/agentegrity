@@ -330,7 +330,7 @@ class _StrandsHookProvider:
         if reason is None:
             return
         try:
-            event.cancel_tool = reason
+            event.cancel_tool = self._adapter._continue_or_raise(reason)
         except AttributeError as exc:
             # Strands restricts writes via __setattr__. If a version locks
             # cancel_tool, halting the run is the only way left to stop the call.

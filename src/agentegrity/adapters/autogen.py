@@ -119,6 +119,7 @@ class AutoGenAdapter(_BaseAdapter):
     """Instruments AutoGen agents and tools via an OpenTelemetry SpanProcessor."""
 
     _name = "autogen"
+    _can_raise_on_deny = False
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)

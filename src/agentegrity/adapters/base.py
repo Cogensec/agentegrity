@@ -254,6 +254,22 @@ class _ToolCall:
     entry: dict[str, Any] | None
 
 
+# What a denied tool call does when the framework can hand the model a result
+# in its place: continue (the model gets the denial) or raise (the run ends).
+ON_DENY_VALUES = ("continue", "raise")
+
+
+def denial_message(code: str) -> str:
+    """The text the model receives for a denied call: a stable code, never the detector.
+
+    ``code`` is the verdict (``block``, ``escalate``) or ``error`` when the call
+    could not be evaluated. The score and the rule that fired stay in the
+    attestation chain and the logs, so probing denials does not teach an
+    attacker what was caught.
+    """
+    return f"agentegrity.denied:{code}: Agentegrity denied this tool call, so it did not run."
+
+
 def _denial_reason(decision: dict[str, Any]) -> str | None:
     """The reason a hook decision denies a tool call, or None when it allows it."""
     output = decision.get("hookSpecificOutput", {})
@@ -303,6 +319,10 @@ class _BaseAdapter:
     """
 
     _name: str = "base"
+    # False where raising from the tool hook does not stop the run: the
+    # framework logs the exception or reports a hook failure, and could then
+    # run the tool, or the adapter only observes. Those adapters never raise.
+    _can_raise_on_deny: bool = True
     # Hosts whose hooks name a transcript set a reader for its usage lines.
     _usage_reader_type: type[TranscriptUsage] | None = None
 
@@ -322,9 +342,18 @@ class _BaseAdapter:
         approval_handler: Callable[..., bool] | None = None,
         chain: AttestationChain | None = None,
         stream_from_env: bool = True,
+        on_deny: str = "continue",
     ) -> None:
+        if on_deny not in ON_DENY_VALUES:
+            raise ValueError(f"on_deny must be one of {ON_DENY_VALUES}, not {on_deny!r}")
+        if on_deny == "raise" and not self._can_raise_on_deny:
+            raise ValueError(
+                f"on_deny='raise' is not supported by the {self._name} adapter: it "
+                f"cannot stop a run by raising from its tool hook"
+            )
         self._profile = profile
         self._enforce = enforce
+        self._on_deny = on_deny
         self._signing_key = signing_key
         # Called when enforce=True and an action escalates (governance
         # require-approval, cortical drift, recovery chain-tamper).
@@ -897,10 +926,7 @@ class _BaseAdapter:
         )
         # A call that could not be evaluated is not known to be safe.
         if self._enforce and event_type == "pre_tool_use":
-            return self._deny_payload(
-                f"Agentegrity could not evaluate this tool call "
-                f"({type(exc).__name__}), so enforcement denies it"
-            )
+            return self._deny_payload("error")
         return {}
 
     # --- Tool-call gates with async layer checks ---
@@ -973,10 +999,20 @@ class _BaseAdapter:
         tool_name: str,
         tool_input: dict[str, Any],
     ) -> None:
-        """Raise :class:`IntegrityViolationError` when enforcement denies a tool call."""
+        """Raise :class:`IntegrityViolationError` when enforcement denies a tool call.
+
+        For hook surfaces that cannot return a result in place of the tool, so a
+        denial ends the run whatever ``on_deny`` says.
+        """
         reason = self._tool_call_denial(tool_name, tool_input)
         if reason is not None:
             raise IntegrityViolationError(reason)
+
+    def _continue_or_raise(self, reason: str) -> str:
+        """Return the denial for the model, or raise it when ``on_deny="raise"``."""
+        if self._on_deny == "raise":
+            raise IntegrityViolationError(reason)
+        return reason
 
     # --- Buffering ---
 
@@ -1007,13 +1043,13 @@ class _BaseAdapter:
         layers = getattr(self._evaluator, "layers", [])
         return [layer for layer in layers if isinstance(layer, kind)]
 
-    def _deny_payload(self, reason: str) -> dict[str, Any]:
-        """Build the hook deny payload from a human-readable reason."""
+    def _deny_payload(self, code: str) -> dict[str, Any]:
+        """Build the hook deny payload; the reason the model sees is :func:`denial_message`."""
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
+                "permissionDecisionReason": denial_message(code),
             }
         }
 
@@ -1039,10 +1075,7 @@ class _BaseAdapter:
             return {}
         action = score.action
         if action == "block":
-            return self._deny_payload(
-                f"Agentegrity integrity score {score.composite:.3f} "
-                f"triggered block action"
-            )
+            return self._deny_payload("block")
         if action == "escalate":
             if self._approval_handler is not None:
                 decision = resolve_approval(
@@ -1057,10 +1090,7 @@ class _BaseAdapter:
                 )
                 if decision.approved:
                     return {}
-            return self._deny_payload(
-                f"Agentegrity integrity score {score.composite:.3f} "
-                f"triggered escalate action without approval"
-            )
+            return self._deny_payload("escalate")
         return {}
 
     # --- Framework-agnostic event handlers ---
