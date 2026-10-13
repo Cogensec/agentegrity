@@ -2,6 +2,7 @@
 
 import pytest
 
+from agentegrity.core.approval import ApprovalDecision, ApprovalWorkflow
 from agentegrity.core.evaluator import IntegrityEvaluator
 from agentegrity.core.monitor import (
     IntegrityMonitor,
@@ -12,6 +13,8 @@ from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext,
 from agentegrity.layers.adversarial import AdversarialLayer
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.governance import GovernanceLayer
+
+from .test_framework_enforcement import _Verdict
 
 
 def make_profile():
@@ -122,3 +125,37 @@ class TestIntegrityMonitor:
 
         with pytest.raises(IntegrityViolationError):
             blocked_action()
+
+
+class TestGuardApproval:
+    """``guard`` honours what an approval handler decided, whatever it returns."""
+
+    @staticmethod
+    def _act(handler):
+        monitor = IntegrityMonitor(
+            make_profile(),
+            IntegrityEvaluator(layers=[_Verdict("escalate")]),
+            approval_handler=handler,
+        )
+
+        @monitor.guard
+        def act(context=None):
+            return "ran"
+
+        return act
+
+    def test_a_workflow_denial_blocks(self):
+        act = self._act(ApprovalWorkflow(lambda *_: False))
+        with pytest.raises(IntegrityViolationError):
+            act(context={})
+
+    def test_a_workflow_approval_runs(self):
+        assert self._act(ApprovalWorkflow(lambda *_: True))(context={}) == "ran"
+
+    def test_a_returned_denial_decision_blocks(self):
+        act = self._act(lambda *_: ApprovalDecision(approved=False))
+        with pytest.raises(IntegrityViolationError):
+            act(context={})
+
+    def test_a_bool_approval_runs(self):
+        assert self._act(lambda *_: True)(context={}) == "ran"

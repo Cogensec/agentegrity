@@ -22,6 +22,8 @@ layer that scores only what exists and never deletes evidence.
 
 ### Fixed
 
+- **`IntegrityMonitor` let a denied escalation through.** `@guard` read the approval handler's return value with `bool()`, and an `ApprovalDecision` is a dataclass that is truthy even when `approved` is false, so a denial from `ApprovalWorkflow` let the guarded function run. The monitor and adapters now share one resolver, `agentegrity.core.approval.resolve_approval()`, which reads `.approved`.
+- **Webhook and Slack alerts never fired from an adapter.** The alert exporters read each event as a `FrameworkEvent` object and defined their callbacks as plain functions, while adapters pass the dict form and await the result. Both failures were caught and logged, so no alert was ever sent. The callbacks are now coroutines that read the dict, like every other exporter.
 - **The recovery layer never checked the chain adapters write.** Adapters fed scores to `RecoveryLayer` but not their `AttestationChain`, so the continuity sub-score was a constant 0.5 and a tampered chain never escalated. Adapters and `IntegrityMonitor` now bind their chain to the recovery layer. An empty bound chain scores as intact, so composites rise slightly from the second evaluation onward and the first evaluation now matches them.
 - **CrewAI could corrupt the attestation chain.** CrewAI's event bus runs handlers on a thread pool, so two events could append to the chain at once (`chain_previous mismatch`). Adapters now handle one event at a time, and CrewAI tool calls are evaluated in the synchronous before-tool-call hook, with their arguments as a dict instead of a string.
 - The OpenAI Agents adapter evaluated every tool call with empty arguments. It now reads them from `ToolContext.tool_arguments`.
