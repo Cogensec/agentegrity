@@ -411,7 +411,13 @@ def _pro(rest: list[str]) -> int:
     import urllib.error
     import urllib.request
 
-    from agentegrity.exporters.http import ENV_TOKEN, ENV_URL, ENV_URL_ALIAS
+    from agentegrity.exporters.http import (
+        ENV_TOKEN,
+        ENV_URL,
+        ENV_URL_ALIAS,
+        open_without_redirects,
+        transport_problem,
+    )
 
     token = os.environ.get(ENV_TOKEN)
     url = os.environ.get(ENV_URL) or os.environ.get(ENV_URL_ALIAS)
@@ -456,6 +462,10 @@ def _pro(rest: list[str]) -> int:
         print(f"error: no dashboard URL. Pass --url or set {ENV_URL}.", file=sys.stderr)
         return 2
     url = url.rstrip("/")
+    problem = transport_problem(url)
+    if problem is not None:
+        print(f"error: {problem}", file=sys.stderr)
+        return 2
 
     # Verify first: turns an opaque token into visible proof it points at the
     # workspace the user expects, before anything is streamed.
@@ -463,7 +473,7 @@ def _pro(rest: list[str]) -> int:
         f"{url}/ingest/verify", headers={"Authorization": f"Bearer {token}"}
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as resp:
+        with open_without_redirects(request, 10) as resp:
             info = json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         if exc.code == 401:

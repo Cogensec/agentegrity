@@ -64,8 +64,8 @@ The command always checks the token first, with `GET <url>/ingest/verify` and th
 | Exit status | Meaning |
 |---|---|
 | 0 | Token accepted (no command given) |
-| 1 | Token rejected (`401`), no `/ingest/verify` at that URL (`404`), another HTTP error, or the URL is unreachable |
-| 2 | Missing token, missing URL, a flag without its value, or an unknown option |
+| 1 | Token rejected (`401`), no `/ingest/verify` at that URL (`404`), a redirect (not followed), another HTTP error, or the URL is unreachable |
+| 2 | Missing token, missing URL, a URL that is neither HTTPS nor loopback, a flag without its value, or an unknown option |
 | 127 | The command was not found |
 
 When a command runs, its own exit status is returned. More on what streaming sends in [Stream to Agentegrity Pro](/exporters/agentegrity-pro).

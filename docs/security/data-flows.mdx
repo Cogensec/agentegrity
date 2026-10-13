@@ -18,7 +18,7 @@ The Python library evaluates in your process and needs no network. Telemetry is 
 | [`AdversarialSLMLayer`](#model-backed-layers) | Off | `AGENTEGRITY_SLM_BASE_URL` (local Ollama by default) | The content it classifies |
 | [`KMSCheckpoint`](#kms-checkpoints) | Off | AWS KMS | Data-key requests only |
 | [`agentegrity pro`](#the-agentegrity-pro-command) | Off | The URL you pass | Your ingest token |
-| [TypeScript reporter](#typescript-client) | On | `AGENTEGRITY_URL`, default `http://localhost:8787` | Full session content |
+| [TypeScript reporter](#typescript-client) | Off | `AGENTEGRITY_URL` | Full session content |
 
 ## Telemetry
 
@@ -39,7 +39,7 @@ Exporters receive everything the adapter sees. Event `data` is the payload the f
 - In code, with `register_exporter(HTTPExporter(url, token))`.
 - From the environment: when `AGENTEGRITY_TOKEN` and `AGENTEGRITY_EXPORTER_URL` (or its alias `AGENTEGRITY_URL`) are both set, every Python adapter attaches one at construction. This includes adapters built by the coding-agent hook daemon.
 
-Unset either variable, or pass `stream_from_env=False` to an adapter class, to keep the environment from attaching one. The token is sent as a Bearer header to whatever URL you set, including `http://` URLs.
+Unset either variable, or pass `stream_from_env=False` to an adapter class, to keep the environment from attaching one. The URL must be HTTPS or a loopback address: `HTTPExporter` raises `ValueError` for any other, and the environment path attaches nothing and logs a warning. The token is sent as a Bearer header, and redirects are not followed, so it goes only to the configured origin.
 
 **`OTelSessionExporter`** writes spans and metrics through your OpenTelemetry providers; where they go is set by your OpenTelemetry configuration. Span attributes carry scores, actions, layer names, tool names and 16-character SHA-256 prefixes of content. Raw content is added only with `capture_content=True`, as span events truncated to 512 characters. See [OpenTelemetry](/exporters/opentelemetry).
 
@@ -67,13 +67,13 @@ All three call their model only on the async path: `await layer.aevaluate(...)`,
 
 ## The agentegrity pro command
 
-`agentegrity pro` sends `GET <url>/ingest/verify` with your token to check it, then, if you pass a command, runs it with streaming turned on. See [CLI](/reference/cli#pro).
+`agentegrity pro` refuses a URL that is neither HTTPS nor loopback, then sends `GET <url>/ingest/verify` with your token to check it without following redirects, then, if you pass a command, runs it with streaming turned on. See [CLI](/reference/cli#pro).
 
 ## TypeScript client
 
-Every `@agentegrity/<framework>` package sends each session through the built-in reporter to `AGENTEGRITY_URL`. With nothing set, that is `http://localhost:8787`, so payloads stay on the machine but requests are still made (and fail with a warning if nothing listens). The payloads are the same full-content exporter payloads, without integrity scores, because the TypeScript packages do not evaluate.
+Every `@agentegrity/<framework>` package sends each session through the built-in reporter to `AGENTEGRITY_URL`, and sends nothing when it is unset. The URL must be HTTPS or a loopback address; any other URL is refused and nothing is sent. The payloads are the same full-content exporter payloads, without integrity scores, because the TypeScript packages do not evaluate. Redirects are refused, so the token in `AGENTEGRITY_TOKEN` goes only to the configured origin.
 
-**Turn off:** `AGENTEGRITY_OFFLINE=1` skips the requests and keeps exporters you registered; `AGENTEGRITY_DISABLED=1` turns the adapter off. The token in `AGENTEGRITY_TOKEN` is sent only to HTTPS or loopback URLs.
+**Turn off:** leave `AGENTEGRITY_URL` unset, set `AGENTEGRITY_OFFLINE=1` to skip requests while keeping exporters you registered, or set `AGENTEGRITY_DISABLED=1` to turn the adapter off.
 
 ## Checking a session
 

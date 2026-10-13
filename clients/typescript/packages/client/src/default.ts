@@ -39,13 +39,12 @@ export interface AdapterConfig {
    * session_start `profile` object.
    */
   profile?: Partial<AgentProfile>;
-  /** Options passed straight to the underlying AgentegrityReporter. */
-  reporterOptions?: Partial<ReporterOptions>;
   /**
-   * Default base URL if `reporterOptions.baseUrl` and
-   * `AGENTEGRITY_URL` env var are both unset. Defaults to `http://localhost:8787`.
+   * Options passed straight to the underlying AgentegrityReporter. Without
+   * `baseUrl` or the `AGENTEGRITY_URL` env var, nothing is sent over the
+   * network; registered exporters still receive every event.
    */
-  defaultBaseUrl?: string;
+  reporterOptions?: Partial<ReporterOptions>;
 }
 
 export interface EmittableEvent {
@@ -158,11 +157,7 @@ async function safeCall(
 export function createDefaultAdapter(config: AdapterConfig): DefaultAdapter {
   const adapterName = config.adapterName;
   const disabled = isDisabled();
-  const baseUrl =
-    config.reporterOptions?.baseUrl ??
-    readEnv("AGENTEGRITY_URL") ??
-    config.defaultBaseUrl ??
-    "http://localhost:8787";
+  const baseUrl = config.reporterOptions?.baseUrl ?? readEnv("AGENTEGRITY_URL");
   const apiKey = config.reporterOptions?.apiKey ?? readEnv("AGENTEGRITY_TOKEN");
   const profile = defaultProfile(adapterName, config.profile);
 

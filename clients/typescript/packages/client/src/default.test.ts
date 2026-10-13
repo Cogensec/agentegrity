@@ -42,3 +42,28 @@ test("exporter exceptions are swallowed (fail-open)", async () => {
   await ad.emit({ event_type: "user_prompt_submit", data: {} });
   assert.ok(true); // didn't throw
 });
+
+test("without AGENTEGRITY_URL the adapter sends nothing but still feeds exporters", async () => {
+  const prevOffline = process.env.AGENTEGRITY_OFFLINE;
+  const prevUrl = process.env.AGENTEGRITY_URL;
+  delete process.env.AGENTEGRITY_OFFLINE;
+  delete process.env.AGENTEGRITY_URL;
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return { ok: true, status: 200 } as Response;
+  }) as unknown as typeof fetch;
+  try {
+    const ad = createDefaultAdapter({ adapterName: "local", reporterOptions: { fetchImpl } });
+    const seen: string[] = [];
+    ad.registerExporter({ on_event: (_s, e) => { seen.push(e.event_type); } });
+    await ad.emit({ event_type: "user_prompt_submit", data: {} });
+    await ad.end();
+    assert.equal(calls, 0);
+    assert.deepEqual(seen, ["user_prompt_submit"]);
+  } finally {
+    if (prevOffline === undefined) delete process.env.AGENTEGRITY_OFFLINE;
+    else process.env.AGENTEGRITY_OFFLINE = prevOffline;
+    if (prevUrl !== undefined) process.env.AGENTEGRITY_URL = prevUrl;
+  }
+});
