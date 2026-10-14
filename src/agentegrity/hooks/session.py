@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from agentegrity.adapters.base import _BaseAdapter
+from agentegrity.adapters.base import _BaseAdapter, denial_message
 from agentegrity.adapters.hook_hosts import ADAPTERS_BY_HOST
 from agentegrity.core.attestation import AttestationChain
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
@@ -126,6 +126,10 @@ class HookSession:
         self.persist()
         if self.mode == "alert":
             return None
+        # The host shows a deny reason to the model and an ask reason to the
+        # user, so only the user sees which detectors fired.
+        if verdict == "deny":
+            return render_decision(verdict, denial_message(action))
         return render_decision(verdict, "agentegrity: " + "; ".join(reasons))
 
     def close(self) -> None:
