@@ -13,17 +13,23 @@ Event mapping:
     on_agent_end       -> stop
     on_llm_end         -> token usage
 
-Enforcement: the SDK awaits ``on_tool_start`` before it invokes a tool.
-Under ``enforce=True`` a denied call raises :class:`IntegrityViolationError`
-there, so the tool never runs and the run ends with that error. Limits:
+Enforcement has two surfaces:
 
-* Tools that run on OpenAI's side (web search, file search) and handoffs
-  fire no ``on_tool_start`` and cannot be blocked.
-* Shell, local shell, computer and apply_patch tools receive no arguments
-  in the hook, so they are evaluated by name only.
-* An agent used through ``Agent.as_tool()`` runs its tools in a nested run
-  that these hooks do not reach; only the call to the agent-tool itself is
-  evaluated.
+* ``instrument(agent)`` attaches a tool input guardrail to every function tool
+  the agent can reach, including the tools of agents used through
+  ``Agent.as_tool()`` and agents in ``handoffs`` (for ``handoff(agent)``
+  objects, on SDK versions that keep a reference to the agent). A denied call returns the
+  denial code to the model in place of the tool result (``reject_content``)
+  and the run continues; with ``on_deny="raise"`` the run ends with
+  :class:`IntegrityViolationError`.
+* The run hooks gate any call whose tool carries no guardrail, such as MCP
+  tools, which the SDK builds on every turn. Hooks cannot return a result in
+  place of the tool, so a denial there raises and the run ends.
+
+Limits: tools that run on OpenAI's side (web search, file search) and
+handoffs cannot be blocked, and shell, local shell, computer and apply_patch
+tools get no guardrails and receive no arguments in the hook, so they are
+evaluated by name only.
 
 Token usage comes from each model response, attributed to the agent's
 model. An agent run as a tool shares its parent's ``Usage`` object but
@@ -32,9 +38,9 @@ counted calls is recorded as one more entry with an unknown model.
 
 Usage:
     from agents import Agent, Runner
-    from agentegrity.openai_agents import run_hooks, report
+    from agentegrity.openai_agents import instrument, run_hooks, report
 
-    agent = Agent(name="my-agent", ...)
+    agent = instrument(Agent(name="my-agent", ...))
     await Runner.run(agent, input="...", hooks=run_hooks())
     print(report())
 """
@@ -43,6 +49,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
@@ -65,6 +72,65 @@ class OpenAIAgentsAdapter(_BaseAdapter):
         # One entry per run's shared Usage object. The object is held so its
         # id cannot be reused by a later run while this one is tracked.
         self._runs: dict[int, _Run] = {}
+        # The tool input guardrail instrument() attaches, built on first use.
+        self._guardrail: Any = None
+
+    def instrument(self, agent: Any) -> Any:
+        """Gate every function tool ``agent`` can reach with a tool input guardrail.
+
+        Walks the agent's tools, the agents behind ``Agent.as_tool()`` tools and
+        the agents in ``handoffs``. A tool already carrying the guardrail is left
+        as is, so instrumenting twice is safe. Returns the agent.
+        """
+        try:
+            from agents import FunctionTool
+        except ImportError:
+            raise ImportError(
+                "openai-agents 0.8 or later is required for instrument(). "
+                "Install it with: pip install agentegrity[openai-agents]"
+            ) from None
+        if not _reaches_agent_tools():
+            warnings.warn(
+                "this openai-agents version does not expose the agent behind "
+                "Agent.as_tool(), so tools inside agents used as tools are not gated",
+                UserWarning,
+                stacklevel=2,
+            )
+        guardrail = self._tool_guardrail()
+        for tool in _function_tools(agent, FunctionTool):
+            guardrails = list(tool.tool_input_guardrails or [])
+            if not any(g is guardrail for g in guardrails):
+                tool.tool_input_guardrails = [*guardrails, guardrail]
+        return agent
+
+    def _tool_guardrail(self) -> Any:
+        """The ``ToolInputGuardrail`` that evaluates each call, shared by every tool."""
+        if self._guardrail is not None:
+            return self._guardrail
+        from agents.tool_guardrails import ToolGuardrailFunctionOutput, ToolInputGuardrail
+
+        adapter = self
+
+        async def agentegrity_tool_gate(data: Any) -> Any:
+            context = data.context
+            reason = await adapter._atool_call_denial(
+                getattr(context, "tool_name", ""), _tool_arguments(context)
+            )
+            if reason is None:
+                return ToolGuardrailFunctionOutput.allow()
+            if adapter._on_deny == "raise":
+                raise _denial_error()(reason)
+            return ToolGuardrailFunctionOutput.reject_content(reason)
+
+        self._guardrail = ToolInputGuardrail(guardrail_function=agentegrity_tool_gate,
+                                             name="agentegrity")
+        return self._guardrail
+
+    def _guards(self, tool: Any) -> bool:
+        """Whether ``tool`` carries this adapter's guardrail, which already gates its calls."""
+        return self._guardrail is not None and any(
+            g is self._guardrail for g in getattr(tool, "tool_input_guardrails", None) or []
+        )
 
     def _record_response(self, context: Any, agent: Any, response: Any) -> None:
         """Count one model call, then any calls the shared total holds beyond it."""
@@ -132,6 +198,8 @@ class OpenAIAgentsAdapter(_BaseAdapter):
             async def on_tool_start(
                 self, context: Any, agent: Any, tool: Any
             ) -> None:
+                if adapter._guards(tool):
+                    return
                 tool_name = getattr(tool, "name", str(tool))
                 reason = await adapter._atool_call_denial(tool_name, _tool_arguments(context))
                 if reason is not None:
@@ -233,6 +301,45 @@ def _denial_error() -> type[IntegrityViolationError]:
         """Agentegrity denied a tool call under enforcement."""
 
     return ToolCallDenied
+
+
+def _reaches_agent_tools() -> bool:
+    """Whether the SDK keeps the agent behind ``Agent.as_tool()`` on the tool (0.8+)."""
+    from agents import FunctionTool
+
+    return "_agent_instance" in getattr(FunctionTool, "__dataclass_fields__", {})
+
+
+def _function_tools(agent: Any, function_tool: type) -> list[Any]:
+    """Every function tool reachable from ``agent``: its own, and those of nested agents."""
+    tools: list[Any] = []
+    seen: list[Any] = []
+    pending = [agent]
+    while pending:
+        current = pending.pop()
+        # Agents are unhashable dataclasses, so visited ones are matched by identity.
+        if current is None or any(current is done for done in seen):
+            continue
+        seen.append(current)
+        for tool in getattr(current, "tools", None) or []:
+            if isinstance(tool, function_tool):
+                tools.append(tool)
+                # The agent behind Agent.as_tool() runs its tools in a nested run.
+                pending.append(getattr(tool, "_agent_instance", None))
+        pending.extend(_handoff_agent(h) for h in getattr(current, "handoffs", None) or [])
+    return tools
+
+
+def _handoff_agent(entry: Any) -> Any:
+    """The agent a ``handoffs`` entry leads to: the entry itself, or a ``Handoff``'s target.
+
+    A ``Handoff`` from ``handoff(agent)`` keeps its agent only in the private
+    ``_agent_ref`` weakref, which recent SDK versions set; older ones keep none.
+    """
+    if hasattr(entry, "tools"):
+        return entry
+    ref = getattr(entry, "_agent_ref", None)
+    return ref() if callable(ref) else None
 
 
 def _tool_arguments(context: Any) -> dict[str, Any]:

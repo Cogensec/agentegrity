@@ -15,6 +15,14 @@ LangChain or LangGraph project:
     graph = instrument_graph(my_compiled_graph)
     graph.invoke(state)
     print(report())
+
+    # create_agent, where a denied call reaches the model and the run continues:
+    from agentegrity.langchain import middleware
+    agent = create_agent(model, tools, middleware=[middleware(enforce=True)])
+
+A callback handler can only stop a denied call by raising, which ends the run.
+``middleware()`` and ``tool_wrappers()`` (for a LangGraph ``ToolNode``) hand the
+model the denial instead.
 """
 
 from __future__ import annotations
@@ -33,9 +41,11 @@ __all__ = [
     "callback_handler",
     "instrument_chain",
     "instrument_graph",
+    "middleware",
     "register_exporter",
     "report",
     "reset",
+    "tool_wrappers",
 ]
 
 
@@ -58,17 +68,40 @@ def _resolve(
     profile: AgentProfile | None,
     client: AgentegrityClient | None,
     enforce: bool,
+    on_deny: str = "continue",
 ) -> LangChainAdapter:
-    if profile is not None or client is not None or enforce:
+    if profile is not None or client is not None or enforce or on_deny != "continue":
         effective_client = client or AgentegrityClient()
-        effective_profile = profile or AgentProfile.default()
         ad: LangChainAdapter = effective_client.create_adapter(
             "langchain",
-            profile=effective_profile,
+            profile=profile or AgentProfile.default(),
             enforce=enforce,
+            on_deny=on_deny,
         )
         return ad
     return _default_adapter()
+
+
+def middleware(
+    *,
+    profile: AgentProfile | None = None,
+    client: AgentegrityClient | None = None,
+    enforce: bool = False,
+    on_deny: str = "continue",
+) -> Any:
+    """Return a ``create_agent`` middleware that gates every tool call."""
+    return _resolve(profile, client, enforce, on_deny).middleware()
+
+
+def tool_wrappers(
+    *,
+    profile: AgentProfile | None = None,
+    client: AgentegrityClient | None = None,
+    enforce: bool = False,
+    on_deny: str = "continue",
+) -> dict[str, Any]:
+    """Return ``wrap_tool_call`` and ``awrap_tool_call`` for ``ToolNode(tools, **...)``."""
+    return _resolve(profile, client, enforce, on_deny).tool_wrappers()
 
 
 def instrument_chain(

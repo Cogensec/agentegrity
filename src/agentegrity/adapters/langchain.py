@@ -14,11 +14,24 @@ Event mapping:
     on_chain_end (top-level)     -> stop
     on_llm_end                   -> token usage (usage_metadata, per run_id)
 
-Enforcement: ``on_tool_start`` runs before LangChain invokes the tool body,
-and the handler sets ``raise_error``, so under ``enforce=True`` a denied
-call raises :class:`IntegrityViolationError` and the tool never runs. The
-error propagates out of ``invoke``; a LangGraph ``ToolNode`` configured to
-handle all tool errors turns it into an error message for the model instead.
+Enforcement has two surfaces:
+
+* ``middleware()`` for ``create_agent`` and ``tool_wrappers()`` for a LangGraph
+  ``ToolNode`` wrap every tool call. A denied call returns a ``ToolMessage``
+  with ``status="error"`` and the denial code instead of running, so the model
+  sees the denial and the run continues (``on_deny="raise"`` ends it with
+  :class:`IntegrityViolationError` instead). They need ``langchain>=1.0`` and
+  ``langgraph-prebuilt>=1.0.2``.
+* The callback handler (``instrument_chain``, ``instrument_graph``) is the only
+  surface for plain runnables. Callbacks cannot return a result in place of the
+  tool, so ``on_tool_start`` raises :class:`IntegrityViolationError` and the run
+  ends. A call the same adapter's middleware or tool wrappers are running is
+  left to them (matched by tool call id), so it is evaluated and recorded once.
+
+The middleware gates the call it receives, so put it last in ``middleware=[...]``:
+a middleware after it could change the call after it was evaluated. The wrappers
+record tool results but not prompts or the end of the run; use the same adapter's
+``instrument_graph()`` on the agent for those.
 
 Usage (LangChain):
     from agentegrity.langchain import instrument_chain, report
@@ -55,6 +68,106 @@ class LangChainAdapter(_BaseAdapter):
         super().__init__(*args, **kwargs)
         # Model named at chat-model start, for responses that do not name it.
         self._start_models: dict[UUID, str] = {}
+        # Tool call ids a wrapper is executing right now, and the callback runs
+        # that belong to them. The wrapper gates and records those calls, so the
+        # callback handler skips them; every other call it still gates.
+        self._wrapped_calls: set[str] = set()
+        self._wrapped_runs: set[UUID] = set()
+
+    def middleware(self) -> Any:
+        """Return a ``create_agent`` middleware that gates every tool call.
+
+        A denied call returns an error ``ToolMessage`` carrying the denial code,
+        and the agent continues; with ``on_deny="raise"`` it raises instead.
+        """
+        try:
+            from langchain.agents.middleware import AgentMiddleware
+        except ImportError:
+            raise ImportError(
+                "middleware() needs langchain 1.0 or later (create_agent). "
+                "Install it with: pip install 'langchain>=1.0'"
+            ) from None
+        wrappers = self.tool_wrappers()
+
+        class AgentegrityMiddleware(AgentMiddleware):  # type: ignore[misc, unused-ignore]
+            """Gates each tool call through the adapter before it runs."""
+
+            def wrap_tool_call(self, request: Any, handler: Any) -> Any:
+                return wrappers["wrap_tool_call"](request, handler)
+
+            async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+                return await wrappers["awrap_tool_call"](request, handler)
+
+        return AgentegrityMiddleware()
+
+    def tool_wrappers(self) -> dict[str, Any]:
+        """Return ``wrap_tool_call`` and ``awrap_tool_call`` for a LangGraph ``ToolNode``.
+
+        Use as ``ToolNode(tools, **adapter.tool_wrappers())``. A denied call
+        returns an error ``ToolMessage`` carrying the denial code instead of
+        running; with ``on_deny="raise"`` it raises instead.
+        """
+        try:
+            from langchain_core.messages import ToolMessage
+        except ImportError:
+            raise ImportError(
+                "langchain-core is required for the LangChain adapter. "
+                "Install it with: pip install agentegrity[langchain]"
+            ) from None
+        adapter = self
+
+        def _denied(request: Any, reason: str) -> Any:
+            call = request.tool_call
+            return ToolMessage(content=adapter._continue_or_raise(reason),
+                               tool_call_id=call.get("id") or "", name=call.get("name"),
+                               status="error")
+
+        def _start(request: Any) -> str | None:
+            call_id = request.tool_call.get("id")
+            if not isinstance(call_id, str) or not call_id:
+                return None
+            adapter._wrapped_calls.add(call_id)
+            return call_id
+
+        def _finish(request: Any, call_id: str | None, result: Any, error: Any) -> None:
+            """Record the tool's result, which the gate on the next call reads."""
+            adapter._wrapped_calls.discard(call_id or "")
+            name = request.tool_call.get("name", "")
+            if error is not None:
+                adapter._dispatch("post_tool_use_failure", {"tool_name": name, "error": str(error)})
+            elif isinstance(result, ToolMessage):
+                adapter._dispatch("post_tool_use",
+                                  {"tool_name": name, "tool_response": str(result.content)})
+
+        def wrap_tool_call(request: Any, execute: Any) -> Any:
+            call = request.tool_call
+            reason = adapter._tool_call_denial(call.get("name", ""), call.get("args"))
+            if reason is not None:
+                return _denied(request, reason)
+            call_id = _start(request)
+            try:
+                result = execute(request)
+            except Exception as exc:
+                _finish(request, call_id, None, exc)
+                raise
+            _finish(request, call_id, result, None)
+            return result
+
+        async def awrap_tool_call(request: Any, execute: Any) -> Any:
+            call = request.tool_call
+            reason = await adapter._atool_call_denial(call.get("name", ""), call.get("args"))
+            if reason is not None:
+                return _denied(request, reason)
+            call_id = _start(request)
+            try:
+                result = await execute(request)
+            except Exception as exc:
+                _finish(request, call_id, None, exc)
+                raise
+            _finish(request, call_id, result, None)
+            return result
+
+        return {"wrap_tool_call": wrap_tool_call, "awrap_tool_call": awrap_tool_call}
 
     def _record_llm_result(self, response: Any, run_id: UUID) -> None:
         """Count each generation's ``usage_metadata``, keyed by run so a repeat counts once."""
@@ -178,6 +291,10 @@ class LangChainAdapter(_BaseAdapter):
                 parent_run_id: UUID | None = None,
                 **kwargs: Any,
             ) -> None:
+                if kwargs.get("tool_call_id") in adapter._wrapped_calls:
+                    # The wrapper already gated this call and records its result.
+                    adapter._wrapped_runs.add(run_id)
+                    return
                 tool_name = (serialized or {}).get("name", "tool") if serialized else "tool"
                 inputs = kwargs.get("inputs")
                 tool_input = dict(inputs) if isinstance(inputs, dict) else {"input": input_str}
@@ -191,6 +308,9 @@ class LangChainAdapter(_BaseAdapter):
                 parent_run_id: UUID | None = None,
                 **kwargs: Any,
             ) -> None:
+                if run_id in adapter._wrapped_runs:
+                    adapter._wrapped_runs.discard(run_id)
+                    return
                 adapter._dispatch(
                     "post_tool_use",
                     {"tool_name": kwargs.get("name", ""), "tool_response": str(output)},
@@ -204,6 +324,9 @@ class LangChainAdapter(_BaseAdapter):
                 parent_run_id: UUID | None = None,
                 **kwargs: Any,
             ) -> None:
+                if run_id in adapter._wrapped_runs:
+                    adapter._wrapped_runs.discard(run_id)
+                    return
                 adapter._dispatch(
                     "post_tool_use_failure",
                     {"tool_name": kwargs.get("name", ""), "error": str(error)},

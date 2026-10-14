@@ -138,6 +138,7 @@ To set a signing key or an approval handler, construct the adapter class directl
 | `approval_handler` | `None` | Called as `handler(profile, score, candidate_action)` when enforcement meets an `escalate`. Return `True` or an `ApprovalDecision` to allow. Without a handler, escalations are denied; a handler that raises denies. |
 | `chain` | new chain | An existing `AttestationChain` to continue. |
 | `stream_from_env` | `True` | `False` stops the adapter from attaching an `HTTPExporter` from the environment. |
+| `on_deny` | `"continue"` | What a denied tool call does: `"continue"` hands the model the denial and the run goes on; `"raise"` ends the run with `IntegrityViolationError`. The Claude, CrewAI, Google ADK and AutoGen adapters refuse `"raise"`. See [Denials](/integrations/python#denials). |
 
 ## Evaluator and layer options
 

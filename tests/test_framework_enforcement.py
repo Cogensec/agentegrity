@@ -88,7 +88,8 @@ class TestEvaluationFailure:
     async def test_crash_denies_under_enforcement(self) -> None:
         decision = await _pre_tool(ClaudeAdapter(**_kwargs("crash", enforce=True)))
         assert _denied(decision)
-        assert "RuntimeError" in decision["hookSpecificOutput"]["permissionDecisionReason"]
+        assert decision["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+            "agentegrity.denied:error")
 
     @pytest.mark.asyncio
     async def test_crash_allows_without_enforcement(self) -> None:
@@ -165,7 +166,7 @@ class TestLangChain:
 
     def test_an_evaluation_crash_stops_the_tool(self) -> None:
         ran: list[str] = []
-        with pytest.raises(IntegrityViolationError, match="RuntimeError"):
+        with pytest.raises(IntegrityViolationError, match="agentegrity.denied:error"):
             self._instrumented("crash", True, ran).invoke({"command": "ls"})
         assert ran == []
 

@@ -238,6 +238,7 @@ class AgentegrityClient:
         profile: AgentProfile,
         *,
         enforce: bool = False,
+        on_deny: str = "continue",
     ) -> Any:
         """Create a framework adapter wired to this client's evaluator.
 
@@ -254,6 +255,11 @@ class AgentegrityClient:
             calls when the integrity score's action is ``"block"``.
             Observation-only adapters (OTel-based) log this flag but
             cannot enforce; they will emit a runtime warning.
+        on_deny : str
+            ``"continue"`` (default) hands the model the denial in place of
+            the tool's result where the framework allows it; ``"raise"``
+            ends the run with :class:`IntegrityViolationError`. The Claude,
+            CrewAI, Google ADK and AutoGen adapters refuse ``"raise"``.
         """
         try:
             module_path, class_name = _ADAPTER_REGISTRY[name]
@@ -271,6 +277,7 @@ class AgentegrityClient:
                 profile=profile,
                 evaluator=self._evaluator,
                 enforce=enforce,
+                on_deny=on_deny,
             )
         except ImportError:
             # Framework not installed — still the highest-value signal we have.

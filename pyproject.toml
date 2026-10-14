@@ -41,7 +41,7 @@ classifiers = [
 crypto = ["cryptography>=41.0"]
 claude = ["claude-agent-sdk>=0.1.0"]
 langchain = ["langchain-core>=0.3.0"]
-openai-agents = ["openai-agents>=0.1.0"]
+openai-agents = ["openai-agents>=0.8.0"]
 crewai = ["crewai>=1.15.0"]
 google-adk = ["google-adk>=1.18.0"]
 autogen = [

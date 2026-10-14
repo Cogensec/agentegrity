@@ -126,11 +126,25 @@ graph.invoke(state)
 print(report())
 ```
 
-Use the returned object. `instrument_chain()` wraps the runnable with `with_config(callbacks=[handler])` and leaves the original unchanged; a legacy chain without `with_config` gets the handler appended to its `callbacks` attribute instead. `callback_handler()` returns the raw `BaseCallbackHandler` if you register callbacks yourself.
+For an agent built with `create_agent`, or a LangGraph `ToolNode`, gate tool calls with middleware or tool wrappers so a denied call reaches the model and the run continues. Take both from one adapter, and keep its callback handler on the graph for prompts and the end of the run:
+
+```python
+from langchain.agents import create_agent
+from langgraph.prebuilt import ToolNode
+from agentegrity import AgentegrityClient, AgentProfile
+
+ad = AgentegrityClient().create_adapter(
+    "langchain", profile=AgentProfile.default(name="my-agent"), enforce=True
+)
+agent = ad.instrument_graph(create_agent(model, tools, middleware=[ad.middleware()]))
+tool_node = ToolNode(tools, **ad.tool_wrappers())
+```
+
+Put the Agentegrity middleware last in `middleware=[...]`: it evaluates the call it receives, so a middleware after it could change the call after the check. `middleware()` needs `langchain` 1.0 or later and `tool_wrappers()` needs `langgraph-prebuilt` 1.0.2 or later. The module functions `middleware()` and `tool_wrappers()` use the module's default adapter, which does not enforce; with any argument they build a new adapter each call. Use the returned object. `instrument_chain()` wraps the runnable with `with_config(callbacks=[handler])` and leaves the original unchanged; a legacy chain without `with_config` gets the handler appended to its `callbacks` attribute instead. `callback_handler()` returns the raw `BaseCallbackHandler` if you register callbacks yourself.
 
 **Hooks into:** a LangChain callback handler. A top-level `on_chain_start` becomes `user_prompt_submit`, a nested chain start (a graph node) becomes `subagent_start`, a top-level `on_chain_end` becomes `stop`, and `on_tool_start`, `on_tool_end` and `on_tool_error` become the three tool events.
 
-**Enforcement:** LangChain calls `on_tool_start` before it runs the tool body, and the handler sets `raise_error`, so under `enforce=True` a denied call raises `agentegrity.IntegrityViolationError` and the tool never runs. The error ends the `invoke` call. A LangGraph `ToolNode` that is configured to handle every tool error turns it into an error message for the model instead.
+**Enforcement:** with `middleware()` or `tool_wrappers()`, a denied call returns a `ToolMessage` with `status="error"` and the [denial code](#denials) instead of running, and the agent continues. With `on_deny="raise"` it raises `agentegrity.IntegrityViolationError` instead. With only the callback handler, LangChain calls `on_tool_start` before it runs the tool body and the handler sets `raise_error`, so a denied call raises `IntegrityViolationError` and the `invoke` call ends: a callback cannot hand the model a result. A call that the same adapter's middleware or tool wrappers are running is left to them (matched by tool call id), so it is evaluated and recorded once; every other call the callback handler still gates.
 
 **Topology:** `instrument_graph()` reads `graph.get_graph().nodes`. A node named `supervisor`, `supervisor_agent` or `orchestrator` gives a `HIERARCHICAL_DAG` with that node as supervisor and the rest as workers; otherwise every node is a peer in a `PEER_TO_PEER` topology. If introspection fails, the graph is instrumented as a single agent. `instrument_chain()` declares no topology.
 
@@ -140,15 +154,29 @@ Use the returned object. `instrument_chain()` wraps the runnable with `with_conf
 
 ```python
 from agents import Agent, Runner
-from agentegrity.openai_agents import run_hooks, report
+from agentegrity.openai_agents import instrument, run_hooks, report
 
-await Runner.run(Agent(...), input="...", hooks=run_hooks())
+agent = instrument(Agent(...))
+await Runner.run(agent, input="...", hooks=run_hooks())
 print(report())
 ```
 
-**Hooks into:** a `RunHooks` subclass. `on_agent_start` becomes `user_prompt_submit`, `on_tool_start` becomes `pre_tool_use`, `on_tool_end` becomes `post_tool_use`, `on_handoff` becomes `subagent_start`, and `on_agent_end` becomes `stop`. `pre_tool_use` carries the call's arguments, parsed from the JSON string the SDK passes on `ToolContext`.
+`instrument()` needs `openai-agents` 0.8 or later. The hooks skip calls whose tool carries the same adapter's guardrail, so take both from one adapter. To enforce:
 
-**Enforcement:** the SDK awaits `on_tool_start` before it invokes a function tool, so under `enforce=True` a denied call raises `agentegrity.IntegrityViolationError` there, the tool never runs, and `Runner.run` ends with that error. Tools that run on OpenAI's side (web search, file search) and handoffs fire no `on_tool_start` and cannot be blocked. Shell, local shell, computer and apply_patch tools are evaluated by name only, because the hook receives no arguments for them. An agent used through `Agent.as_tool()` runs its tools in a nested run these hooks do not reach, so only the call to the agent-tool is evaluated.
+```python
+from agentegrity import AgentegrityClient, AgentProfile
+
+ad = AgentegrityClient().create_adapter(
+    "openai_agents", profile=AgentProfile.default(name="my-agent"), enforce=True
+)
+await Runner.run(ad.instrument(Agent(...)), input="...", hooks=ad.create_run_hooks())
+```
+
+The module functions use the default adapter, which does not enforce; with any argument they build a new adapter each call, so `instrument(agent, enforce=True)` and `run_hooks(enforce=True)` would be two adapters that both evaluate every call.
+
+**Hooks into:** a `RunHooks` subclass. `on_agent_start` becomes `user_prompt_submit`, `on_tool_start` becomes `pre_tool_use`, `on_tool_end` becomes `post_tool_use`, `on_handoff` becomes `subagent_start`, and `on_agent_end` becomes `stop`. `pre_tool_use` carries the call's arguments, parsed from the JSON string the SDK passes on `ToolContext`. `instrument()` adds a tool input guardrail to every function tool the agent can reach: its own tools, the tools of agents used through `Agent.as_tool()`, and those of agents in `handoffs` (for a `handoff(agent)` object, only on SDK versions that keep a reference to the agent, through the private `_agent_ref`).
+
+**Enforcement:** a function tool carrying the guardrail returns the [denial code](#denials) to the model in place of its result (`reject_content`), and the run continues; with `on_deny="raise"`, `Runner.run` ends with `agentegrity.IntegrityViolationError`. Tools without the guardrail, such as MCP tools, which the SDK builds on every turn, are gated in `on_tool_start`, which can only raise. Reaching inside `Agent.as_tool()` relies on a private SDK attribute (`_agent_instance`); `instrument()` warns if an SDK version no longer has it. Tools that run on OpenAI's side (web search, file search) and handoffs cannot be blocked, and shell, local shell, computer and apply_patch tools are evaluated by name only.
 
 **Topology:** `PEER_TO_PEER`, built incrementally. The starting agent seeds a one-member topology and each handoff target is added as a peer, emitting `topology_change`.
 
@@ -181,17 +209,18 @@ Call `instrument()` once per process. A second call registers the handlers on th
 
 ```python
 from google.adk.agents import LlmAgent
+from google.adk.runners import InMemoryRunner
 from agentegrity.google_adk import instrument, report
 
-agent = LlmAgent(name="my-agent", ...)
-instrument(agent)
-# run with google.adk.runners.Runner
+runner = instrument(InMemoryRunner(agent=LlmAgent(name="my-agent", ...)))
 print(report())
 ```
 
+Pass the `Runner`, or an `App` before you build its `Runner`, so `instrument()` also registers an ADK plugin. The plugin gates every tool call in the app, including tool nodes in a workflow graph. Passing a bare agent still works and covers that agent's own tools.
+
 **Hooks into:** ADK agent callbacks, placed ahead of any callbacks already set, on the agent and on every agent reachable through `sub_agents` or an `AgentTool`. `before_agent_callback` becomes `user_prompt_submit` on the instrumented agent and `subagent_start` on any other; `after_agent_callback` becomes `stop` or `subagent_stop`; `before_tool_callback` and `after_tool_callback` become the tool events. ADK uses the first value a callback returns. These callbacks return nothing unless enforcement denies a tool call, so otherwise your own callbacks still run and decide. Instrumenting an agent again is a no-op. ADK does not run after-agent callbacks once it has transferred to another agent, so a run that ends in a transfer reports no `stop`.
 
-**Enforcement:** ADK skips a tool when a before-tool callback returns a dict and gives that dict to the model as the tool's result. Under `enforce=True` a denied call returns `{"error": <reason>}`, so the tool never runs, the model sees why, and the run continues. Tool nodes in an ADK workflow graph run only plugin callbacks, not agent callbacks, so they are not evaluated.
+**Enforcement:** ADK skips a tool when a before-tool callback returns a dict and gives that dict to the model as the tool's result. Under `enforce=True` a denied call returns `{"error": <denial code>}`, so the tool never runs, the model sees the denial, and the run continues. Tool nodes in an ADK workflow graph run only plugin callbacks, so they are gated only when `instrument()` was given the `Runner` or `App`. A call the plugin handles is not evaluated again by the agent callbacks.
 
 **Topology:** an agent with `sub_agents` (`SequentialAgent`, `ParallelAgent`, `LoopAgent`) gives a `HIERARCHICAL_DAG` with the workflow agent as supervisor. A plain agent stays single-agent.
 
@@ -264,6 +293,28 @@ print(report())
 **Topology:** `HUB_SPOKE`, seeded with the Strands agent or the `agentId` as supervisor. On the boto3 path, collaborators found in `agentCollaboratorInvocationInput` traces are added through `topology_change`.
 
 **Token usage:** on Strands, the invocation's usage from `AfterInvocationEvent`. On boto3, `modelInvocationOutput.metadata.usage` from orchestration, pre- and post-processing and routing traces, keyed by trace id; most traces do not name the model, so it falls back to the profile's `model_id`.
+
+## Denials
+
+Under `enforce=True` a denied tool call never runs. What happens next depends on `on_deny`, an argument of every adapter class and of `AgentegrityClient.create_adapter()`:
+
+- `"continue"` (the default) hands the model the denial in place of the tool's result, and the run goes on. The model can try something else, and Phase 1 recovery has a live run to work with.
+- `"raise"` ends the run with `agentegrity.IntegrityViolationError`.
+
+| Framework | `continue` | `raise` |
+|---|---|---|
+| Claude Agent SDK, CrewAI, Google ADK | Always | Refused: an exception from their tool hook does not stop the run |
+| AutoGen, Bedrock `wrap_client()` | Observation only: nothing is denied | Refused (AutoGen) |
+| LangChain `middleware()` / `tool_wrappers()`, OpenAI `instrument()`, Strands | Yes | Yes |
+| LangChain callback handler, OpenAI run hooks (tools without the guardrail), Agno | Not possible: the hook cannot return a result | Always |
+
+The text the model receives is fixed:
+
+```text
+agentegrity.denied:block: Agentegrity denied this tool call, so it did not run.
+```
+
+The code after `agentegrity.denied:` is `block`, `escalate` (no approval) or `error` (the call could not be evaluated). It never names the detector, the rule or the score, so an attacker who probes denials learns only that a call was denied. The score and the rules that fired are in the attestation chain and the session events.
 
 ## Explicit configuration
 

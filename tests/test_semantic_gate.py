@@ -231,7 +231,8 @@ class TestGate:
     async def test_a_crashing_async_check_denies_under_enforcement(self) -> None:
         decision = await _gate(_adapter(_Semantic("crash")))
         assert _denied(decision)
-        assert "RuntimeError" in decision["hookSpecificOutput"]["permissionDecisionReason"]
+        assert decision["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+            "agentegrity.denied:error")
 
     @pytest.mark.asyncio
     async def test_a_crashing_async_check_allows_without_enforcement(self) -> None:
