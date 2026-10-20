@@ -173,7 +173,50 @@ We believe in being explicit about what the library is and is not, because a sec
 **What it does not do.** The adversarial layer ships a regex pattern taxonomy across eight attack families (prompt_injection, jailbreak, role_confusion, system_prompt_extraction, data_exfiltration, prompt_obfuscation, action_injection, tool_poisoning). Calibration is published in STATUS.md, weak numbers included: 1.000 TPR / 0.000 FPR on InjecAgent (N=2,108) after the action_injection family landed — calibrated on that suite, so read it as in-distribution recall — and **0.286 TPR / 0.113 FPR on AgentDojo's goal-text projection**, which regex cannot close because separating an injected goal from a legitimate user task requires session context, not content patterns. Paraphrased or non-English action injections will evade the regex tier; the LLM/SLM classifier layers are the semantic backstop. The cortical layer uses Jensen-Shannon distance with Laplace smoothing for drift detection (replaces the older asymmetric KL approximation) and structural memory-provenance inspection. v0.2.0 introduced optional LLM-backed cortical checks (`pip install agentegrity[llm]`) that use Claude for semantic reasoning-chain validation, memory-provenance analysis, and drift classification; these run alongside the pattern-based checks and fail open on API errors. Production deployments should also register custom detectors with domain-specific logic. The library ships fourteen framework adapters: eight in Python (Claude Agent SDK, LangChain / LangGraph, OpenAI Agents SDK, CrewAI, Google ADK, AutoGen, Agno, AWS Bedrock Agents) and six in TypeScript (the original five plus Vercel AI SDK). Coding agents (Claude Code, Codex) are covered by hook plugins on a shared runtime. Tool calls are classified by their arguments (`classify_tool_call()`), which is static analysis of what a command says: anything the shell computes at runtime (variable-built paths, command substitution, `$IFS` splicing) is flagged as obfuscated, not resolved, and Codex hook gaps (`write_stdin`, still-running commands, hosted tools) cannot be closed from a hook. The Semantic Kernel adapter is deferred pending Microsoft Agent Framework GA (Q2 2026); one MAF adapter will cover both.
 
 
-**What it deliberately is not.** It is not a guardrail. It blocks nothing unless you turn enforcement on (`enforce=True` on an adapter; the coding-agent plugins default to enforce and offer `alert` mode), and every verdict is recorded with its reason on the chain. With the default layers the cause is an explicit rule or a measured threshold: a governance policy, a tool-call category such as remote code execution or log tampering, a high-severity regex match, or drift and degradation past a configured bound. The opt-in LLM and SLM classifier layers can also block on a model's verdict (severity of 0.90 or more), so enable them under enforcement only after measuring them on your traffic. It is not a runtime enforcement layer trying to compete with WAF-style products. It is not a hosted service. It is a measurement and verification library, and everything it does is in service of producing evidence that an agent has (or lacks) the structural properties of a self-securing system.
+**What it deliberately is not.** It is not a guardrail. It blocks nothing unless you turn enforcement on (`enforce=True` on an adapter; the coding-agent plugins default to enforce and offer `alert` mode), and every verdict is recorded with its reason on the chain. With the default layers the cause is an explicit rule or a measured threshold: a governance policy, a tool-call category such as remote code execution or log tampering, a high-severity regex match, or drift and degradation past a configured bound. The opt-in LLM and SLM classifier layers can also block on a model's verdict (severity of 0.90 or more), so enable them under enforcement only after measuring them on your traffic. The Python OSS library also provides an **opt-in, host-installed authorization gate** (`ActionSecurityGate`) that can deny unauthorized tools at the real execution boundary when callers use `invoke()` or `ainvoke()`. Adapter hook verdicts are only enforceable where the host actually honors a denial. It is **not** a universal interception layer, tool sandbox, hosted service, or guarantee that a downstream effect occurred. Its central purpose remains measuring and verifying agent integrity with defensible evidence.
+
+---
+
+## Runtime Action Authority (opt-in, Python OSS)
+
+In addition to integrity scoring and attestation, the **current repository source**
+includes a trusted-host authorization API for consequential agent tool calls.
+This work was merged after the v0.12.0 release documented above; **its presence
+on `main` is not a claim that every published PyPI or npm package includes it**.
+Check the installed package and its release notes before relying on these APIs.
+
+`TaskMandate` defines who may act, for which run, tools, resources, effects
+and credentials, and for how long. `ToolAuthority` is a separate trusted
+registry of each tool's real effect and resource binding. An
+`ActionSecurityGate` checks both at a tool's execution boundary. Neither
+permissions nor trusted source labels should be derived from model text,
+retrieved documents, peer-agent messages, or MCP/tool descriptions.
+
+| Runtime failure pattern | Opt-in capability | Detailed guide |
+|---|---|---|
+| **Standing access** | Explicit, expiring task mandates with tool/resource/effect/credential allowlists | [Runtime Action Authority](docs/RUNTIME-ACTION-AUTHORITY.md) |
+| **First-call effects** | `invoke()` / `ainvoke()` enforce before executing, and distinguish permission from actual side effects | [Runtime Action Authority](docs/RUNTIME-ACTION-AUTHORITY.md) |
+| **Unclear trust boundaries** | Host-supplied `ActionProvenance` and protected arguments must originate from authorized sources | [Trust Boundaries and Data-as-Control](docs/TRUST-BOUNDARIES-AND-DATA-CONTROL.md) |
+| **Data-as-control** | Untrusted content cannot supply authority for protected tool parameters when accurate host lineage is provided | [Trust Boundaries and Data-as-Control](docs/TRUST-BOUNDARIES-AND-DATA-CONTROL.md) |
+| **Cascading delegation** | `delegate()` narrows child scope and lifetime; ancestor revocation applies in-process | [Cascading Delegation](docs/CASCADING-DELEGATION-AUTHORITY.md) |
+| **Late-arriving evidence** | Explicit `PENDING` / `UNKNOWN` / `CONFIRMED` / `FAILED` / `CONFLICTED` receipt states; host verification and timeouts | [Late-Arriving Effect Evidence](docs/LATE-ARRIVING-EFFECT-EVIDENCE.md) |
+
+**Security boundaries:** These features are **off unless configured**. A
+pre-tool adapter hook alone is not a universal hard gate; for reliable denial,
+put `invoke()` / `ainvoke()` around the actual trusted tool executor.
+Delegation and evidence tracking are process-local, not distributed or
+durable. Provenance must be captured outside model control. A successful
+executor result does **not** independently verify a committed downstream
+effect; an application-owned verifier must check the acting system and bind
+evidence to the correct action, principal, run, resource and effect. Evidence
+deadlines require the host to call `expire_unresolved_effects()`; they do not
+run in a background worker. The TypeScript event-streaming packages do not
+automatically inherit these Python enforcement semantics.
+
+The [runnable synthetic banking example](examples/action_authority_evidence.py)
+demonstrates a denied out-of-scope action, an unverified pending receipt, and
+an in-memory simulated ledger reconciliation. It deliberately uses **no real
+banking system or cryptographic downstream attestation**.
 
 ---
 
@@ -190,6 +233,34 @@ pip install "agentegrity[google-adk]"      # Google Agent Development Kit
 ```
 
 Other extras: `[crypto]` (Ed25519 attestation signing), `[llm]` (LLM-backed cortical checks via the Anthropic API), `[all]` (everything).
+
+### Task-scoped tool authorization and evidence (repository source)
+
+Run the **offline, test-covered** example from a checkout with the Python
+package installed (for example, `pip install -e .`):
+
+```bash
+python examples/action_authority_evidence.py
+```
+
+Expected output:
+
+```text
+Out-of-scope action: denied
+Before simulated evidence verification: pending
+After simulated evidence verification: confirmed
+```
+
+The example uses `ActionSecurityGate.invoke()` to stop a resource not in the
+task mandate **before any executor call**. The authorized synthetic operation
+starts as `PENDING`; a tool-returned claim alone is still not accepted. A
+trusted-host callback then compares the receipt against a separately maintained
+**in-memory simulated ledger**. This is an API demonstration, **not independent
+verification of a real external side effect**. Production integrations must
+authenticate the real downstream evidence source. See
+[Late-Arriving Effect Evidence](docs/LATE-ARRIVING-EFFECT-EVIDENCE.md) for
+unknown, delayed and conflicting outcomes, and
+[Cascading Delegation](docs/CASCADING-DELEGATION-AUTHORITY.md) for subagents.
 
 ### Telemetry (and how to opt out)
 
@@ -617,6 +688,14 @@ agentegrity/
 
 **v0.12.0: Token usage + framework packages that attach (current).** Every adapter reports the LLM tokens a session spends, normalized so `input_tokens` always includes cached tokens, totalled per model and keyed per model call so repeats count once: both coding-agent hosts read their transcripts, all eight Python adapters and all six TypeScript packages read their framework's usage. The TypeScript packages are rebuilt against their frameworks' real lifecycle APIs and tested against the frameworks themselves; four of them never received events before. Drift and sustained degradation are measured for the first time, and drift past twice the tolerance alerts instead of blocking.
 
+**Unreleased on `main` — Runtime Action Authority and evidence reconciliation.** The
+Python OSS implementation adds task-bound execution authorization, trusted-host
+source provenance for protected arguments, bounded subagent delegation, and
+late-arriving downstream evidence reconciliation. These are opt-in and
+process-local; see the [runtime-security overview](#runtime-action-authority-opt-in-python-oss)
+and the individual guides below. This entry describes merged source changes,
+**not a new package release or independently measured prevention rate**.
+
 **Federation + fleet (next).** `FederationLayer` at pipeline position 0 producing topology context the existing layers consume. `Coordination Integrity` property at default weight 0.0 (rebalanced to ~0.10-0.15 in a follow-up). `KeyProvider` Protocol with multi-agent signatures + per-agent attestation chains (pattern b). Fleet aggregator for population posture formalizing the glossary's "Agentegrity Posture." Deliberately unnumbered: it has slipped a version twice already, and pinning it just forces a roadmap edit every time an unplanned release lands.
 
 **v1.0.0 — Stable API (when ready).** Declared stable when the public API has been unchanged for a full minor release cycle, when the library has production deployments at three or more external organizations, and when the framework has been cited in at least one peer-reviewed publication. v1.0.0 is not a date — it's a signal that adoption has happened beyond our direct influence.
@@ -634,6 +713,11 @@ agentegrity/
 | [Cortical Layer](spec/layers/cortical-layer.md) | Self-stability verification architecture |
 | [Governance Layer](spec/layers/governance-layer.md) | Policy enforcement and audit architecture |
 | [Recovery Layer](spec/layers/recovery-layer.md) | Self-recovery verification architecture |
+| [Runtime Action Authority](docs/RUNTIME-ACTION-AUTHORITY.md) | Time-bound mandates, declared tool effects, and execution-boundary checks |
+| [Trust Boundaries and Data-as-Control](docs/TRUST-BOUNDARIES-AND-DATA-CONTROL.md) | Host-supplied provenance and protected argument authority |
+| [Cascading Delegation](docs/CASCADING-DELEGATION-AUTHORITY.md) | In-process scope attenuation, subagent identity and revocation |
+| [Late-Arriving Effect Evidence](docs/LATE-ARRIVING-EFFECT-EVIDENCE.md) | Receipt uncertainty, delayed verification, conflict handling and deadlines |
+| [Authorization & Evidence Example](examples/action_authority_evidence.py) | Executable, offline demonstration (synthetic ledger) |
 | [Telemetry](docs/telemetry.md) | Anonymous usage analytics: every event documented, opt-out |
 
 ---
@@ -658,14 +742,13 @@ agentegrity/
 
 We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-Priority areas for v0.4 and beyond:
-- Additional framework adapters (Semantic Kernel, AutoGen, AWS Bedrock Agents, Agno)
-- Minimal web dashboard for session visualization
-- Compliance report generation (EU AI Act, NIST AI RMF, ISO 42001)
-- Domain-specific validator libraries (healthcare, finance, embodied)
-- Language ports (TypeScript, Go, Rust)
-- Formal verification of layer interactions
-- Cross-framework session merging (multiple adapters sharing one attestation chain)
+Priority areas for future contributions:
+- Reproducible, independent adversarial evaluations of authorization and recovery
+- Authenticated downstream-effect verification and durable evidence/replay stores
+- Distributed subagent delegation, revocation and agent identity integration
+- Domain-specific tool authority policies and validators (finance, healthcare, embodied agents)
+- Formal verification of enforcement and reconciliation state transitions
+- Cross-framework session merging and trustworthy multi-agent evidence
 
 ---
 
