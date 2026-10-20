@@ -103,7 +103,7 @@ The TypeScript packages do not classify. They forward the tool arguments they re
 
 ### Version parity
 
-`pyproject.toml` and every `@agentegrity/*` package publish with the same version string (0.12.0 for this release). CI enforces it with [`clients/typescript/scripts/check-versions.ts`](https://github.com/Cogensec/agentegrity/blob/main/clients/typescript/scripts/check-versions.ts). The two plugin manifests carry the same version, which is the library version they need.
+`pyproject.toml` and every published `@agentegrity/*` package are prepared for **v0.13.0** (release candidate, **not yet published**; the last published version is v0.12.0). CI enforces matching version strings and pinned internal-client dependencies, including the frozen Bun lockfile, with [`clients/typescript/scripts/check-versions.ts`](https://github.com/Cogensec/agentegrity/blob/main/clients/typescript/scripts/check-versions.ts). The two plugin manifests carry the same version, which is the library version they need.
 
 ## Token usage
 

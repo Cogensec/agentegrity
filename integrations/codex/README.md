@@ -1,5 +1,9 @@
 # agentegrity for Codex
 
+> **v0.13.0 release candidate:** The install command below is for the
+> forthcoming release; v0.12.0 remains the published package until v0.13.0
+> is available on PyPI.
+
 Stateful integrity verification for every tool call in a Codex session,
 with a hash-linked decision chain you can verify afterwards. It runs on
 Codex's native hooks and shares its runtime with the Claude Code plugin,
@@ -43,7 +47,7 @@ shown.
 ## Install
 
 ```bash
-pip install "agentegrity[crypto]>=0.12.0"   # must be importable by python3 on PATH
+pip install "agentegrity[crypto]>=0.13.0"   # must be importable by python3 on PATH
 codex plugin marketplace add cogensec/agentegrity
 ```
 

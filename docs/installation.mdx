@@ -3,12 +3,14 @@ title: "Installation"
 description: "Install the Python library, the TypeScript packages, or the coding-agent plugins."
 ---
 
+> **Release-candidate note:** This page is staged for v0.13.0. These version-pinned install examples will work only **after** v0.13.0 is published to PyPI. Until then, the latest public release remains v0.12.0.
+
 ## Python
 
 Agentegrity needs Python 3.10 or later. The core library has no required dependencies; each framework adapter and optional layer is an extra.
 
 ```bash
-pip install "agentegrity>=0.12.0"
+pip install "agentegrity>=0.13.0"
 ```
 
 Add the extra for your framework so the adapter's dependency is installed at a version the adapter supports:
@@ -71,14 +73,14 @@ Claude Code and Codex are instrumented through their hook systems. Install the l
 
 <CodeGroup>
 ```bash Claude Code
-pip install "agentegrity[crypto]>=0.12.0"
+pip install "agentegrity[crypto]>=0.13.0"
 # then, inside Claude Code:
 # /plugin marketplace add cogensec/agentegrity
 # /plugin install agentegrity@agentegrity
 ```
 
 ```bash Codex
-pip install "agentegrity[crypto]>=0.12.0"
+pip install "agentegrity[crypto]>=0.13.0"
 codex plugin marketplace add cogensec/agentegrity
 # then trust the hooks once with /hooks
 ```
