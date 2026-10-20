@@ -1,6 +1,9 @@
-# Runtime action authority (proposed PR 1)
+# Runtime Action Authority (experimental, Python OSS)
 
-This experimental capability targets **standing access** and **first-call effects**.
+This opt-in capability is available in the current repository source,
+merged after the v0.12.0 release. It targets **standing access** and
+**first-call effects**. Consult the version installed in your environment
+before assuming these APIs are available.
 The `ActionSecurityGate` is an application-installed, explicit allowlist that
 compares each action to a time-limited task mandate and a trusted tool/effect
 registry. It does not infer authorization from prompt instructions, MCP
@@ -73,11 +76,16 @@ to the adapter constructor; a mismatch raises immediately. Pre-tool hooks do
 **not** create effect receipts: use `invoke()` or `ainvoke()` at the trusted
 execution boundary and independently verify downstream effects.
 
-## Next milestones
+## Scope and follow-on work
 
-This PR does **not** implement identity-provider-issued short-lived credentials,
-trustworthy effect receipts, durable replay protection, delegated authority,
-source-to-instruction taint propagation, or evidence completeness across
-process failures. Those require controlled integration points with the acting
-system and Pro's evidence ingestion pipeline. Do not market this as end-to-end
-containment or production-wide automatic blocking.
+This page describes the core task-scoped execution gate. Additional,
+still-experimental Python OSS capabilities now include
+[provenance-aware trust boundaries](TRUST-BOUNDARIES-AND-DATA-CONTROL.md),
+[bounded in-process delegation](CASCADING-DELEGATION-AUTHORITY.md), and
+[late-arriving evidence reconciliation](LATE-ARRIVING-EFFECT-EVIDENCE.md).
+
+These do **not** supply identity-provider-issued credentials, automatic
+source-to-instruction taint propagation, durable replay protection,
+cross-process revocation, or independently verified downstream effects.
+Those require authenticated infrastructure outside this library. Do not
+market this as end-to-end containment or production-wide automatic blocking.
