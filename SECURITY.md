@@ -56,23 +56,25 @@ provide them) a contact URL or email.
 
 ## Supported versions
 
-The library is pre-1.0. Until v1.0 lands, only the **latest minor
-release line** receives security backports. v0.11 and earlier are no
-longer supported.
+The source tree is staged for **v0.13.0** but that version is **not yet
+published**. **v0.12.x remains the latest public release until the actual
+PyPI and npm publication.** The release-candidate row below states the
+support policy that takes effect upon publication; it does not claim
+that v0.13.0 is already available.
+
+Pre-1.0, the latest published minor line receives security backports.
+v0.12.x becomes EOL only when v0.13.0 is actually published.
 
 | Version | Supported | Notes |
 |---|:---:|---|
-| 0.12.x | ✅ | Current. All security fixes ship here first. |
-| 0.11.x | ❌ | EOL on the 2026-10-06 v0.12.0 release. Upgrade. |
-| < 0.11 | ❌ | Not supported. Upgrade to 0.12.x. |
+| 0.13.x | ✅ | Prepared release candidate; support begins **upon publication**. |
+| 0.12.x | ⚠️ | Latest publicly released line until v0.13.0 is published; EOL after publication. |
+| 0.11.x | ❌ | EOL after the 2026-10-06 v0.12.0 release. |
+| < 0.11 | ❌ | Not supported. Upgrade to the latest published minor. |
 
-`scripts/check_versions.py` fails CI when the supported line here differs
-from the version in `pyproject.toml`, so a release cannot ship with this
-table behind it.
-
-After v1.0 we will move to a dual-track support window: latest minor
-+ previous minor for at least 6 months. That policy will be
-documented in this file when v1.0 ships.
+`scripts/check_versions.py` checks that this table's intended target
+matches the source version. Before tagging, replace the candidate wording
+with the actual publication state and verify the published distributions.
 
 ## Scope
 
