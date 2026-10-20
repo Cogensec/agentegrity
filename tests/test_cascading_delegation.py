@@ -389,3 +389,19 @@ def test_malformed_requested_grant_is_not_implicitly_cast():
         _child(root, agent_id=" ")
     with pytest.raises(ValueError, match="run_id"):
         _child(root, run_id=" ")
+
+
+def test_descendant_cannot_reuse_ancestor_agent_or_run_identity():
+    root = _root(max_depth=3)
+    child = _child(root)
+    params = dict(
+        allowed_tools=frozenset({"read_account"}),
+        allowed_resources=frozenset({"account-42"}),
+        allowed_effects=frozenset({EffectType.READ}),
+        expires_at=NOW + timedelta(minutes=12),
+        now=NOW + timedelta(minutes=3),
+    )
+    with pytest.raises(ValueError, match="distinct"):
+        child.delegate(agent_id=root.mandate.agent_id, run_id="new-run", **params)
+    with pytest.raises(ValueError, match="distinct"):
+        child.delegate(agent_id="new-agent", run_id=root.mandate.run_id, **params)
