@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="754" viewBox="0 0 1320 754" role="img" aria-labelledby="title desc">
+<title id="title">Agentegrity architecture: observe and evaluate, authorize and verify</title>
+<desc id="desc">Two separate paths. Agent events reach framework adapters, integrity evaluation and optional signed attestations. Tool requests may pass through a trusted host-installed ActionSecurityGate before a real executor, and downstream effects require separately authenticated host verification. Hook observation alone is not hard enforcement.</desc>
+<defs>
+<filter id="shadow" x="-5%" y="-10%" width="110%" height="125%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#182D30" flood-opacity=".07"/></filter>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8Z" fill="#778B89"/></marker>
+</defs>
+<style>
+  .title{font-family:Inter,Arial,sans-serif;font-size:32px;font-weight:760;fill:#15282A;letter-spacing:-.7px}
+  .subtitle{font-family:Inter,Arial,sans-serif;font-size:15px;fill:#5C7070}
+  .section{font-family:Inter,Arial,sans-serif;font-size:20px;font-weight:710;fill:#233F3D}
+  .kicker{font-family:Inter,Arial,sans-serif;font-size:11px;letter-spacing:1.1px;font-weight:750;fill:#A65A3C}
+  .cardTitle{font-family:Inter,Arial,sans-serif;font-size:17px;font-weight:750;fill:#193333}
+  .small{font-family:Inter,Arial,sans-serif;font-size:12.5px;fill:#627574}
+  .note{font-family:Inter,Arial,sans-serif;font-size:13px;fill:#435C5B}
+</style>
+<rect width="1320" height="754" rx="24" fill="#F8F8F4"/>
+<rect x="0" y="0" width="1320" height="10" rx="5" fill="#B96C4F"/>
+<text x="66" y="69" class="title">How Agentegrity fits into your agent</text>
+<text x="66" y="100" class="subtitle">Two complementary paths: visibility into agent integrity, and opt-in authorization at the tool boundary.</text>
+<rect x="57" y="128" width="1206" height="228" rx="20" fill="#EEF2EF" stroke="#DCE4DE"/>
+<text x="76" y="168" class="section">01 / Observe and evaluate</text>
+<text x="365" y="168" class="note">Framework lifecycle events → integrity signals → decision evidence</text>
+<g filter="url(#shadow)"><rect x="74" y="204" width="242" height="107" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="89" y="222" width="5" height="71" rx="2.5" fill="#668A82"/><text x="105" y="234" class="kicker">SOURCE</text><text x="105" y="259" class="cardTitle">Agent events</text><text x="105" y="281" class="small">Prompts · tools · handoffs</text>
+<g filter="url(#shadow)"><rect x="374" y="204" width="242" height="107" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="389" y="222" width="5" height="71" rx="2.5" fill="#668A82"/><text x="405" y="234" class="kicker">INTEGRATE</text><text x="405" y="259" class="cardTitle">Framework adapters</text><text x="405" y="281" class="small">Python evaluation / TS streaming</text>
+<g filter="url(#shadow)"><rect x="673" y="204" width="250" height="107" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="688" y="222" width="5" height="71" rx="2.5" fill="#668A82"/><text x="704" y="234" class="kicker">EVALUATE</text><text x="704" y="259" class="cardTitle">Four integrity layers</text><text x="704" y="281" class="small">Adversarial · cortical · policy</text>
+<g filter="url(#shadow)"><rect x="980" y="204" width="266" height="107" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="995" y="222" width="5" height="71" rx="2.5" fill="#668A82"/><text x="1011" y="234" class="kicker">PROVE</text><text x="1011" y="259" class="cardTitle">Evidence and attestation</text><text x="1011" y="281" class="small">Python chain; signing is opt-in</text>
+<path d="M316 256 H366" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M616 256 H665" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M923 256 H972" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="57" y="371" width="1206" height="315" rx="20" fill="#F3EFEB" stroke="#E8DED8"/>
+<text x="76" y="410" class="section">02 / Authorize and reconcile</text>
+<text x="398" y="410" class="note">Trusted-host Python API · explicit opt-in · real tool execution boundary</text>
+<g filter="url(#shadow)"><rect x="75" y="446" width="210" height="112" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="90" y="464" width="5" height="76" rx="2.5" fill="#C46D4D"/><text x="106" y="476" class="kicker">REQUEST</text><text x="106" y="501" class="cardTitle">Agent tool call</text><text x="106" y="523" class="small">Proposed action</text>
+<g filter="url(#shadow)"><rect x="349" y="446" width="255" height="112" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="364" y="464" width="5" height="76" rx="2.5" fill="#C46D4D"/><text x="380" y="476" class="kicker">BOUNDARY</text><text x="380" y="501" class="cardTitle">ActionSecurityGate</text><text x="380" y="523" class="small">Mandate · scope · expiry</text>
+<g filter="url(#shadow)"><rect x="667" y="446" width="236" height="112" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="682" y="464" width="5" height="76" rx="2.5" fill="#C46D4D"/><text x="698" y="476" class="kicker">EXECUTE</text><text x="698" y="501" class="cardTitle">Trusted tool wrapper</text><text x="698" y="523" class="small">invoke() / ainvoke()</text>
+<g filter="url(#shadow)"><rect x="968" y="446" width="277" height="112" rx="14" fill="#FFFFFF" stroke="#D8DDD9"/></g><rect x="983" y="464" width="5" height="76" rx="2.5" fill="#C46D4D"/><text x="999" y="476" class="kicker">EXTERNAL</text><text x="999" y="501" class="cardTitle">Downstream system</text><text x="999" y="523" class="small">May commit even on timeout</text>
+<path d="M285 503 H341" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M604 503 H659" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M903 503 H960" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="349" y="591" width="255" height="61" rx="13" fill="#FBE9E3" stroke="#E7B3A2"/>
+<text x="476" y="615" text-anchor="middle" font-size="15" font-weight="750" font-family="Arial,sans-serif" fill="#8D4030">DENY before execution</text>
+<text x="476" y="635" text-anchor="middle" font-size="12" font-family="Arial,sans-serif" fill="#9E5A48">No tool call, no effect receipt</text>
+<path d="M476 558 V583" fill="none" stroke="#B46D54" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="667" y="591" width="236" height="61" rx="13" fill="#E7F0EB" stroke="#B5CFC0"/>
+<text x="785" y="615" text-anchor="middle" font-size="15" font-weight="750" font-family="Arial,sans-serif" fill="#335B4D">Effect receipt</text>
+<text x="785" y="635" text-anchor="middle" font-size="12" font-family="Arial,sans-serif" fill="#446C5C">Pending / unknown / verified</text>
+<path d="M968 621 H911" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="968" y="591" width="277" height="61" rx="13" fill="#E7F0EB" stroke="#B5CFC0"/>
+<text x="1106" y="614" text-anchor="middle" font-size="15" font-weight="750" font-family="Arial,sans-serif" fill="#335B4D">Independent verifier</text>
+<text x="1106" y="635" text-anchor="middle" font-size="12" font-family="Arial,sans-serif" fill="#446C5C">Authenticated downstream evidence</text>
+<path d="M1107 558 V582" fill="none" stroke="#778B89" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<circle cx="78" cy="722" r="5" fill="#C46D4D"/>
+<text x="94" y="726" class="note">Host hooks alone may be advisory. Neither the receipt store nor delegated authority is distributed or durable.</text>
+</svg>
