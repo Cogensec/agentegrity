@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import inspect
 import threading
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Generic, TypeVar
 from uuid import uuid4
@@ -36,6 +36,7 @@ class EffectStatus(str, Enum):
     CONFIRMED = "confirmed"
     UNKNOWN = "unknown"
     FAILED = "failed"
+    CONFLICTED = "conflicted"
 
 
 def _aware(value: datetime) -> bool:
@@ -145,6 +146,20 @@ class EffectReceipt:
 
 
 @dataclass(frozen=True)
+class EffectObservation:
+    """Process-local transition metadata; not cryptographic evidence."""
+
+    action_id: str
+    previous_status: EffectStatus | None
+    status: EffectStatus
+    reason: str
+    observed_at: datetime
+    evidence_source: str = "sdk"
+    evidence_reference: str | None = None
+    independently_verified: bool = False
+
+
+@dataclass(frozen=True)
 class ActionExecution(Generic[_T]):
     verdict: AuthorizationVerdict
     result: _T
@@ -174,12 +189,16 @@ class ActionSecurityGate:
         *,
         trust_boundary: TrustBoundaryPolicy | None = None,
         max_delegation_depth: int = 0,
+        evidence_timeout: timedelta | None = None,
         _parent_gate: ActionSecurityGate | None = None,
     ):
         if (isinstance(max_delegation_depth, bool)
                 or not isinstance(max_delegation_depth, int)
                 or not 0 <= max_delegation_depth <= 8):
             raise ValueError("max_delegation_depth must be between 0 and 8")
+        if evidence_timeout is not None:
+            if not isinstance(evidence_timeout, timedelta) or evidence_timeout <= timedelta(0):
+                raise ValueError("evidence_timeout must be a positive timedelta")
         self.mandate = mandate
         self._tools = dict(tools)
         # Host-controlled policy. Never derived from an agent or tool payload.
@@ -189,10 +208,14 @@ class ActionSecurityGate:
             0 if _parent_gate is None else _parent_gate._delegation_depth + 1
         )
         self._max_delegation_depth = max_delegation_depth
+        self._evidence_timeout = evidence_timeout
         self._revoked = False
         self._lock = threading.RLock()
         self._decisions: dict[str, AuthorizationVerdict] = {}
         self._receipts: dict[str, EffectReceipt] = {}
+        self._receipt_started_at: dict[str, datetime] = {}
+        self._effect_observations: list[EffectObservation] = []
+        self._verified_evidence: dict[str, dict[tuple[str, str], EffectStatus]] = {}
 
     @property
     def delegation_lineage(self) -> tuple[str, ...]:
@@ -314,6 +337,7 @@ class ActionSecurityGate:
                 {name: self._tools[name] for name in allowed_tools},
                 trust_boundary=self._trust_boundary,
                 max_delegation_depth=self._max_delegation_depth,
+                evidence_timeout=self._evidence_timeout,
                 _parent_gate=self,
             )
 
@@ -413,23 +437,121 @@ class ActionSecurityGate:
                 raise ValueError("action execution already started")
             receipt = EffectReceipt(identifier, EffectStatus.PENDING)
             self._receipts[identifier] = receipt
+            self._receipt_started_at[identifier] = when
+            self._append_effect_observation(
+                identifier, None, receipt, "execution_started", when,
+            )
             return receipt
 
     def receipt_for(self, action_id: str) -> EffectReceipt | None:
         with self._lock:
             return self._receipts.get(action_id)
 
+    @property
+    def effect_observations(self) -> tuple[EffectObservation, ...]:
+        """Snapshot of receipt transitions; process-local, never signed."""
+        with self._lock:
+            return tuple(self._effect_observations)
+
+    def effects_verified(self, action_ids: Iterable[str]) -> bool:
+        """Require independent success evidence for every requested action.
+
+        Empty input deliberately returns False rather than granting success.
+        """
+        requested = tuple(action_ids)
+        if not requested:
+            return False
+        with self._lock:
+            return all(
+                (receipt := self._receipts.get(action_id)) is not None
+                and receipt.status is EffectStatus.CONFIRMED
+                and receipt.independently_verified
+                for action_id in requested
+            )
+
+    def _append_effect_observation(
+        self,
+        action_id: str,
+        previous_status: EffectStatus | None,
+        receipt: EffectReceipt,
+        reason: str,
+        when: datetime,
+    ) -> None:
+        self._effect_observations.append(EffectObservation(
+            action_id=action_id,
+            previous_status=previous_status,
+            status=receipt.status,
+            reason=reason,
+            observed_at=when,
+            evidence_source=receipt.evidence_source,
+            evidence_reference=receipt.evidence_reference,
+            independently_verified=receipt.independently_verified,
+        ))
+
+    def _mark_uncertain(self, action_id: str, *, when: datetime | None = None) -> EffectReceipt:
+        """Record an SDK-observed uncertain effect without overriding verified evidence."""
+        observed = when if when is not None else datetime.now(timezone.utc)
+        if not _aware(observed):
+            raise ValueError("now must be timezone-aware")
+        with self._lock:
+            previous = self._receipts.get(action_id)
+            if previous is None:
+                raise ValueError("missing pending effect receipt")
+            if previous.independently_verified or previous.status is EffectStatus.CONFLICTED:
+                return previous
+            if previous.status is EffectStatus.UNKNOWN:
+                return previous
+            uncertain = EffectReceipt(action_id, EffectStatus.UNKNOWN)
+            self._receipts[action_id] = uncertain
+            self._append_effect_observation(
+                action_id, previous.status, uncertain, "effect_uncertain", observed,
+            )
+            return uncertain
+
+    def expire_unresolved_effects(
+        self, *, now: datetime | None = None,
+    ) -> tuple[EffectReceipt, ...]:
+        """Sweep evidence deadlines; no background timer runs automatically.
+
+        Timeout means UNKNOWN, never FAILED or CONFIRMED. A later independently
+        verified result may still resolve an UNKNOWN receipt.
+        """
+        when = now if now is not None else datetime.now(timezone.utc)
+        if not _aware(when):
+            raise ValueError("now must be timezone-aware")
+        if self._evidence_timeout is None:
+            return ()
+        expired: list[EffectReceipt] = []
+        with self._lock:
+            for action_id, began in self._receipt_started_at.items():
+                previous = self._receipts[action_id]
+                if (previous.status is EffectStatus.PENDING
+                        and when >= began + self._evidence_timeout):
+                    uncertain = EffectReceipt(action_id, EffectStatus.UNKNOWN)
+                    self._receipts[action_id] = uncertain
+                    self._append_effect_observation(
+                        action_id, previous.status, uncertain, "evidence_timeout", when,
+                    )
+                    expired.append(uncertain)
+        return tuple(expired)
+
     def record_effect(
         self,
         receipt: EffectReceipt,
         *,
         verifier: Callable[[EffectReceipt], bool] | None = None,
+        now: datetime | None = None,
     ) -> EffectReceipt:
-        """Reconcile a result; never trust a client-side 'verified' flag.
+        """Reconcile delayed evidence; never accept client 'verified' flags.
 
-        The host chooses the verifier; it MUST check independent evidence
-        from the acting system and never derive approval from agent messages.
+        Trusted host verifiers must check the exact action and effect against
+        independent downstream records, including source/reference binding.
+        CONFIRMED/FAILED are authoritative only after successful verification.
+        Conflicting independently verified outcomes remain CONFLICTED.
         """
+        when = now if now is not None else datetime.now(timezone.utc)
+        if not _aware(when):
+            raise ValueError("now must be timezone-aware")
         with self._lock:
             verdict = self._decisions.get(receipt.action_id)
             if verdict is None or not verdict.allowed:
@@ -437,18 +559,62 @@ class ActionSecurityGate:
             previous = self._receipts.get(receipt.action_id)
             if previous is None:
                 raise ValueError("missing pending effect receipt")
-            if previous.independently_verified:
-                raise ValueError("verified effect receipt cannot be overwritten")
+            if receipt.status is EffectStatus.UNKNOWN:
+                if previous.independently_verified or previous.status is EffectStatus.CONFLICTED:
+                    raise ValueError("verified effect receipt cannot be overwritten")
+                return self._mark_uncertain(receipt.action_id, when=when)
+            if receipt.status not in (EffectStatus.CONFIRMED, EffectStatus.FAILED):
+                raise ValueError("evidence cannot assert pending or conflicted state")
+
+            # The evidence reference and source are opaque identifiers supplied
+            # by the trusted host, not model/tool content or self-attestation.
+            valid_reference = (
+                isinstance(receipt.evidence_source, str)
+                and bool(receipt.evidence_source.strip())
+                and receipt.evidence_source != "sdk"
+                and isinstance(receipt.evidence_reference, str)
+                and bool(receipt.evidence_reference.strip())
+            )
             verified = False
-            if (verifier is not None and receipt.evidence_reference
-                    and receipt.evidence_source != "sdk"):
+            if verifier is not None and valid_reference:
                 try:
                     verified = verifier(receipt) is True
                 except Exception:
                     verified = False
-            stored = replace(receipt, independently_verified=verified)
-            self._receipts[receipt.action_id] = stored
-            return stored
+            if not verified:
+                if previous.independently_verified:
+                    raise ValueError("verified effect receipt cannot be overwritten")
+                # Unverified claims cannot invent successful or failed effects.
+                return previous
+
+            reference = receipt.evidence_reference
+            assert reference is not None  # guaranteed by valid_reference
+            evidence_key = (receipt.evidence_source, reference)
+            observed_evidence = self._verified_evidence.setdefault(receipt.action_id, {})
+            if observed_evidence.get(evidence_key) is receipt.status:
+                return previous  # idempotent replay of an identical verified observation
+
+            observed_evidence[evidence_key] = receipt.status
+            if previous.status is EffectStatus.CONFLICTED:
+                return previous  # an independently confirmed conflict is sticky
+            if previous.independently_verified and previous.status is not receipt.status:
+                reconciled = EffectReceipt(
+                    receipt.action_id, EffectStatus.CONFLICTED, "sdk",
+                )
+                reason = "conflicting_verified_evidence"
+            else:
+                reconciled = EffectReceipt(
+                    receipt.action_id, receipt.status,
+                    evidence_source=receipt.evidence_source,
+                    evidence_reference=reference,
+                    independently_verified=True,
+                )
+                reason = "verified_evidence"
+            self._receipts[receipt.action_id] = reconciled
+            self._append_effect_observation(
+                receipt.action_id, previous.status, reconciled, reason, when,
+            )
+            return reconciled
 
     def invoke(
         self,
@@ -485,7 +651,7 @@ class ActionSecurityGate:
                 raise TypeError("awaitable executor result requires ActionSecurityGate.ainvoke()")
         except BaseException:
             # A callable may have committed an external write before raising.
-            self.record_effect(EffectReceipt(verdict.intent.action_id, EffectStatus.UNKNOWN))
+            self._mark_uncertain(verdict.intent.action_id)
             raise
         return ActionExecution(verdict, result, receipt)
 
@@ -514,6 +680,6 @@ class ActionSecurityGate:
         try:
             result = await executor(**checked_arguments)
         except BaseException:
-            self.record_effect(EffectReceipt(verdict.intent.action_id, EffectStatus.UNKNOWN))
+            self._mark_uncertain(verdict.intent.action_id)
             raise
         return ActionExecution(verdict, result, receipt)
