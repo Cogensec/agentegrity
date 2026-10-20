@@ -41,6 +41,7 @@ from uuid import uuid4
 from agentegrity.adapters import _background
 from agentegrity.adapters.transcripts import TranscriptUsage
 from agentegrity.core.action_security import ActionSecurityGate
+from agentegrity.core.trust_boundaries import ActionProvenance
 from agentegrity.core.approval import resolve_approval
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -346,6 +347,7 @@ class _BaseAdapter:
         on_deny: str = "continue",
         action_security: ActionSecurityGate | None = None,
         session_id: str | None = None,
+        provenance_provider: Callable[[str, Mapping[str, Any]], ActionProvenance] | None = None,
     ) -> None:
         if on_deny not in ON_DENY_VALUES:
             raise ValueError(f"on_deny must be one of {ON_DENY_VALUES}, not {on_deny!r}")
@@ -373,6 +375,10 @@ class _BaseAdapter:
         mandate_run_id = action_security.mandate.run_id if action_security is not None else None
         if session_id is not None and mandate_run_id is not None and session_id != mandate_run_id:
             raise ValueError("session_id does not match the action-security mandate run_id")
+        if provenance_provider is not None and action_security is None:
+            raise ValueError("provenance_provider requires action_security")
+        # Host-installed lookup, never read lineage claims out of tool_input.
+        self._provenance_provider = provenance_provider
         self._action_security = action_security
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
@@ -1166,11 +1172,18 @@ class _BaseAdapter:
         authority = None
         if self._action_security is not None:
             # Authorization is supplied by the application, never by tool input.
+            provenance = (
+                self._provenance_provider(call.tool_name, call.tool_input)
+                if self._provenance_provider is not None else None
+            )
+            if provenance is not None and not isinstance(provenance, ActionProvenance):
+                raise TypeError("provenance_provider must return ActionProvenance")
             authority = self._action_security.check(
                 agent_id=self._profile.agent_id,
                 run_id=self._session_id,
                 tool_name=call.tool_name,
                 arguments=call.tool_input,
+                provenance=provenance,
             )
             call.data["action_authority"] = authority.to_dict()
             candidate_action["action_authority"] = authority.to_dict()
