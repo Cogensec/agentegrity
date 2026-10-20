@@ -50,6 +50,14 @@ from agentegrity.core.monitor import IntegrityMonitor, IntegrityViolationError
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.core.telemetry import disable_telemetry
 from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_call
+from agentegrity.core.trust_boundaries import (
+    ActionProvenance,
+    BoundaryVerdict,
+    SourceChannel,
+    SourceLabel,
+    SourceTrust,
+    TrustBoundaryPolicy,
+)
 from agentegrity.core.topology import (
     AgentMember,
     AgentRole,
@@ -140,6 +148,12 @@ __all__ = [
     "ActionExecution",
     "ActionIntent",
     "ActionSecurityGate",
+    "ActionProvenance",
+    "BoundaryVerdict",
+    "SourceChannel",
+    "SourceLabel",
+    "SourceTrust",
+    "TrustBoundaryPolicy",
     "AuthorizationDenied",
     "AuthorizationVerdict",
     "EffectReceipt",
