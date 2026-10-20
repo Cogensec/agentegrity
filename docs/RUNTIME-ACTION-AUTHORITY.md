@@ -11,12 +11,18 @@ metadata, retrieved data, or agent reasoning.
 - Construct `TaskMandate` and `ToolAuthority` in a trusted control plane, not
   from agent-supplied instructions. Each known tool must declare one effect
   type and how to resolve an exact resource ID. Unknown tools deny.
-- `check()` returns an authorization decision for pre-tool hooks. Hooks are **not**
+- `check()` returns an authorization decision **without** opening a pending
+  effect receipt. Only an actual `invoke()` or `ainvoke()` execution attempt
+  creates one, avoiding phantom effects when another governance rule denies.
+  Hooks are **not**
   a universally reliable enforcement boundary: a particular framework can
   swallow or ignore a denial. `enforce=True` is required when configuring the
   adapter with `action_security=`; separately verify your host's hook semantics.
-- `invoke()` is the explicit execution-boundary wrapper. It invokes the provided
-  callable only after authorization, passing precisely the checked arguments.
+- `invoke()` is the synchronous execution-boundary wrapper; `ainvoke()`
+  awaits async executors and observes their failures/cancellation. Both enforce
+  before execution and pass precisely the checked arguments. An async executor
+  passed to `invoke()` is rejected before execution, and an unexpected awaitable
+  result fails closed with an **unknown** effect.
   It is not a sandbox; the callable or a downstream service can still have
   undeclared side effects. Use service-side resource policy for assurance.
 - Successful tool return creates a **pending**, not verified, effect receipt.
@@ -61,7 +67,11 @@ assert read.receipt.assurance == "unverified"
 
 An adapter can be constructed with `action_security=gate` and `enforce=True`.
 When used in a framework adapter, construct the mandate with the same
-`profile.agent_id`; if `run_id` is bound, it must be the adapter session id.
+`profile.agent_id`. A bound `TaskMandate.run_id` automatically becomes the
+adapter session ID. Alternatively, pass an explicit matching `session_id=`
+to the adapter constructor; a mismatch raises immediately. Pre-tool hooks do
+**not** create effect receipts: use `invoke()` or `ainvoke()` at the trusted
+execution boundary and independently verify downstream effects.
 
 ## Next milestones
 
