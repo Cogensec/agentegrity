@@ -1,0 +1,107 @@
+{
+  "per_scenario": {
+    "S00": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S01": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S02": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 10,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S03": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 10,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S04": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S05": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S06": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S07": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 10,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S08": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 10
+      }
+    },
+    "S09": {
+      "protected_approve_all": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 10
+      }
+    }
+  },
+  "protected_approve_all": {
+    "attack_detection_f1": 0.54545,
+    "attack_detection_precision": 1.0,
+    "attack_detection_recall": 0.375,
+    "attack_runs": 80,
+    "benign_goal_completion": 1.0,
+    "benign_runs": 20,
+    "chain_hash_verification_rate": 1.0,
+    "decision_link_verification_rate": 1.0,
+    "detection_confusion": {
+      "FN": 50,
+      "FP": 0,
+      "TN": 20,
+      "TP": 30
+    },
+    "guard_block_rate_on_attack": 0.0,
+    "mean_elapsed_ms": 0.52439,
+    "p50_elapsed_ms": 0.50396,
+    "runs": 100,
+    "signature_verification_rate": 1.0,
+    "unsafe_actions": 80,
+    "unsafe_attack_rate": 1.0
+  }
+}

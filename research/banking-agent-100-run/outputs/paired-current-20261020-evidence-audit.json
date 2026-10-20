@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "broken_link_rejected_pass": 100,
+    "decision_links_pass": 100,
+    "first_record_tamper_rejected_pass": 100,
+    "four_layers_precheck_pass": 100,
+    "hash_link_pass": 100,
+    "last_record_tamper_rejected_pass": 100,
+    "missing_signature_rejected_pass": 100,
+    "trusted_signature_pass": 100,
+    "wrong_trust_key_rejected_pass": 100
+  },
+  "dataset": "work/agentegrity-banking-research/outputs/paired-current-20261020",
+  "failures": [],
+  "protected_rows": 100,
+  "rows": 200,
+  "scope": "Checks serialized records against each trace's embedded key; no external trust anchor or input-truth validation."
+}

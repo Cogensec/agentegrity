@@ -1,0 +1,4 @@
+agentegrity[crypto] @ git+https://github.com/Cogensec/agentegrity.git@56cfcc48d8edeb4beee1bec3948c95d20804e4f4
+cryptography==50.0.2
+pytest==9.1.1
+pytest-asyncio==1.4.0
