@@ -57,6 +57,7 @@ from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.monitor import IntegrityViolationError
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.tool_classifier import classify_tool_call
+from agentegrity.core.trust_boundaries import ActionProvenance
 from agentegrity.core.usage import TokenUsage, UsageLedger
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.recovery import RecoveryLayer
@@ -346,6 +347,7 @@ class _BaseAdapter:
         on_deny: str = "continue",
         action_security: ActionSecurityGate | None = None,
         session_id: str | None = None,
+        provenance_provider: Callable[[str, Mapping[str, Any]], ActionProvenance] | None = None,
     ) -> None:
         if on_deny not in ON_DENY_VALUES:
             raise ValueError(f"on_deny must be one of {ON_DENY_VALUES}, not {on_deny!r}")
@@ -373,6 +375,10 @@ class _BaseAdapter:
         mandate_run_id = action_security.mandate.run_id if action_security is not None else None
         if session_id is not None and mandate_run_id is not None and session_id != mandate_run_id:
             raise ValueError("session_id does not match the action-security mandate run_id")
+        if provenance_provider is not None and action_security is None:
+            raise ValueError("provenance_provider requires action_security")
+        # Host-installed lookup, never read lineage claims out of tool_input.
+        self._provenance_provider = provenance_provider
         self._action_security = action_security
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
@@ -939,9 +945,14 @@ class _BaseAdapter:
             exc,
             exc_info=True,
         )
-        # A call that could not be evaluated is not known to be safe.
-        if self._enforce and event_type == "pre_tool_use":
-            return self._deny_payload("error")
+        # A failed pre-tool evaluation must never train the clean-session
+        # behavioral baseline, including failures in trusted provenance lookup.
+        # Other layers can score normally before a later authorization error.
+        if event_type == "pre_tool_use":
+            with self._lock:
+                self._session_clean = False
+            if self._enforce:
+                return self._deny_payload("error")
         return {}
 
     # --- Tool-call gates with async layer checks ---
@@ -1166,11 +1177,18 @@ class _BaseAdapter:
         authority = None
         if self._action_security is not None:
             # Authorization is supplied by the application, never by tool input.
+            provenance = (
+                self._provenance_provider(call.tool_name, call.tool_input)
+                if self._provenance_provider is not None else None
+            )
+            if provenance is not None and not isinstance(provenance, ActionProvenance):
+                raise TypeError("provenance_provider must return ActionProvenance")
             authority = self._action_security.check(
                 agent_id=self._profile.agent_id,
                 run_id=self._session_id,
                 tool_name=call.tool_name,
                 arguments=call.tool_input,
+                provenance=provenance,
             )
             call.data["action_authority"] = authority.to_dict()
             candidate_action["action_authority"] = authority.to_dict()

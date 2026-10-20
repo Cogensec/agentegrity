@@ -22,12 +22,26 @@ from agentegrity.core.telemetry import (
     telemetry_tag,
 )
 from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_call
+from agentegrity.core.trust_boundaries import (
+    ActionProvenance,
+    BoundaryVerdict,
+    SourceChannel,
+    SourceLabel,
+    SourceTrust,
+    TrustBoundaryPolicy,
+)
 
 __all__ = [
     "AgentProfile",
     "ActionExecution",
     "ActionIntent",
     "ActionSecurityGate",
+    "ActionProvenance",
+    "BoundaryVerdict",
+    "SourceChannel",
+    "SourceLabel",
+    "SourceTrust",
+    "TrustBoundaryPolicy",
     "AuthorizationDenied",
     "AuthorizationVerdict",
     "EffectReceipt",

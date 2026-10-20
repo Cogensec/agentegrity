@@ -57,6 +57,14 @@ from agentegrity.core.topology import (
     TopologyChange,
     TopologyKind,
 )
+from agentegrity.core.trust_boundaries import (
+    ActionProvenance,
+    BoundaryVerdict,
+    SourceChannel,
+    SourceLabel,
+    SourceTrust,
+    TrustBoundaryPolicy,
+)
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
 from agentegrity.exporters.alerts import SlackAlertExporter, WebhookAlertExporter
@@ -140,6 +148,12 @@ __all__ = [
     "ActionExecution",
     "ActionIntent",
     "ActionSecurityGate",
+    "ActionProvenance",
+    "BoundaryVerdict",
+    "SourceChannel",
+    "SourceLabel",
+    "SourceTrust",
+    "TrustBoundaryPolicy",
     "AuthorizationDenied",
     "AuthorizationVerdict",
     "EffectReceipt",
