@@ -185,7 +185,7 @@ class ActionSecurityGate:
         # Host-controlled policy. Never derived from an agent or tool payload.
         self._trust_boundary = trust_boundary
         self._parent_gate = _parent_gate
-        self._delegation_depth = (
+        self._delegation_depth: int = (
             0 if _parent_gate is None else _parent_gate._delegation_depth + 1
         )
         self._max_delegation_depth = max_delegation_depth
