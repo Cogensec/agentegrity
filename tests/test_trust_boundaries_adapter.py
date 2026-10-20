@@ -154,9 +154,16 @@ def test_provenance_provider_requires_action_security():
         )
 
 
+class _EmptyBaseline:
+    sample_count = 0
+
+
 class _BaselineLearningProbe:
     def __init__(self):
         self.learned: list[tuple[dict[str, int], dict[str, int]]] = []
+
+    def load_baseline(self, profile, role):
+        return _EmptyBaseline()
 
     def learn_session(self, distribution, usage):
         self.learned.append((distribution, usage))
@@ -168,7 +175,10 @@ class _BaselineLearningProbe:
 async def test_provenance_lookup_failure_never_teaches_cortical_baseline(
     monkeypatch, failure_mode: str, entry_point: str,
 ):
+    provider_calls: list[str] = []
+
     def unavailable_lineage(tool, arguments):
+        provider_calls.append(tool)
         if failure_mode == "exception":
             raise RuntimeError("host lineage service unavailable")
         # An incorrect result must be treated like a failed lookup, not authority.
@@ -195,6 +205,7 @@ async def test_provenance_lookup_failure_never_teaches_cortical_baseline(
     )
     # Normal-scoring calls have already been buffered, so learning here is unsafe.
     assert adapter._buffer.tool_usage["prepare_transfer"] == 1
+    assert provider_calls == ["prepare_transfer"]
     assert adapter._session_clean is False
     assert not gate._receipts
     adapter.close()
