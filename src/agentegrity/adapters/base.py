@@ -945,9 +945,14 @@ class _BaseAdapter:
             exc,
             exc_info=True,
         )
-        # A call that could not be evaluated is not known to be safe.
-        if self._enforce and event_type == "pre_tool_use":
-            return self._deny_payload("error")
+        # A failed pre-tool evaluation must never train the clean-session
+        # behavioral baseline, including failures in trusted provenance lookup.
+        # Other layers can score normally before a later authorization error.
+        if event_type == "pre_tool_use":
+            with self._lock:
+                self._session_clean = False
+            if self._enforce:
+                return self._deny_payload("error")
         return {}
 
     # --- Tool-call gates with async layer checks ---
