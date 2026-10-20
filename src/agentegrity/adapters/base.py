@@ -41,7 +41,6 @@ from uuid import uuid4
 from agentegrity.adapters import _background
 from agentegrity.adapters.transcripts import TranscriptUsage
 from agentegrity.core.action_security import ActionSecurityGate
-from agentegrity.core.trust_boundaries import ActionProvenance
 from agentegrity.core.approval import resolve_approval
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -58,6 +57,7 @@ from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.monitor import IntegrityViolationError
 from agentegrity.core.profile import AgentProfile
 from agentegrity.core.tool_classifier import classify_tool_call
+from agentegrity.core.trust_boundaries import ActionProvenance
 from agentegrity.core.usage import TokenUsage, UsageLedger
 from agentegrity.layers.cortical import CorticalLayer
 from agentegrity.layers.recovery import RecoveryLayer
