@@ -40,6 +40,7 @@ from uuid import uuid4
 
 from agentegrity.adapters import _background
 from agentegrity.adapters.transcripts import TranscriptUsage
+from agentegrity.core.action_security import ActionSecurityGate
 from agentegrity.core.approval import resolve_approval
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -343,6 +344,8 @@ class _BaseAdapter:
         chain: AttestationChain | None = None,
         stream_from_env: bool = True,
         on_deny: str = "continue",
+        action_security: ActionSecurityGate | None = None,
+        session_id: str | None = None,
     ) -> None:
         if on_deny not in ON_DENY_VALUES:
             raise ValueError(f"on_deny must be one of {ON_DENY_VALUES}, not {on_deny!r}")
@@ -361,13 +364,25 @@ class _BaseAdapter:
         # escalations fail closed (deny), so "require approval" is not
         # silently advisory under enforcement.
         self._approval_handler = approval_handler
+        if action_security is not None and not enforce:
+            raise ValueError("action_security requires enforce=True")
+        if session_id is not None and (
+            not isinstance(session_id, str) or not session_id.strip()
+        ):
+            raise ValueError("session_id must be a nonempty string")
+        mandate_run_id = action_security.mandate.run_id if action_security is not None else None
+        if session_id is not None and mandate_run_id is not None and session_id != mandate_run_id:
+            raise ValueError("session_id does not match the action-security mandate run_id")
+        self._action_security = action_security
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
         # A resumed session passes its persisted chain so new records
         # link onto it instead of starting a second root.
         self._chain = chain if chain is not None else AttestationChain()
         self._evaluation_count = 0
-        self._session_id = uuid4().hex
+        # Use the trusted mandate's run scope unless the host supplied one.
+        # This makes run-bound authorization possible before hooks are registered.
+        self._session_id = session_id or mandate_run_id or uuid4().hex
         self._exporters: list[SessionExporter] = []
         self._credentials = CredentialRegistry()
         # credential_declared events emitted while no exporter existed, replayed at session start.
@@ -1148,12 +1163,27 @@ class _BaseAdapter:
             "tool_name": call.tool_name,
             "arguments": call.tool_input,
         }
+        authority = None
+        if self._action_security is not None:
+            # Authorization is supplied by the application, never by tool input.
+            authority = self._action_security.check(
+                agent_id=self._profile.agent_id,
+                run_id=self._session_id,
+                tool_name=call.tool_name,
+                arguments=call.tool_input,
+            )
+            call.data["action_authority"] = authority.to_dict()
+            candidate_action["action_authority"] = authority.to_dict()
+            if not authority.allowed:
+                self._session_clean = False
         self.record_decision(
             decision_point="pre_tool_use",
             candidate_action=candidate_action,
             decision_inputs=call.decision_inputs,
         )
         self._emit_event("pre_tool_use", call.data, score)
+        if authority is not None and not authority.allowed:
+            return self._deny_payload("action_authority")
         return self._enforcement_decision(score, dict(candidate_action))
 
     def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:

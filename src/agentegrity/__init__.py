@@ -18,6 +18,18 @@ from agentegrity.bedrock_agents import report as bedrock_agents_report
 from agentegrity.bedrock_agents import wrap_client as bedrock_agents_wrap_client
 from agentegrity.claude import hooks as claude_hooks
 from agentegrity.claude import report as claude_report
+from agentegrity.core.action_security import (
+    ActionExecution,
+    ActionIntent,
+    ActionSecurityGate,
+    AuthorizationDenied,
+    AuthorizationVerdict,
+    EffectReceipt,
+    EffectStatus,
+    EffectType,
+    TaskMandate,
+    ToolAuthority,
+)
 from agentegrity.core.approval import ApprovalDecision, ApprovalWorkflow
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -125,6 +137,16 @@ __all__ = [
     "SlackAlertExporter",
     "ApprovalDecision",
     "ApprovalWorkflow",
+    "ActionExecution",
+    "ActionIntent",
+    "ActionSecurityGate",
+    "AuthorizationDenied",
+    "AuthorizationVerdict",
+    "EffectReceipt",
+    "EffectStatus",
+    "EffectType",
+    "TaskMandate",
+    "ToolAuthority",
     "KeyProvider",
     "StaticKeyProvider",
     "FileKeyProvider",
