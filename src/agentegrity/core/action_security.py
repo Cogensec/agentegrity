@@ -17,6 +17,8 @@ from enum import Enum
 from typing import Any, Generic, TypeVar
 from uuid import uuid4
 
+from agentegrity.core.trust_boundaries import ActionProvenance, TrustBoundaryPolicy
+
 _T = TypeVar("_T")
 
 
@@ -165,9 +167,17 @@ class ActionSecurityGate:
     can promote a completed effect receipt to independently verified.
     """
 
-    def __init__(self, mandate: TaskMandate, tools: Mapping[str, ToolAuthority]):
+    def __init__(
+        self,
+        mandate: TaskMandate,
+        tools: Mapping[str, ToolAuthority],
+        *,
+        trust_boundary: TrustBoundaryPolicy | None = None,
+    ):
         self.mandate = mandate
         self._tools = dict(tools)
+        # Host-controlled policy. Never derived from an agent or tool payload.
+        self._trust_boundary = trust_boundary
         self._lock = threading.RLock()
         self._decisions: dict[str, AuthorizationVerdict] = {}
         self._receipts: dict[str, EffectReceipt] = {}
@@ -181,6 +191,7 @@ class ActionSecurityGate:
         arguments: Mapping[str, Any],
         action_id: str | None = None,
         now: datetime | None = None,
+        provenance: ActionProvenance | None = None,
     ) -> AuthorizationVerdict:
         when = now if now is not None else datetime.now(timezone.utc)
         if not _aware(when):
@@ -223,6 +234,10 @@ class ActionSecurityGate:
             elif (credential is not None and self.mandate.credential_expires_at is not None
                   and when >= self.mandate.credential_expires_at):
                 reason = "credential_expired"
+            elif self._trust_boundary is not None:
+                boundary = self._trust_boundary.evaluate(tool_name, arguments, provenance)
+                if not boundary.allowed:
+                    reason = boundary.reason
 
             verdict = AuthorizationVerdict(intent, reason == "allowed", reason,
                                            self.mandate.mandate_id)
@@ -289,11 +304,15 @@ class ActionSecurityGate:
         executor: Callable[..., _T],
         action_id: str | None = None,
         now: datetime | None = None,
+        provenance: ActionProvenance | None = None,
     ) -> ActionExecution[_T]:
         """Enforce before calling a tool; success does NOT verify effects."""
         checked_arguments = dict(arguments)
-        verdict = self.check(agent_id=agent_id, run_id=run_id, tool_name=tool_name,
-                             arguments=checked_arguments, action_id=action_id, now=now)
+        verdict = self.check(
+            agent_id=agent_id, run_id=run_id, tool_name=tool_name,
+            arguments=checked_arguments, action_id=action_id, now=now,
+            provenance=provenance,
+        )
         if not verdict.allowed:
             raise AuthorizationDenied(verdict)
         if inspect.iscoroutinefunction(executor):
@@ -324,11 +343,15 @@ class ActionSecurityGate:
         executor: Callable[..., Awaitable[_T]],
         action_id: str | None = None,
         now: datetime | None = None,
+        provenance: ActionProvenance | None = None,
     ) -> ActionExecution[_T]:
         """Await an authorized async tool; exceptions and cancellation leave effects unknown."""
         checked_arguments = dict(arguments)
-        verdict = self.check(agent_id=agent_id, run_id=run_id, tool_name=tool_name,
-                             arguments=checked_arguments, action_id=action_id, now=now)
+        verdict = self.check(
+            agent_id=agent_id, run_id=run_id, tool_name=tool_name,
+            arguments=checked_arguments, action_id=action_id, now=now,
+            provenance=provenance,
+        )
         if not verdict.allowed:
             raise AuthorizationDenied(verdict)
         receipt = self._begin_execution(verdict)
