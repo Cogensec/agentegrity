@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://pypi.org/project/agentegrity/"><img src="https://img.shields.io/pypi/v/agentegrity?label=PyPI" alt="PyPI release"></a>
   <a href="https://www.npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/v/@agentegrity/client" alt="npm package"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.12.0-3E7465" alt="Repository version: 0.12.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.13.0-3E7465" alt="Repository source version: 0.13.0 release candidate"></a>
   <a href=".github/workflows/ci.yml"><img src="https://github.com/Cogensec/agentegrity/actions/workflows/ci.yml/badge.svg" alt="Continuous integration"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-informational" alt="Apache 2.0"></a>
 </p>
@@ -41,7 +41,7 @@ Use it to **observe** your existing agent, **enforce** task-bound authority at a
 | --- | --- | --- | --- |
 | Detect adversarial signals, drift, and integrity degradation | Constrain supported tool actions using trusted task mandates | Record decisions and reconcile downstream effects | Evaluate continuity, checkpoints, and recovery mechanisms |
 
-**Source vs. release:** The repository's current version declaration is **v0.12.0**. The opt-in Python Runtime Action Authority features merged into `main` **after** that release. Their presence in source does **not** establish that the published PyPI or npm packages contain them. Check your installed version and [changelog](CHANGELOG.md).
+**Release candidate vs. published packages:** Repository source is prepared for **v0.13.0 (not yet published)**; the last published GitHub release is **v0.12.0**. Runtime Action Authority APIs were merged after v0.12.0 and are included in this candidate, **not automatically in a currently installed v0.12.0**. Verify PyPI/npm publication and your installed package before using these APIs. See the [changelog](CHANGELOG.md).
 
 ## See It in Action
 
@@ -207,7 +207,7 @@ Agentegrity offers **eight Python framework adapters** and **six TypeScript fram
 | Host-controlled `ActionSecurityGate` | Separate opt-in Python API | Not provided |
 | Automatic blocking of every tool/handoff | **No**; host-dependent | **No** |
 
-Claude Code and Codex use their own hook-plugin paths. See [supported integrations](docs/integrations/overview.mdx) for implementation and known limits. **Additional coding-agent harnesses are proposals, not shipped support:** [Cursor, OpenCode, Gemini CLI, Copilot CLI and other integration roadmap](docs/HARNESS-EXPANSION-PROPOSAL.md).
+Claude Code and Codex use their own hook-plugin paths. See [supported integrations](docs/integrations/overview.mdx) for implementation and known limits. Our **[Agent Ecosystem Integration Roadmap](docs/AGENT-ECOSYSTEM-ROADMAP.md)** targets enterprise, financial, customer-facing, browser, research, infrastructure, multi-agent, coding, and longer-term embodied agents. It describes **proposed** integrations, not additional shipped support.
 
 ## Evidence, Evaluation, and Limits
 
@@ -245,6 +245,7 @@ Session exporters may send **full agent content**, while opt-in LLM-backed evalu
 | [Effect evidence](docs/LATE-ARRIVING-EFFECT-EVIDENCE.md) | Deadlines, late outcomes, and conflicts |
 | [Example](examples/action_authority_evidence.py) | Runnable offline authorization demonstration |
 | [Research status](STATUS.md) | Benchmark figures, methods, and limitations |
+| [Agent Ecosystem Roadmap](docs/AGENT-ECOSYSTEM-ROADMAP.md) | Planned coverage across digital and physical agent categories; not shipped support |
 | [Changelog](CHANGELOG.md) | Releases and unreleased work |
 | [Manifesto](MANIFESTO.md) | Research motivation and discipline |
 | [Contributor guide](CONTRIBUTING.md) | Development and contribution guidelines |

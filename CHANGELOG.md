@@ -5,13 +5,26 @@ All notable changes to the Agentegrity Framework are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 minor versions may contain breaking changes; the project remains
-in beta until the v1.0 stability criteria documented in
-[README → Roadmap](README.md#roadmap) are met.
+in beta. The [Agent Ecosystem Roadmap](docs/AGENT-ECOSYSTEM-ROADMAP.md)
+describes proposed integrations, not guarantees of shipped support.
 
 ## [Unreleased]
 
-Enforcement that stops tool calls in every Python framework that can stop one, and a recovery
-layer that scores only what exists and never deletes evidence.
+## [0.13.0] - Release candidate (not yet published)
+
+**Prepared for a future v0.13.0 publication; no tag or package release has
+occurred.** This section will receive the actual date when published.
+
+Runtime Action Authority, provenance-aware trust boundaries, bounded
+multi-agent delegation, and downstream-effect evidence reconciliation.
+Enforcement now stops denied tool calls on additional supported Python
+framework boundaries, while recovery preserves compromise evidence. Several
+previously ineffective enforcement and reporting paths are corrected.
+
+**Important:** `enforce=True` can now deny actions it previously only
+observed. Review the Breaking section, approval policies, and deployment
+configurations before upgrading. See the
+[v0.13.0 release-candidate notes](docs/releases/v0.13.0.md).
 
 ### Breaking
 
