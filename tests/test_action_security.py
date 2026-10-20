@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -51,13 +52,22 @@ def _check(gate: ActionSecurityGate, tool: str = "read_account", **arguments: ob
                       now=NOW)
 
 
+def _invoke_read(gate: ActionSecurityGate):
+    return gate.invoke(
+        agent_id="synthetic-bank-agent", run_id="run-1",
+        tool_name="read_account", arguments={"account_id": "account-42"},
+        executor=lambda account_id: account_id, now=NOW,
+    )
+
+
 def test_permitted_read_and_consequential_action():
     gate = _gate()
-    assert _check(gate).allowed
+    read = _check(gate)
     verdict = _check(gate, "prepare_transfer")
-    assert verdict.allowed
-    assert gate.receipt_for(verdict.intent.action_id).status is EffectStatus.PENDING
-    assert gate.receipt_for(verdict.intent.action_id).assurance == "unverified"
+    assert read.allowed and verdict.allowed
+    # Passing a pre-tool authorization check is not proof execution started.
+    assert gate.receipt_for(read.intent.action_id) is None
+    assert gate.receipt_for(verdict.intent.action_id) is None
 
 
 def test_unknown_tool_denied_even_if_model_claims_read_only():
@@ -193,8 +203,8 @@ def test_mandate_validation_rejects_unbounded_grants_and_naive_time():
 
 def test_reconciler_errors_cannot_assert_verification():
     gate = _gate()
-    v = _check(gate)
-    receipt = EffectReceipt(v.intent.action_id, EffectStatus.CONFIRMED,
+    execution = _invoke_read(gate)
+    receipt = EffectReceipt(execution.verdict.intent.action_id, EffectStatus.CONFIRMED,
                             evidence_source="bank-sandbox", evidence_reference="tx-001")
     stored = gate.record_effect(receipt, verifier=lambda r: 1 / 0 == 0)
     assert stored.assurance == "unverified"
@@ -202,9 +212,108 @@ def test_reconciler_errors_cannot_assert_verification():
 
 def test_verified_receipt_cannot_be_replaced():
     gate = _gate()
-    v = _check(gate)
-    receipt = EffectReceipt(v.intent.action_id, EffectStatus.CONFIRMED,
+    execution = _invoke_read(gate)
+    receipt = EffectReceipt(execution.verdict.intent.action_id, EffectStatus.CONFIRMED,
                             evidence_source="independent-ledger", evidence_reference="entry-1")
     gate.record_effect(receipt, verifier=lambda r: True)
     with pytest.raises(ValueError, match="cannot be overwritten"):
-        gate.record_effect(EffectReceipt(v.intent.action_id, EffectStatus.UNKNOWN))
+        gate.record_effect(EffectReceipt(execution.verdict.intent.action_id, EffectStatus.UNKNOWN))
+
+@pytest.mark.asyncio
+async def test_ainvoke_awaits_async_tool_before_reporting_execution():
+    gate = _gate()
+    steps: list[str] = []
+
+    async def prepare_transfer(account_id: str) -> str:
+        steps.append("started")
+        await asyncio.sleep(0)
+        steps.append("finished")
+        return account_id
+
+    execution = await gate.ainvoke(
+        agent_id="synthetic-bank-agent", run_id="run-1",
+        tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+        executor=prepare_transfer, now=NOW,
+    )
+    assert steps == ["started", "finished"]
+    assert execution.result == "account-42"
+    assert execution.receipt.status is EffectStatus.PENDING
+    assert execution.receipt.assurance == "unverified"
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_records_unknown_if_async_tool_raises_after_submission():
+    gate = _gate()
+    calls: list[str] = []
+
+    async def submit(account_id: str) -> None:
+        calls.append(account_id)
+        await asyncio.sleep(0)
+        raise RuntimeError("synthetic downstream timeout")
+
+    with pytest.raises(RuntimeError, match="timeout"):
+        await gate.ainvoke(
+            agent_id="synthetic-bank-agent", run_id="run-1",
+            tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+            executor=submit, now=NOW,
+        )
+    assert calls == ["account-42"]
+    assert next(iter(gate._receipts.values())).status is EffectStatus.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_records_unknown_on_cancellation():
+    gate = _gate()
+
+    async def cancelled(account_id: str) -> None:
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await gate.ainvoke(
+            agent_id="synthetic-bank-agent", run_id="run-1",
+            tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+            executor=cancelled, now=NOW,
+        )
+    assert next(iter(gate._receipts.values())).status is EffectStatus.UNKNOWN
+
+
+def test_sync_invoke_rejects_native_async_executor_without_effect_receipt():
+    gate = _gate()
+    executed: list[str] = []
+
+    async def async_transfer(account_id: str) -> str:
+        executed.append(account_id)
+        return account_id
+
+    with pytest.raises(TypeError, match="ainvoke"):
+        gate.invoke(
+            agent_id="synthetic-bank-agent", run_id="run-1",
+            tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+            executor=async_transfer, now=NOW,
+        )
+    assert executed == []
+    assert not gate._receipts
+
+
+def test_sync_invoke_rejects_awaitable_return_and_marks_effect_unknown():
+    gate = _gate()
+
+    def dynamic_transfer(account_id: str):
+        async def awaitable() -> str:
+            return account_id
+        return awaitable()
+
+    with pytest.raises(TypeError, match="ainvoke"):
+        gate.invoke(
+            agent_id="synthetic-bank-agent", run_id="run-1",
+            tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+            executor=dynamic_transfer, now=NOW,
+        )
+    assert next(iter(gate._receipts.values())).status is EffectStatus.UNKNOWN
+
+
+def test_check_alone_never_opens_effect_receipt():
+    gate = _gate()
+    for _ in range(3):
+        assert _check(gate).allowed
+    assert not gate._receipts
