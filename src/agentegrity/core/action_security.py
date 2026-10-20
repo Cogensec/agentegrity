@@ -401,9 +401,13 @@ class ActionSecurityGate:
                     reason = "mandate_not_yet_valid"
             if reason is None and when >= self.mandate.expires_at:
                 reason = "mandate_expired"
+            if (reason is None and verdict.intent.credential_id is not None
+                    and self.mandate.credential_expires_at is not None
+                    and when >= self.mandate.credential_expires_at):
+                reason = "credential_expired"
             if reason is not None:
-                # A parent may revoke or expire after check() but before the
-                # executor runs; do not start execution or invent a receipt.
+                # Revocation, mandate lifetime, or credential lifetime may
+                # change after check(). Never start an unauthorized effect.
                 raise AuthorizationDenied(replace(verdict, allowed=False, reason=reason))
             if identifier in self._receipts:
                 raise ValueError("action execution already started")
