@@ -173,14 +173,149 @@ class ActionSecurityGate:
         tools: Mapping[str, ToolAuthority],
         *,
         trust_boundary: TrustBoundaryPolicy | None = None,
+        max_delegation_depth: int = 0,
+        _parent_gate: ActionSecurityGate | None = None,
     ):
+        if (isinstance(max_delegation_depth, bool)
+                or not isinstance(max_delegation_depth, int)
+                or not 0 <= max_delegation_depth <= 8):
+            raise ValueError("max_delegation_depth must be between 0 and 8")
         self.mandate = mandate
         self._tools = dict(tools)
         # Host-controlled policy. Never derived from an agent or tool payload.
         self._trust_boundary = trust_boundary
+        self._parent_gate = _parent_gate
+        self._delegation_depth: int = (
+            0 if _parent_gate is None else _parent_gate._delegation_depth + 1
+        )
+        self._max_delegation_depth = max_delegation_depth
+        self._revoked = False
         self._lock = threading.RLock()
         self._decisions: dict[str, AuthorizationVerdict] = {}
         self._receipts: dict[str, EffectReceipt] = {}
+
+    @property
+    def delegation_lineage(self) -> tuple[str, ...]:
+        """In-process mandate IDs from root to this gate; not a signed proof."""
+        chain = (self.mandate.mandate_id,)
+        if self._parent_gate is not None:
+            return self._parent_gate.delegation_lineage + chain
+        return chain
+
+    def revoke(self) -> None:
+        """Revoke this gate and every in-process descendant immediately."""
+        with self._lock:
+            self._revoked = True
+
+    def _delegation_denial(self, when: datetime | None = None) -> str | None:
+        """Enforce revocation through the ancestor chain; check time when supplied."""
+        current: ActionSecurityGate | None = self
+        while current is not None:
+            with current._lock:
+                if current._revoked:
+                    return "delegation_revoked"
+                if when is not None and current is not self:
+                    mandate = current.mandate
+                    if mandate.not_before is not None and when < mandate.not_before:
+                        return "ancestor_mandate_not_yet_valid"
+                    if when >= mandate.expires_at:
+                        return "ancestor_mandate_expired"
+            current = current._parent_gate
+        return None
+
+    def delegate(
+        self,
+        *,
+        agent_id: str,
+        run_id: str,
+        allowed_tools: frozenset[str],
+        allowed_resources: frozenset[str],
+        allowed_effects: frozenset[EffectType],
+        expires_at: datetime,
+        allowed_credentials: frozenset[str] = frozenset(),
+        not_before: datetime | None = None,
+        credential_expires_at: datetime | None = None,
+        now: datetime | None = None,
+    ) -> ActionSecurityGate:
+        """Mint a strictly attenuated child gate from a trusted host controller.
+
+        This is a host-side capability factory, not an agent-callable tool.
+        The child always inherits the same principal, declared tool registry,
+        provenance boundary, ancestor revocation, and maximum delegation depth.
+        Nothing in the untrusted subagent's prompt constitutes authority.
+        """
+        when = now if now is not None else datetime.now(timezone.utc)
+        if not _aware(when) or not _aware(expires_at):
+            raise ValueError("delegation times must be timezone-aware")
+        with self._lock:
+            if self._delegation_depth >= self._max_delegation_depth:
+                raise ValueError("delegation depth exceeded or disabled")
+            if self.mandate.run_id is None:
+                raise ValueError("parent delegation requires run-bound mandate")
+            if (self._delegation_denial(when) is not None
+                    or when >= self.mandate.expires_at
+                    or (self.mandate.not_before is not None
+                        and when < self.mandate.not_before)):
+                raise PermissionError("parent mandate is not currently valid")
+            if not isinstance(agent_id, str) or not agent_id.strip():
+                raise ValueError("child agent_id must be nonempty")
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise ValueError("child run_id must be nonempty")
+            ancestor: ActionSecurityGate | None = self
+            while ancestor is not None:
+                if (agent_id == ancestor.mandate.agent_id
+                        or run_id == ancestor.mandate.run_id):
+                    raise ValueError("child must have distinct agent_id and run_id")
+                ancestor = ancestor._parent_gate
+            scopes = (
+                (allowed_tools, self.mandate.allowed_tools, "tools"),
+                (allowed_resources, self.mandate.allowed_resources, "resources"),
+                (allowed_effects, self.mandate.allowed_effects, "effects"),
+                (allowed_credentials, self.mandate.allowed_credentials, "credentials"),
+            )
+            for requested, granted, name in scopes:
+                if not isinstance(requested, frozenset) or not requested <= granted:
+                    raise ValueError(f"delegated {name} must be a parent subset")
+            if not allowed_tools <= self._tools.keys():
+                raise ValueError("delegated tools must be registered")
+            if expires_at <= when or expires_at > self.mandate.expires_at:
+                raise ValueError("child expiration must be within active parent lifetime")
+            start = not_before if not_before is not None else self.mandate.not_before
+            if start is not None:
+                if not _aware(start) or start >= expires_at:
+                    raise ValueError("invalid child not_before")
+                if self.mandate.not_before is not None and start < self.mandate.not_before:
+                    raise ValueError("child cannot begin before parent")
+            credential_end = (
+                credential_expires_at if credential_expires_at is not None
+                else self.mandate.credential_expires_at
+            )
+            if credential_end is not None and not _aware(credential_end):
+                raise ValueError("child credential expiry must be timezone-aware")
+            if (self.mandate.credential_expires_at is not None
+                    and credential_end is not None
+                    and credential_end > self.mandate.credential_expires_at):
+                raise ValueError("child cannot extend parent credential lifetime")
+            child = TaskMandate(
+                mandate_id=f"delegation-{uuid4().hex}",
+                principal_id=self.mandate.principal_id,
+                agent_id=agent_id,
+                run_id=run_id,
+                expires_at=expires_at,
+                not_before=start,
+                allowed_tools=allowed_tools,
+                allowed_resources=allowed_resources,
+                allowed_effects=allowed_effects,
+                allowed_credentials=allowed_credentials,
+                credential_expires_at=credential_end,
+            )
+            return ActionSecurityGate(
+                child,
+                {name: self._tools[name] for name in allowed_tools},
+                trust_boundary=self._trust_boundary,
+                max_delegation_depth=self._max_delegation_depth,
+                _parent_gate=self,
+            )
 
     def check(
         self,
@@ -215,6 +350,8 @@ class ActionSecurityGate:
             reason = "allowed"
             if identifier in self._decisions:
                 reason = "duplicate_action_id"
+            elif (delegation_denial := self._delegation_denial(when)) is not None:
+                reason = delegation_denial
             elif agent_id != self.mandate.agent_id:
                 reason = "agent_identity_mismatch"
             elif self.mandate.run_id is not None and run_id != self.mandate.run_id:
@@ -247,12 +384,31 @@ class ActionSecurityGate:
             # Only the execution-boundary wrappers create a pending receipt.
             return verdict
 
-    def _begin_execution(self, verdict: AuthorizationVerdict) -> EffectReceipt:
-        """Register an attempted execution only after all authorization gates pass."""
+    def _begin_execution(
+        self, verdict: AuthorizationVerdict, *, now: datetime | None = None,
+    ) -> EffectReceipt:
+        """Recheck ancestor validity before beginning an authorized effect."""
+        when = now if now is not None else datetime.now(timezone.utc)
+        if not _aware(when):
+            raise ValueError("now must be timezone-aware")
         with self._lock:
             identifier = verdict.intent.action_id
             if not verdict.allowed or self._decisions.get(identifier) is not verdict:
                 raise ValueError("execution requires an authorized decision")
+            reason = self._delegation_denial(when)
+            if reason is None and self.mandate.not_before is not None:
+                if when < self.mandate.not_before:
+                    reason = "mandate_not_yet_valid"
+            if reason is None and when >= self.mandate.expires_at:
+                reason = "mandate_expired"
+            if (reason is None and verdict.intent.credential_id is not None
+                    and self.mandate.credential_expires_at is not None
+                    and when >= self.mandate.credential_expires_at):
+                reason = "credential_expired"
+            if reason is not None:
+                # Revocation, mandate lifetime, or credential lifetime may
+                # change after check(). Never start an unauthorized effect.
+                raise AuthorizationDenied(replace(verdict, allowed=False, reason=reason))
             if identifier in self._receipts:
                 raise ValueError("action execution already started")
             receipt = EffectReceipt(identifier, EffectStatus.PENDING)
@@ -318,7 +474,7 @@ class ActionSecurityGate:
         if inspect.iscoroutinefunction(executor):
             # An async function does not execute until awaited. Do not create a receipt.
             raise TypeError("async executor requires ActionSecurityGate.ainvoke()")
-        receipt = self._begin_execution(verdict)
+        receipt = self._begin_execution(verdict, now=now)
         try:
             result = executor(**checked_arguments)
             if inspect.isawaitable(result):
@@ -354,7 +510,7 @@ class ActionSecurityGate:
         )
         if not verdict.allowed:
             raise AuthorizationDenied(verdict)
-        receipt = self._begin_execution(verdict)
+        receipt = self._begin_execution(verdict, now=now)
         try:
             result = await executor(**checked_arguments)
         except BaseException:
