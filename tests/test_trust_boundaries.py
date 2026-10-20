@@ -129,7 +129,10 @@ def test_lower_trust_sources_cannot_choose_recipient(tainted_source: str, expect
         "destination": frozenset({tainted_source}),
     })
     with pytest.raises(AuthorizationDenied, match=expected_reason):
-        _transfer(gate, lineage, executor=lambda account_id, destination: effects.append(destination))
+        _transfer(
+            gate, lineage,
+            executor=lambda account_id, destination: effects.append(destination),
+        )
     assert effects == []
     assert not gate._receipts
 
