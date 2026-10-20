@@ -345,6 +345,7 @@ class _BaseAdapter:
         stream_from_env: bool = True,
         on_deny: str = "continue",
         action_security: ActionSecurityGate | None = None,
+        session_id: str | None = None,
     ) -> None:
         if on_deny not in ON_DENY_VALUES:
             raise ValueError(f"on_deny must be one of {ON_DENY_VALUES}, not {on_deny!r}")
@@ -365,6 +366,13 @@ class _BaseAdapter:
         self._approval_handler = approval_handler
         if action_security is not None and not enforce:
             raise ValueError("action_security requires enforce=True")
+        if session_id is not None and (
+            not isinstance(session_id, str) or not session_id.strip()
+        ):
+            raise ValueError("session_id must be a nonempty string")
+        mandate_run_id = action_security.mandate.run_id if action_security is not None else None
+        if session_id is not None and mandate_run_id is not None and session_id != mandate_run_id:
+            raise ValueError("session_id does not match the action-security mandate run_id")
         self._action_security = action_security
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
@@ -372,7 +380,9 @@ class _BaseAdapter:
         # link onto it instead of starting a second root.
         self._chain = chain if chain is not None else AttestationChain()
         self._evaluation_count = 0
-        self._session_id = uuid4().hex
+        # Use the trusted mandate's run scope unless the host supplied one.
+        # This makes run-bound authorization possible before hooks are registered.
+        self._session_id = session_id or mandate_run_id or uuid4().hex
         self._exporters: list[SessionExporter] = []
         self._credentials = CredentialRegistry()
         # credential_declared events emitted while no exporter existed, replayed at session start.
