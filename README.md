@@ -207,7 +207,7 @@ Agentegrity offers **eight Python framework adapters** and **six TypeScript fram
 | Host-controlled `ActionSecurityGate` | Separate opt-in Python API | Not provided |
 | Automatic blocking of every tool/handoff | **No**; host-dependent | **No** |
 
-Claude Code and Codex use their own hook-plugin paths. See [supported integrations](docs/integrations/overview.mdx) for implementation and known limits.
+Claude Code and Codex use their own hook-plugin paths. See [supported integrations](docs/integrations/overview.mdx) for implementation and known limits. **Additional coding-agent harnesses are proposals, not shipped support:** [Cursor, OpenCode, Gemini CLI, Copilot CLI and other integration roadmap](docs/HARNESS-EXPANSION-PROPOSAL.md).
 
 ## Evidence, Evaluation, and Limits
 
