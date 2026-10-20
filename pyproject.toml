@@ -126,6 +126,7 @@ module = [
     "boto3", "boto3.*", "botocore.*",
     "scipy", "scipy.*",
     "langchain_core", "langchain_core.*",
+    "langchain", "langchain.*",
     "agents", "agents.*",
     "claude_agent_sdk", "claude_agent_sdk.*",
     "crewai", "crewai.*",
