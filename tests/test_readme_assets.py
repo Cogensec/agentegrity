@@ -45,3 +45,18 @@ def test_readme_demo_is_honest_about_synthetic_replay():
     assert "Before simulated evidence verification: pending" in demo
     assert "After simulated evidence verification: confirmed" in demo
     assert "No real bank" in demo
+
+
+def test_adoption_badges_and_framework_logos_remain_visible():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "static.pepy.tech/personalized-badge/agentegrity" in readme
+    assert "img.shields.io/npm/dm/@agentegrity/client" in readme
+    assert "badges%2Fnpm-downloads.json" in readme
+    assert (ROOT / ".github" / "workflows" / "npm-downloads-badge.yml").exists()
+    logos = (
+        "anthropics", "langchain-ai", "openai", "crewAIInc",
+        "google", "microsoft", "agno-agi", "aws", "vercel",
+    )
+    for org in logos:
+        assert f"https://github.com/{org}.png" in readme
+    assert "logos identify third-party products" in readme
