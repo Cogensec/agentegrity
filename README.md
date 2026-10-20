@@ -15,6 +15,12 @@
 </p>
 
 <p align="center">
+  <a href="https://pepy.tech/projects/agentegrity"><img src="https://static.pepy.tech/personalized-badge/agentegrity?period=total&amp;units=INTERNATIONAL_SYSTEM&amp;left_color=BLACK&amp;right_color=GREEN&amp;left_text=pypi-downloads" alt="Agentegrity total PyPI downloads"></a>
+  <a href="https://www.npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/dm/@agentegrity/client" alt="Agentegrity client npm monthly downloads"></a>
+  <a href="https://www.npmjs.com/org/agentegrity"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCogensec%2Fagentegrity%2Fmain%2Fbadges%2Fnpm-downloads.json" alt="Agentegrity npm packages aggregated downloads badge"></a>
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick Start</a> ·
   <a href="#see-it-in-action">Demo</a> ·
   <a href="#how-it-works">Architecture</a> ·
@@ -164,6 +170,20 @@ The opt-in Python OSS Runtime Action Authority APIs address six failure patterns
 A remote timeout is **not** proof that no external effect occurred. An apparently successful tool response is **not** proof of commitment. See [late-arriving effect evidence](docs/LATE-ARRIVING-EFFECT-EVIDENCE.md).
 
 ## Supported Frameworks
+
+<p align="center">
+  <a href="https://github.com/anthropics/claude-agent-sdk-python"><img src="https://github.com/anthropics.png" width="43" alt="Claude Agent SDK"></a>&nbsp;&nbsp;
+  <a href="https://github.com/langchain-ai/langchain"><img src="https://github.com/langchain-ai.png" width="43" alt="LangChain and LangGraph"></a>&nbsp;&nbsp;
+  <a href="https://github.com/openai/openai-agents-python"><img src="https://github.com/openai.png" width="43" alt="OpenAI Agents SDK"></a>&nbsp;&nbsp;
+  <a href="https://github.com/crewAIInc/crewAI"><img src="https://github.com/crewAIInc.png" width="43" alt="CrewAI"></a>&nbsp;&nbsp;
+  <a href="https://github.com/google/adk-python"><img src="https://github.com/google.png" width="43" alt="Google ADK"></a>&nbsp;&nbsp;
+  <a href="https://github.com/microsoft/autogen"><img src="https://github.com/microsoft.png" width="43" alt="AutoGen"></a>&nbsp;&nbsp;
+  <a href="https://github.com/agno-agi/agno"><img src="https://github.com/agno-agi.png" width="43" alt="Agno"></a>&nbsp;&nbsp;
+  <a href="https://github.com/aws"><img src="https://github.com/aws.png" width="43" alt="AWS Bedrock Agents"></a>&nbsp;&nbsp;
+  <a href="https://github.com/vercel/ai"><img src="https://github.com/vercel.png" width="43" alt="Vercel AI SDK"></a>
+</p>
+
+<p align="center"><sub>Integrated framework families in Python, TypeScript, or both. See the capability matrix below for exact support; logos identify third-party products and do not imply endorsement.</sub></p>
 
 Agentegrity offers **eight Python framework adapters** and **six TypeScript framework packages**, plus Claude Code and Codex hook integrations. Framework support means event instrumentation on supported integration surfaces; coverage and enforcement vary.
 
