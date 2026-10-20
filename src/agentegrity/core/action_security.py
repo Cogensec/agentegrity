@@ -8,8 +8,9 @@ use ``invoke`` at the actual tool execution boundary for a hard gate.
 
 from __future__ import annotations
 
+import inspect
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -227,9 +228,21 @@ class ActionSecurityGate:
                                            self.mandate.mandate_id)
             if identifier not in self._decisions:
                 self._decisions[identifier] = verdict
-                if verdict.allowed:
-                    self._receipts[identifier] = EffectReceipt(identifier, EffectStatus.PENDING)
+            # Authorization alone does not mean the tool has started.
+            # Only the execution-boundary wrappers create a pending receipt.
             return verdict
+
+    def _begin_execution(self, verdict: AuthorizationVerdict) -> EffectReceipt:
+        """Register an attempted execution only after all authorization gates pass."""
+        with self._lock:
+            identifier = verdict.intent.action_id
+            if not verdict.allowed or self._decisions.get(identifier) is not verdict:
+                raise ValueError("execution requires an authorized decision")
+            if identifier in self._receipts:
+                raise ValueError("action execution already started")
+            receipt = EffectReceipt(identifier, EffectStatus.PENDING)
+            self._receipts[identifier] = receipt
+            return receipt
 
     def receipt_for(self, action_id: str) -> EffectReceipt | None:
         with self._lock:
@@ -283,12 +296,45 @@ class ActionSecurityGate:
                              arguments=checked_arguments, action_id=action_id, now=now)
         if not verdict.allowed:
             raise AuthorizationDenied(verdict)
+        if inspect.iscoroutinefunction(executor):
+            # An async function does not execute until awaited. Do not create a receipt.
+            raise TypeError("async executor requires ActionSecurityGate.ainvoke()")
+        receipt = self._begin_execution(verdict)
         try:
             result = executor(**checked_arguments)
+            if inspect.isawaitable(result):
+                # A sync-looking callable may also return a coroutine or Future.
+                # Do not report a result until execution actually completed.
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise TypeError("awaitable executor result requires ActionSecurityGate.ainvoke()")
         except BaseException:
-            # Tools can commit an external write and then raise. Never mark clean.
+            # A callable may have committed an external write before raising.
             self.record_effect(EffectReceipt(verdict.intent.action_id, EffectStatus.UNKNOWN))
             raise
-        receipt = self.receipt_for(verdict.intent.action_id)
-        assert receipt is not None
+        return ActionExecution(verdict, result, receipt)
+
+    async def ainvoke(
+        self,
+        *,
+        agent_id: str,
+        run_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        executor: Callable[..., Awaitable[_T]],
+        action_id: str | None = None,
+        now: datetime | None = None,
+    ) -> ActionExecution[_T]:
+        """Await an authorized async tool; exceptions and cancellation leave effects unknown."""
+        checked_arguments = dict(arguments)
+        verdict = self.check(agent_id=agent_id, run_id=run_id, tool_name=tool_name,
+                             arguments=checked_arguments, action_id=action_id, now=now)
+        if not verdict.allowed:
+            raise AuthorizationDenied(verdict)
+        receipt = self._begin_execution(verdict)
+        try:
+            result = await executor(**checked_arguments)
+        except BaseException:
+            self.record_effect(EffectReceipt(verdict.intent.action_id, EffectStatus.UNKNOWN))
+            raise
         return ActionExecution(verdict, result, receipt)
