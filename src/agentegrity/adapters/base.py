@@ -40,6 +40,7 @@ from uuid import uuid4
 
 from agentegrity.adapters import _background
 from agentegrity.adapters.transcripts import TranscriptUsage
+from agentegrity.core.action_security import ActionSecurityGate
 from agentegrity.core.approval import resolve_approval
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -343,6 +344,7 @@ class _BaseAdapter:
         chain: AttestationChain | None = None,
         stream_from_env: bool = True,
         on_deny: str = "continue",
+        action_security: ActionSecurityGate | None = None,
     ) -> None:
         if on_deny not in ON_DENY_VALUES:
             raise ValueError(f"on_deny must be one of {ON_DENY_VALUES}, not {on_deny!r}")
@@ -361,6 +363,9 @@ class _BaseAdapter:
         # escalations fail closed (deny), so "require approval" is not
         # silently advisory under enforcement.
         self._approval_handler = approval_handler
+        if action_security is not None and not enforce:
+            raise ValueError("action_security requires enforce=True")
+        self._action_security = action_security
         self._buffer = _ContextBuffer()
         self._events: list[FrameworkEvent] = []
         # A resumed session passes its persisted chain so new records
@@ -1148,12 +1153,27 @@ class _BaseAdapter:
             "tool_name": call.tool_name,
             "arguments": call.tool_input,
         }
+        authority = None
+        if self._action_security is not None:
+            # Authorization is supplied by the application, never by tool input.
+            authority = self._action_security.check(
+                agent_id=self._profile.agent_id,
+                run_id=self._session_id,
+                tool_name=call.tool_name,
+                arguments=call.tool_input,
+            )
+            call.data["action_authority"] = authority.to_dict()
+            candidate_action["action_authority"] = authority.to_dict()
+            if not authority.allowed:
+                self._session_clean = False
         self.record_decision(
             decision_point="pre_tool_use",
             candidate_action=candidate_action,
             decision_inputs=call.decision_inputs,
         )
         self._emit_event("pre_tool_use", call.data, score)
+        if authority is not None and not authority.allowed:
+            return self._deny_payload("action_authority")
         return self._enforcement_decision(score, dict(candidate_action))
 
     def _handle_post_tool_use(self, data: dict[str, Any]) -> dict[str, Any]:
