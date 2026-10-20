@@ -1,3 +1,15 @@
+from agentegrity.core.action_security import (
+    ActionExecution,
+    ActionIntent,
+    ActionSecurityGate,
+    AuthorizationDenied,
+    AuthorizationVerdict,
+    EffectReceipt,
+    EffectStatus,
+    EffectType,
+    TaskMandate,
+    ToolAuthority,
+)
 from agentegrity.core.attestation import AttestationChain, AttestationRecord
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore
 from agentegrity.core.monitor import IntegrityMonitor, IntegrityViolationError
@@ -13,6 +25,16 @@ from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_cal
 
 __all__ = [
     "AgentProfile",
+    "ActionExecution",
+    "ActionIntent",
+    "ActionSecurityGate",
+    "AuthorizationDenied",
+    "AuthorizationVerdict",
+    "EffectReceipt",
+    "EffectStatus",
+    "EffectType",
+    "TaskMandate",
+    "ToolAuthority",
     "AgentType",
     "DeploymentContext",
     "RiskTier",
