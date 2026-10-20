@@ -261,8 +261,12 @@ class ActionSecurityGate:
                 raise ValueError("child agent_id must be nonempty")
             if not isinstance(run_id, str) or not run_id.strip():
                 raise ValueError("child run_id must be nonempty")
-            if agent_id == self.mandate.agent_id or run_id == self.mandate.run_id:
-                raise ValueError("child must have distinct agent_id and run_id")
+            ancestor: ActionSecurityGate | None = self
+            while ancestor is not None:
+                if (agent_id == ancestor.mandate.agent_id
+                        or run_id == ancestor.mandate.run_id):
+                    raise ValueError("child must have distinct agent_id and run_id")
+                ancestor = ancestor._parent_gate
             scopes = (
                 (allowed_tools, self.mandate.allowed_tools, "tools"),
                 (allowed_resources, self.mandate.allowed_resources, "resources"),
