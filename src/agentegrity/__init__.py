@@ -50,6 +50,13 @@ from agentegrity.core.monitor import IntegrityMonitor, IntegrityViolationError
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
 from agentegrity.core.telemetry import disable_telemetry
 from agentegrity.core.tool_classifier import ToolCallCategory, classify_tool_call
+from agentegrity.core.topology import (
+    AgentMember,
+    AgentRole,
+    AgentTopology,
+    TopologyChange,
+    TopologyKind,
+)
 from agentegrity.core.trust_boundaries import (
     ActionProvenance,
     BoundaryVerdict,
@@ -57,13 +64,6 @@ from agentegrity.core.trust_boundaries import (
     SourceLabel,
     SourceTrust,
     TrustBoundaryPolicy,
-)
-from agentegrity.core.topology import (
-    AgentMember,
-    AgentRole,
-    AgentTopology,
-    TopologyChange,
-    TopologyKind,
 )
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
