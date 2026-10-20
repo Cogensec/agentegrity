@@ -214,7 +214,7 @@ class ActionSecurityGate:
             with current._lock:
                 if current._revoked:
                     return "delegation_revoked"
-                if when is not None:
+                if when is not None and current is not self:
                     mandate = current.mandate
                     if mandate.not_before is not None and when < mandate.not_before:
                         return "ancestor_mandate_not_yet_valid"
@@ -389,6 +389,11 @@ class ActionSecurityGate:
             if not verdict.allowed or self._decisions.get(identifier) is not verdict:
                 raise ValueError("execution requires an authorized decision")
             reason = self._delegation_denial(when)
+            if reason is None and self.mandate.not_before is not None:
+                if when < self.mandate.not_before:
+                    reason = "mandate_not_yet_valid"
+            if reason is None and when >= self.mandate.expires_at:
+                reason = "mandate_expired"
             if reason is not None:
                 # A parent may revoke or expire after check() but before the
                 # executor runs; do not start execution or invent a receipt.
