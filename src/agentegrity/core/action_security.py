@@ -599,7 +599,10 @@ class ActionSecurityGate:
                 return previous  # an independently confirmed conflict is sticky
             if previous.independently_verified and previous.status is not receipt.status:
                 reconciled = EffectReceipt(
-                    receipt.action_id, EffectStatus.CONFLICTED, "sdk",
+                    receipt.action_id, EffectStatus.CONFLICTED,
+                    evidence_source=receipt.evidence_source,
+                    evidence_reference=reference,
+                    independently_verified=True,
                 )
                 reason = "conflicting_verified_evidence"
             else:
