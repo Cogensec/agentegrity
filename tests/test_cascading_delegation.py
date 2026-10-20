@@ -296,7 +296,7 @@ def test_revocation_after_check_blocks_before_effect_begins():
     assert verdict.allowed
     root.revoke()
     with pytest.raises(AuthorizationDenied, match="delegation_revoked"):
-        child._begin_execution(verdict)
+        child._begin_execution(verdict, now=NOW + timedelta(minutes=4))
     assert child.receipt_for(verdict.intent.action_id) is None
 
 
