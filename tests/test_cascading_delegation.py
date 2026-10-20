@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from agentegrity.core import action_security as authority_module
 from agentegrity.core.action_security import (
     ActionSecurityGate,
     AuthorizationDenied,
@@ -405,3 +406,93 @@ def test_descendant_cannot_reuse_ancestor_agent_or_run_identity():
         child.delegate(agent_id=root.mandate.agent_id, run_id="new-run", **params)
     with pytest.raises(ValueError, match="distinct"):
         child.delegate(agent_id="new-agent", run_id=root.mandate.run_id, **params)
+
+
+def _credentialed_child() -> ActionSecurityGate:
+    return _child(
+        _root(),
+        allowed_tools=frozenset({"prepare_transfer"}),
+        allowed_effects=frozenset({EffectType.FINANCIAL_WRITE}),
+        allowed_credentials=frozenset({"bank-short-lived"}),
+    )
+
+
+def test_expiring_delegated_credential_is_rechecked_after_authorization():
+    child = _credentialed_child()
+    verdict = child.check(
+        agent_id="reader-worker", run_id="child-run",
+        tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+        now=NOW + timedelta(minutes=19),
+    )
+    assert verdict.allowed
+    # A credential reaches its expiry after the earlier authorization check.
+    with pytest.raises(AuthorizationDenied, match="credential_expired"):
+        child._begin_execution(verdict, now=NOW + timedelta(minutes=20))
+    assert child.receipt_for(verdict.intent.action_id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_execution", [False, True])
+async def test_credential_expires_between_check_and_sync_or_async_execution(
+    monkeypatch, async_execution: bool,
+):
+    child = _credentialed_child()
+    before = NOW + timedelta(minutes=19, seconds=59)
+    at_expiry = NOW + timedelta(minutes=20)
+    timestamps = iter((before, at_expiry))
+    clock_calls: list[datetime] = []
+
+    class _AdvancingClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = next(timestamps)
+            clock_calls.append(value)
+            return value
+
+    # Production callers use the real clock. Here it advances precisely
+    # between check() and _begin_execution(), reproducing the race.
+    monkeypatch.setattr(authority_module, "datetime", _AdvancingClock)
+    executed: list[str] = []
+
+    async def asynchronous_tool(account_id: str) -> None:
+        executed.append(account_id)
+
+    def synchronous_tool(account_id: str) -> None:
+        executed.append(account_id)
+
+    request = dict(
+        agent_id="reader-worker", run_id="child-run",
+        tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+    )
+    with pytest.raises(AuthorizationDenied, match="credential_expired"):
+        if async_execution:
+            await child.ainvoke(**request, executor=asynchronous_tool)
+        else:
+            child.invoke(**request, executor=synchronous_tool)
+
+    assert clock_calls == [before, at_expiry]
+    assert executed == []
+    assert not child._receipts
+
+
+def test_credential_recheck_keeps_valid_actions_and_credential_free_reads_usable():
+    child = _credentialed_child()
+    before = NOW + timedelta(minutes=19)
+    result = child.invoke(
+        agent_id="reader-worker", run_id="child-run",
+        tool_name="prepare_transfer", arguments={"account_id": "account-42"},
+        executor=lambda account_id: "synthetic-prepared", now=before,
+    )
+    assert result.result == "synthetic-prepared"
+    assert result.receipt.status is EffectStatus.PENDING
+
+    read_child = _child(_root())
+    after_credential_expiry = NOW + timedelta(minutes=21)
+    read_result = read_child.invoke(
+        agent_id="reader-worker", run_id="child-run",
+        tool_name="read_account", arguments={"account_id": "account-42"},
+        executor=lambda account_id: "synthetic-read",
+        now=after_credential_expiry,
+    )
+    assert read_result.result == "synthetic-read"
+    assert read_result.receipt.status is EffectStatus.PENDING
