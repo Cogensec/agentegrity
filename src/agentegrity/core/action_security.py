@@ -377,18 +377,22 @@ class ActionSecurityGate:
             # Only the execution-boundary wrappers create a pending receipt.
             return verdict
 
-    def _begin_execution(self, verdict: AuthorizationVerdict) -> EffectReceipt:
-        """Register an attempted execution only after all authorization gates pass."""
+    def _begin_execution(
+        self, verdict: AuthorizationVerdict, *, now: datetime | None = None,
+    ) -> EffectReceipt:
+        """Recheck ancestor validity before beginning an authorized effect."""
+        when = now if now is not None else datetime.now(timezone.utc)
+        if not _aware(when):
+            raise ValueError("now must be timezone-aware")
         with self._lock:
             identifier = verdict.intent.action_id
             if not verdict.allowed or self._decisions.get(identifier) is not verdict:
                 raise ValueError("execution requires an authorized decision")
-            if self._delegation_denial() is not None:
-                # A parent may revoke between the authorization check and actual
-                # tool invocation. Do not start execution or invent a receipt.
-                raise AuthorizationDenied(
-                    replace(verdict, allowed=False, reason="delegation_revoked")
-                )
+            reason = self._delegation_denial(when)
+            if reason is not None:
+                # A parent may revoke or expire after check() but before the
+                # executor runs; do not start execution or invent a receipt.
+                raise AuthorizationDenied(replace(verdict, allowed=False, reason=reason))
             if identifier in self._receipts:
                 raise ValueError("action execution already started")
             receipt = EffectReceipt(identifier, EffectStatus.PENDING)
@@ -454,7 +458,7 @@ class ActionSecurityGate:
         if inspect.iscoroutinefunction(executor):
             # An async function does not execute until awaited. Do not create a receipt.
             raise TypeError("async executor requires ActionSecurityGate.ainvoke()")
-        receipt = self._begin_execution(verdict)
+        receipt = self._begin_execution(verdict, now=now)
         try:
             result = executor(**checked_arguments)
             if inspect.isawaitable(result):
@@ -490,7 +494,7 @@ class ActionSecurityGate:
         )
         if not verdict.allowed:
             raise AuthorizationDenied(verdict)
-        receipt = self._begin_execution(verdict)
+        receipt = self._begin_execution(verdict, now=now)
         try:
             result = await executor(**checked_arguments)
         except BaseException:
