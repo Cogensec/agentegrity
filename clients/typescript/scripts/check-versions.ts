@@ -70,8 +70,11 @@ if (start < 0 || end < 0) {
   const workspaces = lock.slice(start, end);
   const versions = [...workspaces.matchAll(/^\s*"version": "([^"]+)"/gm)]
     .map((match) => match[1]);
+  // The private workspace root references the client as workspace:*.
+  // Only the six published adapter packages must pin the release version.
   const clientPins = [...workspaces.matchAll(/^\s*"@agentegrity\/client": "([^"]+)"/gm)]
-    .map((match) => match[1]);
+    .map((match) => match[1])
+    .filter((version) => version !== "workspace:*");
 
   if (versions.length !== published || versions.some((v) => v !== pyVersion)) {
     console.error(
