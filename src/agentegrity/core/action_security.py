@@ -252,7 +252,10 @@ class ActionSecurityGate:
                 raise ValueError("delegation depth exceeded or disabled")
             if self.mandate.run_id is None:
                 raise ValueError("parent delegation requires run-bound mandate")
-            if self._delegation_denial(when) is not None:
+            if (self._delegation_denial(when) is not None
+                    or when >= self.mandate.expires_at
+                    or (self.mandate.not_before is not None
+                        and when < self.mandate.not_before)):
                 raise PermissionError("parent mandate is not currently valid")
             if not isinstance(agent_id, str) or not agent_id.strip():
                 raise ValueError("child agent_id must be nonempty")
