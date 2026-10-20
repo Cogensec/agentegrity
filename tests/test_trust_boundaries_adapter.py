@@ -22,6 +22,7 @@ from agentegrity.core.trust_boundaries import (
     SourceTrust,
     TrustBoundaryPolicy,
 )
+from agentegrity.layers.cortical import CorticalLayer
 
 
 class _Allow:
@@ -151,3 +152,75 @@ def test_provenance_provider_requires_action_security():
                 control_origins={}
             ),
         )
+
+
+class _BaselineLearningProbe:
+    def __init__(self):
+        self.learned: list[tuple[dict[str, int], dict[str, int]]] = []
+
+    def learn_session(self, distribution, usage):
+        self.learned.append((distribution, usage))
+
+
+@pytest.mark.parametrize("failure_mode", ["exception", "malformed"])
+@pytest.mark.parametrize("entry_point", ["sync", "async"])
+@pytest.mark.asyncio
+async def test_provenance_lookup_failure_never_teaches_cortical_baseline(
+    monkeypatch, failure_mode: str, entry_point: str,
+):
+    def unavailable_lineage(tool, arguments):
+        if failure_mode == "exception":
+            raise RuntimeError("host lineage service unavailable")
+        # An incorrect result must be treated like a failed lookup, not authority.
+        return {"destination": "user"}
+
+    adapter, gate = _adapter(unavailable_lineage)
+    probe = _BaselineLearningProbe()
+    monkeypatch.setattr(
+        adapter, "_layers_of",
+        lambda kind: [probe] if kind is CorticalLayer else [],
+    )
+    payload = {
+        "tool_name": "prepare_transfer",
+        "tool_input": {"account_id": "account-42", "destination": "merchant-01"},
+    }
+    if entry_point == "sync":
+        denial = adapter._evaluate_sync("pre_tool_use", payload)
+    else:
+        denial = await adapter._gate_async(payload)
+
+    assert denial["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert denial["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "agentegrity.denied:error"
+    )
+    # Normal-scoring calls have already been buffered, so learning here is unsafe.
+    assert adapter._buffer.tool_usage["prepare_transfer"] == 1
+    assert adapter._session_clean is False
+    assert not gate._receipts
+    adapter.close()
+    assert probe.learned == []
+
+
+@pytest.mark.asyncio
+async def test_clean_authorized_provenance_still_teaches_baseline(monkeypatch):
+    def trusted_lineage(tool, arguments):
+        return ActionProvenance(control_origins={
+            "account_id": frozenset({"user"}),
+            "destination": frozenset({"user"}),
+        })
+
+    adapter, _ = _adapter(trusted_lineage)
+    probe = _BaselineLearningProbe()
+    monkeypatch.setattr(
+        adapter, "_layers_of",
+        lambda kind: [probe] if kind is CorticalLayer else [],
+    )
+    result = await adapter.on_event("pre_tool_use", {
+        "tool_name": "prepare_transfer",
+        "tool_input": {"account_id": "account-42", "destination": "merchant-01"},
+    })
+    assert result == {}
+    assert adapter._session_clean is True
+    adapter.close()
+    assert len(probe.learned) == 1
+    assert probe.learned[0][1]["prepare_transfer"] == 1
