@@ -219,7 +219,7 @@ def test_expiration_cannot_extend_parent_or_be_expired_at_issue_time():
         agent_id="reader-worker", run_id="child-run",
         tool_name="read_account", arguments={"account_id": "account-42"},
         now=NOW + timedelta(minutes=6),
-    ).reason == "ancestor_mandate_expired"
+    ).reason == "mandate_expired"
 
 
 def test_not_before_inherits_and_never_precedes_parent():
