@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-labelledby="title desc">
+<title id="title">Agentegrity terminal demo: resource denial and synthetic effect reconciliation</title>
+<desc id="desc">Animated replay of the repository's test-covered offline synthetic action authority example. An unauthorized action is denied before execution; an authorized action is pending until its in-memory simulated ledger is checked. This is not a real-world bank or a screen recording.</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#121E21"/><stop offset="1" stop-color="#0E171B"/></linearGradient><filter id="shadow" x="-5%" y="-10%" width="110%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#15201C" flood-opacity=".3"/></filter></defs>
+<style>
+  text{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+  .muted{fill:#A2B4B5;font-size:18px}
+  .out{font-size:27px;font-weight:600}
+  .line1{animation:appear1 11s steps(1,end) infinite}
+  .line2{animation:appear2 11s steps(1,end) infinite}
+  .line3{animation:appear3 11s steps(1,end) infinite}
+  .cursor{animation:blink 1s step-end infinite}
+  @keyframes appear1{0%,16%{opacity:0}17%,100%{opacity:1}}
+  @keyframes appear2{0%,41%{opacity:0}42%,100%{opacity:1}}
+  @keyframes appear3{0%,69%{opacity:0}70%,100%{opacity:1}}
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){
+    .line1,.line2,.line3,.cursor{animation:none;opacity:1}
+  }
+</style>
+<rect x="2" y="2" width="1196" height="486" rx="22" fill="url(#bg)" stroke="#354547" stroke-width="3"/>
+<rect x="3" y="2" width="1194" height="59" rx="21" fill="#1D2A2F"/>
+<rect x="3" y="42" width="1194" height="20" fill="#1D2A2F"/>
+<circle cx="37" cy="33" r="8" fill="#CC7264"/><circle cx="66" cy="33" r="8" fill="#D5B06C"/><circle cx="95" cy="33" r="8" fill="#77A293"/>
+<text x="600" y="40" fill="#C2CCCC" font-size="17" text-anchor="middle" letter-spacing=".5">Agentegrity  /  synthetic authorization demo</text>
+<rect x="26" y="85" width="1148" height="58" rx="8" fill="#202D30"/>
+<text x="48" y="122" fill="#8CC7AE" font-size="23">$</text>
+<text x="78" y="122" fill="#EAF0EE" font-size="22">python examples/action_authority_evidence.py</text>
+<g class="line1">
+  <rect x="27" y="171" width="8" height="31" rx="3" fill="#D28C75"/>
+  <text x="51" y="197" class="out" fill="#F4B2A0">Out-of-scope action: denied</text>
+  <text x="51" y="220" class="muted">The executor did not run.</text>
+</g>
+<g class="line2">
+  <rect x="27" y="246" width="8" height="31" rx="3" fill="#DCBA7C"/>
+  <text x="51" y="272" class="out" fill="#F2E1BB">Before simulated evidence verification: pending</text>
+  <text x="51" y="295" class="muted">Tool return is not proof of a committed effect.</text>
+</g>
+<g class="line3">
+  <rect x="27" y="321" width="8" height="31" rx="3" fill="#77B498"/>
+  <text x="51" y="347" class="out" fill="#A6E2BC">After simulated evidence verification: confirmed</text>
+  <text x="51" y="370" class="muted">Confirmed only against the example's in-memory synthetic ledger.</text>
+</g>
+<rect x="25" y="402" width="1150" height="55" rx="9" fill="#253133"/>
+<text x="45" y="426" fill="#C5D4D2" font-size="16">ANIMATED REPLAY OF TEST-COVERED OUTPUT</text>
+<text x="45" y="446" fill="#99ACAB" font-size="14">No real bank, live attack, external attestation, or screen recording is represented.</text>
+</svg>
