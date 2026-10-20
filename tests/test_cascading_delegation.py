@@ -188,8 +188,8 @@ def test_nested_delegation_cannot_reexpand_scopes_or_bypass_depth():
     assert len(grandchild.delegation_lineage) == 3
     assert _check(grandchild).allowed
     with pytest.raises(ValueError, match="parent subset"):
-        grandchild.delegate(
-            agent_id="another-agent", run_id="another-run",
+        child.delegate(
+            agent_id="attempted-escalation", run_id="escalated-run",
             allowed_tools=frozenset({"prepare_transfer"}),
             allowed_resources=frozenset({"account-99"}),
             allowed_effects=frozenset({EffectType.FINANCIAL_WRITE}),
