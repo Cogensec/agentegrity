@@ -27,6 +27,20 @@ jobs:
       - name: Resolve patched dependency versions within declared ranges
         working-directory: clients/typescript
         run: |
+          # Invalidate only the two stale, nested patch-series resolutions.
+          # Bun will fetch package metadata and write new integrity hashes.
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("bun.lock")
+          lines = p.read_text().splitlines(keepends=True)
+          bad = ("undici@6.29.0", "undici@7.30.0")
+          for target in bad:
+              candidates = [line for line in lines if target in line]
+              assert len(candidates) == 1, f"expected exactly one locked {target}"
+              assert '"undici": [' in candidates[0] or '/undici": [' in candidates[0]
+              lines = [line for line in lines if target not in line]
+          p.write_text("".join(lines))
+          PY
           bun install
           bun install --frozen-lockfile
           bun why tsx
