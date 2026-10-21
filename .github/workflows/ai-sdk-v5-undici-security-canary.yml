@@ -62,6 +62,24 @@ jobs:
         if: always()
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: npm audit --json --no-package-lock > audit-report.json || true
+      - name: Summarize live audit report for upstream discussion
+        if: always()
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: |
+          node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            const data = JSON.parse(readFileSync("audit-report.json", "utf8"));
+            if (!data.vulnerabilities || !data.metadata?.vulnerabilities) {
+              throw new Error("npm audit is missing vulnerability metadata");
+            }
+            console.log("Resolution:", process.env.RESOLUTION);
+            console.log("Node:", process.version);
+            console.log("Affected packages:", Object.entries(data.vulnerabilities)
+              .map(([name, info]) => name + " (" + info.severity + ")").join(", ") || "none");
+            console.log("Severity counts:", JSON.stringify(data.metadata.vulnerabilities));
+          '
+        env:
+          RESOLUTION: ${{ matrix.resolution }}
       - name: Retain proof of installed graph and live advisories
         if: always()
         uses: actions/upload-artifact@v7
