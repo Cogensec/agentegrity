@@ -118,7 +118,9 @@ jobs:
       - name: Collect CrewAI optional installation audit
         run: |
           mkdir -p security-evidence
-          pip-audit --format json --output security-evidence/python-crewai.json || true
+          # The local editable Agentegrity version is not published yet.
+          # Skip ONLY editable roots; still audit all installed CrewAI deps.
+          pip-audit --skip-editable --format json --output security-evidence/python-crewai.json || true
       - name: Install isolated legacy AI SDK v5 fixture
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: npm install --ignore-scripts --no-package-lock
