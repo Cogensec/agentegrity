@@ -26,7 +26,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install published CrewAI integration and dependencies
-        run: python -m pip install -e ".[crewai]"
+        run: |
+          # Freeze the upstream baseline under test; otherwise a later
+          # stable CrewAI release changes this experiment silently.
+          python -m pip install -e ".[crewai]" \
+            "crewai==1.15.28" "chromadb==1.5.9" \
+            "mcp==1.28.1" "uv==0.11.33"
       - name: Substitute patched MCP/uv in ephemeral canary only
         if: matrix.scenario == 'patched-mcp-and-uv'
         run: |
