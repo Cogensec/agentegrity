@@ -30,6 +30,29 @@ def test_no_advisories_passes(tmp_path: Path) -> None:
     assert gate.main(args) == 0
 
 
+def test_skip_only_unpublished_editable_agentegrity_root(tmp_path: Path) -> None:
+    args = _reports(
+        tmp_path,
+        {"dependencies": [
+            {"name": "agentegrity", "skip_reason": "distribution marked as editable"},
+            {"name": "crewai", "version": "1.15.28", "vulns": []},
+        ]},
+        {"vulnerabilities": {}},
+    )
+    assert gate.main(args) == 0
+
+
+def test_other_skipped_dependencies_fail_closed(tmp_path: Path) -> None:
+    args = _reports(
+        tmp_path,
+        {"dependencies": [
+            {"name": "not-agentegrity", "skip_reason": "distribution marked as editable"},
+        ]},
+        {"vulnerabilities": {}},
+    )
+    assert gate.main(args) == 2
+
+
 def test_upstream_crewai_and_v5_findings_block(tmp_path: Path) -> None:
     args = _reports(
         tmp_path,
