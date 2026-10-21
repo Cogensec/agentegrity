@@ -49,6 +49,32 @@ multipart safety, fetch/stream behavior, or reachability of every advisory.
 A vendor-reviewed backport would require broader integration and
 network/multipart behavior tests.
 
+## Verified experimental result (October 21, 2026)
+
+The [nonpublishing six-job matrix](https://github.com/Cogensec/agentegrity/actions/runs/39543930435)
+completed with all jobs successful. Results were stable across Node
+18.20.8, 20.20.2, and 22.23.3:
+
+| Metric | Published AI SDK v5 | Experimental `undici@6.29.1` |
+| --- | --- | --- |
+| Exact Undici resolution | `undici@5.29.0` | `undici@6.29.1` (temporary override) |
+| `@fastify/busboy@2.1.1` in installed graph | Yes | No |
+| Actual v5 instrumentation tests | 3 passed on each of 3 Node versions | 3 passed on each of 3 Node versions |
+| `npm audit` package findings | 5 (2 high, 3 moderate) | 0 in scanned fixture |
+
+The experimental audit observed no reported vulnerabilities for that
+**isolated installed graph at scan time**. It is **not** evidence that the
+upstream packages are patched or that deployed AI SDK v5 applications have
+no security vulnerabilities. The tests only exercise mock-model telemetry,
+not real HTTP uploads/downloads, network retries, streaming, multipart
+boundaries, or all provider-utils API entrypoints.
+
+**Recommendation to upstream:** consider a separately tested backport to
+the maintained v5 provider-utils line, with Node 18/20/22 functional
+and HTTP/multipart regression coverage. Do not use the experimental
+`overrides` configuration in Agentegrity's normal workspace or registry
+release until the vendor has reviewed and released a compatible fix.
+
 ## Vendor coordination and next steps
 
 1. Share the baseline/experimental resolution and audit results on the
