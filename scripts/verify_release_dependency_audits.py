@@ -31,6 +31,18 @@ def python_advisories(report: dict[str, Any]) -> list[str]:
     for package in entries:
         if not isinstance(package, dict) or not isinstance(package.get("name"), str):
             raise ValueError("pip-audit: malformed dependency")
+        # pip-audit --skip-editable still reports the unpublished root
+        # with skip_reason instead of vulns. Exclude ONLY that known local
+        # source distribution; every other skipped package fails closed.
+        if package.get("skip_reason") is not None:
+            if (
+                package["name"].lower() == "agentegrity"
+                and package["skip_reason"] == "distribution marked as editable"
+            ):
+                continue
+            raise ValueError(
+                f"pip-audit: unsupported skipped dependency {package['name']}"
+            )
         advisories = package.get("vulns")
         if not isinstance(advisories, list):
             raise ValueError("pip-audit: missing vulns array")
