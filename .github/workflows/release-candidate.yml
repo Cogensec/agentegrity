@@ -148,6 +148,7 @@ jobs:
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: npm audit --json --no-package-lock > ../../../../security-evidence/ai-sdk-v5-npm.json || true
       - name: Rehearse hard gate and preserve vulnerability verdict
+        id: security-verdict
         run: |
           set +e
           python scripts/verify_release_dependency_audits.py \
@@ -157,10 +158,30 @@ jobs:
           set -e
           if [ "$result" -eq 2 ]; then
             echo "::error::Release security audit evidence invalid or missing"
+            {
+              echo "## v0.13.0 release security: NO-GO"
+              echo "Audit evidence is missing or malformed. Fix the scanner/inputs."
+              echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 2
           fi
           if [ "$result" -eq 1 ]; then
-            echo "::warning::v0.13.0 registry publication remains BLOCKED by issue #97"
+            echo "::warning::v0.13.0 registry publication remains BLOCKED; see release tracker #106"
+            {
+              echo "## v0.13.0 release security: NO-GO"
+              echo "Supported optional integration dependencies have unresolved audit findings."
+              echo "The tag-triggered release job will **fail**. Green PR rehearsal is NOT a waiver."
+              echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$result" -eq 0 ]; then
+            {
+              echo "## v0.13.0 dependency audit: clear"
+              echo "No advisories in these two scanned optional paths; separate registry and owner approvals still required."
+              echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Unexpected audit verifier exit status: $result"
+            exit "$result"
           fi
           exit 0
       - name: Upload complete vulnerability evidence

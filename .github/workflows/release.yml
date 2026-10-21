@@ -100,7 +100,7 @@ jobs:
   # Audit the exact separately-installed OPTIONAL frameworks that remain
   # vulnerable upstream. This is a hard publication gate, not advisory CI.
   # No registry job may begin while the audit reports known vulnerabilities
-  # or if the audit result cannot be parsed. See security issue #97.
+  # or if the audit result cannot be parsed. See active release-approval issue #106 (historical research #97).
   optional-dependency-security-gate:
     runs-on: ubuntu-latest
     permissions:

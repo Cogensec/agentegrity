@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in findings:
             print("  " + item)
     if python or npm:
-        print("RELEASE BLOCKED: dependency findings remain; see issue #97. "
+        print("RELEASE BLOCKED: dependency findings remain; see release issue #106. "
               "A green advisory CI job is not an approved risk exception.",
               file=sys.stderr)
         return 1
