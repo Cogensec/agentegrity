@@ -81,6 +81,7 @@ def test_new_npm_vulnerability_fails_closed() -> None:
 
 def test_waiver_fails_when_pkg_versions_change() -> None:
     policy, python, npm, installed, fixture = _accepted_snapshot()
+    installed = dict(installed)  # do not mutate the expected policy snapshot
     installed["undici"] = "5.29.1"
     assert not gate.verify_disposition(
         policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 10, 22)
