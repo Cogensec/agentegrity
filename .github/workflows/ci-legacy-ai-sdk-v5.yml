@@ -1,0 +1,43 @@
+name: Legacy AI SDK v5 compatibility (isolated)
+
+# Purposefully excluded from the main Bun workspace and release artifact.
+# AI SDK v5 depends on legacy Undici and Busboy with known advisories.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "clients/typescript/compat/ai-sdk-v5/**"
+      - "clients/typescript/packages/vercel-ai/**"
+      - "clients/typescript/packages/client/**"
+      - ".github/workflows/ci-legacy-ai-sdk-v5.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-ai-sdk-v5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Install modern workspace from frozen lock
+        working-directory: clients/typescript
+        run: bun install --frozen-lockfile
+      - name: Build shared client
+        working-directory: clients/typescript
+        run: bun run --filter @agentegrity/client build
+      - name: Install legacy framework tests in separate non-workspace fixture
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm install --ignore-scripts --no-package-lock
+      - name: Run retained real AI SDK v5 behavior tests
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm test
+      - name: Audit legacy fixture (advisory; see issue 97)
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        continue-on-error: true
+        run: npm audit --audit-level=high --no-package-lock
