@@ -1,0 +1,61 @@
+name: CrewAI upstream patch compatibility canary
+
+# Diagnostic only: attempts patched MCP and uv with published CrewAI.
+# Does NOT change shipped dependencies, accept CVEs, or publish packages.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/crewai-upstream-compatibility.yml"
+      - "scripts/research/crewai_patched_dependency_canary.py"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  crewai-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [published-constraints, patched-mcp-and-uv]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install published CrewAI integration and dependencies
+        run: |
+          # Freeze the upstream baseline under test; otherwise a later
+          # stable CrewAI release changes this experiment silently.
+          python -m pip install -e ".[crewai]" \
+            "crewai==1.15.28" "chromadb==1.5.9" \
+            "mcp==1.28.1" "uv==0.11.33"
+      - name: Substitute patched MCP/uv in ephemeral canary only
+        if: matrix.scenario == 'patched-mcp-and-uv'
+        run: |
+          python -m pip install --upgrade "mcp==1.30.0" "uv==0.13.4"
+          python - <<'PY'
+          from importlib.metadata import version
+          assert version("mcp") == "1.30.0"
+          assert version("uv") == "0.13.4"
+          PY
+      - name: Capture real dependency metadata conflicts
+        run: |
+          mkdir -p canary-evidence
+          python -m pip check > canary-evidence/pip-check.txt 2>&1 || true
+          python -m pip freeze > canary-evidence/resolved-packages.txt
+          cat canary-evidence/pip-check.txt
+          if [ "${{ matrix.scenario }}" = "patched-mcp-and-uv" ]; then
+            echo "::notice::Patched package versions intentionally violate CrewAI 1.15.28's published dependency pins; this is a compatibility experiment, not a valid published resolver."
+          fi
+      - name: Run offline CrewAI/MCP/uv/Agentegrity compatibility smoke
+        run: python scripts/research/crewai_patched_dependency_canary.py
+      - name: Upload upstream compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crewai-${{ matrix.scenario }}-canary
+          path: canary-evidence/
+          retention-days: 14
