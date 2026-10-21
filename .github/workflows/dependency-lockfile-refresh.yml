@@ -28,7 +28,6 @@ jobs:
         working-directory: clients/typescript
         run: |
           bun install
-          bun update tsx
           bun install --frozen-lockfile
           bun why tsx
           bun why undici
