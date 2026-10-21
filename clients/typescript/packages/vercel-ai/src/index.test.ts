@@ -1,5 +1,5 @@
 /**
- * Runs the real AI SDK (v5 and v6 through the tracer, v7 through
+ * Runs the real AI SDK (v6 through the tracer, v7 through
  * `registerTelemetry`) with its own mock models, so these tests fail if the
  * adapter stops receiving the SDK's spans or callbacks.
  */
@@ -9,7 +9,7 @@ import { generateText as generateText6, streamText as streamText6, stepCountIs, 
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
 import type { FrameworkEvent } from "@agentegrity/client";
-import { adapter, flush, instrument, registerExporter, report, reset, telemetry } from "./index.js";
+import { flush, instrument, registerExporter, report, reset, telemetry } from "./index.js";
 
 const NODE_MAJOR = Number(process.versions.node.split(".")[0]);
 
