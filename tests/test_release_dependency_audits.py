@@ -22,7 +22,11 @@ def _reports(tmp_path: Path, py: object, npm: object) -> list[str]:
 
 
 def test_no_advisories_passes(tmp_path: Path) -> None:
-    args = _reports(tmp_path, {"dependencies": [{"name": "crewai", "version": "1.15.28", "vulns": []}]}, {"vulnerabilities": {}})
+    args = _reports(
+        tmp_path,
+        {"dependencies": [{"name": "crewai", "version": "1.15.28", "vulns": []}]},
+        {"vulnerabilities": {}},
+    )
     assert gate.main(args) == 0
 
 
