@@ -173,12 +173,15 @@ jobs:
               echo "The tag-triggered release job will **fail**. Green PR rehearsal is NOT a waiver."
               echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
             } >> "$GITHUB_STEP_SUMMARY"
-          else
+          elif [ "$result" -eq 0 ]; then
             {
               echo "## v0.13.0 dependency audit: clear"
               echo "No advisories in these two scanned optional paths; separate registry and owner approvals still required."
               echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
             } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Unexpected audit verifier exit status: $result"
+            exit "$result"
           fi
           exit 0
       - name: Upload complete vulnerability evidence
