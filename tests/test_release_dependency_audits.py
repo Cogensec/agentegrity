@@ -49,7 +49,7 @@ def _accepted_snapshot() -> tuple[
         for name, metadata in policy["npm"].items()
     }}
     fixture = {"devDependencies": {"ai5": "npm:ai@5.0.272"}}
-    return policy, python, npm, policy["npm_installed_versions"], fixture
+    return policy, python, npm, dict(policy["npm_installed_versions"]), fixture
 
 
 def test_exact_temporary_distribution_approval() -> None:
