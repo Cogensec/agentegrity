@@ -1,0 +1,57 @@
+name: Dependency lockfile refresh (temporary)
+
+# One-time, nonpublishing PR task. Remove this workflow after committing the
+# generated lockfile and passing the normal frozen-lockfile CI suite.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/dependency-lockfile-refresh.yml"
+      - "clients/typescript/package.json"
+      - "clients/typescript/packages/**/package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Resolve patched dependency versions within declared ranges
+        working-directory: clients/typescript
+        run: |
+          bun install
+          bun update tsx undici
+          bun install --frozen-lockfile
+          bun why tsx
+          bun why undici
+          bun why esbuild
+      - name: Validate refreshed workspace
+        working-directory: clients/typescript
+        run: |
+          bun run check-versions
+          bun run --filter @agentegrity/client build
+          bun run typecheck
+          bun run build
+          bun run test
+          bun run check-coverage
+      - name: Inspect package distributions
+        run: node scripts/check_release_npm.mjs
+      - name: Audit refreshed lockfile (still advisory for optional peers)
+        working-directory: clients/typescript
+        continue-on-error: true
+        run: bun audit
+      - name: Upload exact resolved Bun 1.3.10 lockfile for review
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0-13-refreshed-bun-lockfile
+          path: clients/typescript/bun.lock
+          retention-days: 7
