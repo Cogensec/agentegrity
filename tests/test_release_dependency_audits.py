@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,96 @@ def _reports(tmp_path: Path, py: object, npm: object) -> list[str]:
     p1.write_text(json.dumps(py))
     p2.write_text(json.dumps(npm))
     return ["--pip-audit", str(p1), "--npm-audit", str(p2)]
+
+
+
+POLICY = (
+    Path(__file__).resolve().parent.parent
+    / "docs" / "releases" / "v0.13.0-risk-disposition.json"
+)
+
+
+def _accepted_snapshot() -> tuple[
+    dict[str, object], list[str], dict[str, object], dict[str, str], dict[str, object]
+]:
+    policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    python = [
+        f"{package}: {advisory}"
+        for package, ids in policy["python"].items()
+        for advisory in ids
+    ]
+    npm = {"vulnerabilities": {
+        name: {
+            "severity": metadata["severity"],
+            "via": [
+                {"url": f"https://github.com/advisories/{v}"} if v.startswith("GHSA-") else v
+                for v in metadata["via"]
+            ],
+        }
+        for name, metadata in policy["npm"].items()
+    }}
+    fixture = {"devDependencies": {"ai5": "npm:ai@5.0.272"}}
+    return policy, python, npm, policy["npm_installed_versions"], fixture
+
+
+def test_exact_temporary_distribution_approval() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    approved, reason = gate.verify_disposition(
+        policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 10, 22)
+    )
+    assert approved
+    assert "Production exposure is NOT approved" in reason
+
+
+def test_new_python_advisory_fails_closed() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    python.append("chromadb@1.5.9: PYSEC-NEW-ADVISORY")
+    assert not gate.verify_disposition(
+        policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 10, 22)
+    )[0]
+
+
+def test_new_npm_vulnerability_fails_closed() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    npm["vulnerabilities"]["undici"]["via"].append(
+        {"url": "https://github.com/advisories/GHSA-0000-new-0000"}
+    )
+    assert not gate.verify_disposition(
+        policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 10, 22)
+    )[0]
+
+
+def test_waiver_fails_when_pkg_versions_change() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    installed["undici"] = "5.29.1"
+    assert not gate.verify_disposition(
+        policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 10, 22)
+    )[0]
+
+
+def test_exception_cannot_extend_to_another_release() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    assert not gate.verify_disposition(
+        policy, python, npm, installed, fixture, "0.13.1", today=date(2026, 10, 22)
+    )[0]
+
+
+def test_expired_distribution_exception_fails_closed() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    assert not gate.verify_disposition(
+        policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 11, 21)
+    )[0]
+
+
+def test_only_approved_advisory_sources_are_accepted() -> None:
+    policy, python, npm, installed, fixture = _accepted_snapshot()
+    npm["vulnerabilities"]["undici"]["via"].append(
+        {"url": "https://untrusted.example.invalid/not-a-GHSA"}
+    )
+    with pytest.raises(ValueError, match="missing GitHub advisory"):
+        gate.verify_disposition(
+            policy, python, npm, installed, fixture, "0.13.0", today=date(2026, 10, 22)
+        )
 
 
 def test_no_advisories_passes(tmp_path: Path) -> None:
