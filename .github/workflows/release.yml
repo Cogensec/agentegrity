@@ -128,11 +128,28 @@ jobs:
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: |
           npm audit --json --no-package-lock > ../../../../security-evidence/ai-sdk-v5-npm.json || true
-      - name: Require zero unresolved optional-framework advisories
+      - name: Snapshot the exact installed vulnerable legacy npm versions
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: |
+          node - <<'NODE' > ../../../../security-evidence/ai-sdk-v5-installed.json
+          const fs = require("node:fs");
+          const packages = ["ai5", "undici", "@fastify/busboy"];
+          const versions = {};
+          for (const name of packages) {
+            const manifest = JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`, "utf8"));
+            versions[name] = manifest.version;
+          }
+          process.stdout.write(JSON.stringify(versions));
+          NODE
+      - name: Enforce approved exact, expiring optional-framework disposition
         run: |
           python scripts/verify_release_dependency_audits.py \
             --pip-audit security-evidence/python-crewai.json \
-            --npm-audit security-evidence/ai-sdk-v5-npm.json
+            --npm-audit security-evidence/ai-sdk-v5-npm.json \
+            --disposition-policy docs/releases/v0.13.0-risk-disposition.json \
+            --npm-installed security-evidence/ai-sdk-v5-installed.json \
+            --fixture-manifest clients/typescript/compat/ai-sdk-v5/package.json \
+            --release-version "${GITHUB_REF_NAME#v}"
       - name: Retain release-security evidence, even on failure
         if: always()
         uses: actions/upload-artifact@v7

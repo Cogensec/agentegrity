@@ -54,6 +54,22 @@ the report and we'll align our publish timeline with theirs. If you
 need credit on the advisory we'll include your handle and (if you
 provide them) a contact URL or email.
 
+## Known optional upstream dependencies — v0.13.0
+
+**Security disclosure:** The optional CrewAI extra and applications
+using the legacy AI SDK v5 can inherit documented unpatched ChromaDB,
+MCP, uv, Undici and Busboy advisories. The base Agentegrity Python
+wheel has no mandatory framework dependencies, and the npm adapters do
+not bundle those optional peers. This does **not** mean an application
+that installs them is safe.
+
+The [temporary, narrowly scoped v0.13.0 distribution risk disposition](docs/releases/v0.13.0-risk-disposition.md)
+permits release packaging only after exact-evidence checks. It **does not
+authorize production exposure** of vulnerable Chroma Python server,
+MCP stateful HTTP or AI SDK v5 HTTP paths. Deployments must separately
+review affected versions, restrict network and tenant boundaries, and
+upgrade as soon as upstream fixed releases are compatible.
+
 ## Supported versions
 
 The source tree is staged for **v0.13.0** but that version is **not yet
