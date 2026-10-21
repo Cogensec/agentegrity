@@ -12,7 +12,13 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = resolve(root, "clients/typescript/packages");
-const expected = process.env.RELEASE_VERSION ?? "0.13.0";
+const expected = process.env.RELEASE_VERSION ??
+  JSON.parse(readFileSync(resolve(packageDir, "client", "package.json"), "utf8")).version;
+const tag = process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : null;
+if (tag && tag !== `v${expected}`) {
+  console.error(`Release tag ${tag} does not match package version ${expected}`);
+  process.exit(1);
+}
 const names = readdirSync(packageDir, { withFileTypes: true })
   .filter((ent) => ent.isDirectory())
   .map((ent) => ent.name)
