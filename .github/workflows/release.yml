@@ -157,11 +157,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
+      - name: Reject npm package version conflicts before any Python upload
+        run: node scripts/check_registry_release_versions.mjs
       - name: Require a currently valid npm publish token
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
