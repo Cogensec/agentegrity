@@ -20,6 +20,7 @@ on:
       - ".github/workflows/release-candidate.yml"
       - "scripts/check_release_artifacts.py"
       - "scripts/check_release_npm.mjs"
+      - "scripts/verify_release_dependency_audits.py"
   workflow_dispatch: {}
 
 permissions:
@@ -116,3 +117,53 @@ jobs:
           name: advisory-dependency-paths
           path: audit-inventory/
           retention-days: 14
+
+  optional-framework-audit-rehearsal:
+    # Nonpublishing verification of the same parser and dependency scopes used
+    # by the hard tag-release gate. Vulnerabilities yield a visible warning
+    # until remediated; missing/malformed scanner reports are CI failures.
+    # A green rehearsal is NOT approval to publish an affected integration.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Install optional CrewAI framework and audit tool
+        run: python -m pip install -e ".[crewai]" pip-audit
+      - name: Collect CrewAI dependency audit
+        run: |
+          mkdir -p security-evidence
+          pip-audit --skip-editable --format json --output security-evidence/python-crewai.json || true
+      - name: Install isolated legacy AI SDK v5 fixture
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm install --ignore-scripts --no-package-lock
+      - name: Collect legacy SDK dependency audit
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm audit --json --no-package-lock > ../../../../security-evidence/ai-sdk-v5-npm.json || true
+      - name: Rehearse hard gate and preserve vulnerability verdict
+        run: |
+          set +e
+          python scripts/verify_release_dependency_audits.py \
+            --pip-audit security-evidence/python-crewai.json \
+            --npm-audit security-evidence/ai-sdk-v5-npm.json
+          result=$?
+          set -e
+          if [ "$result" -eq 2 ]; then
+            echo "::error::Release security audit evidence invalid or missing"
+            exit 2
+          fi
+          if [ "$result" -eq 1 ]; then
+            echo "::warning::v0.13.0 registry publication remains BLOCKED by issue #97"
+          fi
+          exit 0
+      - name: Upload complete vulnerability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rehearsal-optional-framework-security
+          path: security-evidence/
+          retention-days: 30
