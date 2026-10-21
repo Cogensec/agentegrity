@@ -24,12 +24,16 @@ async function readBody(stream) {
 }
 
 async function withServer(handler, action) {
+  let handlerError;
   const server = createServer(async (req, res) => {
     try {
       await handler(req, res);
     } catch (error) {
+      // The listener is loopback-only, but never serialize stack traces
+      // or internal test errors into a network response.
+      handlerError = error;
       res.statusCode = 500;
-      res.end(String(error));
+      res.end("test request failed");
     }
   });
   server.listen(0, "127.0.0.1");
@@ -40,6 +44,7 @@ async function withServer(handler, action) {
   }
   try {
     await action(`http://127.0.0.1:${address.port}`);
+    if (handlerError) throw handlerError;
   } finally {
     server.closeAllConnections();
     await new Promise((resolve, reject) => {
