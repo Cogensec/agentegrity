@@ -20,6 +20,7 @@ on:
       - ".github/workflows/release-candidate.yml"
       - "scripts/check_release_artifacts.py"
       - "scripts/check_release_npm.mjs"
+      - "scripts/check_registry_release_versions.mjs"
       - "scripts/verify_release_dependency_audits.py"
   workflow_dispatch: {}
 
@@ -167,3 +168,16 @@ jobs:
           name: rehearsal-optional-framework-security
           path: security-evidence/
           retention-days: 30
+
+  npm-registry-version-availability:
+    # Read-only registry metadata query, without secrets, tags or uploads.
+    # This does not prove ownership or the future availability of a token.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - name: Confirm that all seven v0.13.0 npm package versions are unused
+        run: node scripts/check_registry_release_versions.mjs
