@@ -5,6 +5,11 @@ on:
     tags:
       - "v*.*.*"
 
+# Default token is read-only. Registry publication uses explicitly scoped
+# OIDC permissions in its dedicated environment-gated jobs.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -20,6 +25,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -e ".[dev,crypto]"
+
+      - name: Verify Python source, plugins and documentation version parity
+        run: python scripts/check_versions.py
 
       - name: Lint
         run: python -m ruff check src/ tests/
@@ -49,6 +57,9 @@ jobs:
       - name: Validate long description
         run: python -m twine check dist/*
 
+      - name: Inspect wheel/sdist contents before any publication
+        run: python scripts/check_release_artifacts.py dist
+
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -56,7 +67,7 @@ jobs:
           path: dist/
 
   publish-testpypi:
-    needs: build
+    needs: [build, build-npm]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -94,7 +105,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   build-npm:
-    needs: publish-pypi
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -120,20 +131,47 @@ jobs:
       - name: Test all packages
         run: bun run test
         working-directory: clients/typescript
+      - name: Verify every npm package contains compiled code and types
+        run: node scripts/check_release_npm.mjs
+
       - name: Upload workspace artifact
         uses: actions/upload-artifact@v7
         with:
           name: ts-workspace
           path: clients/typescript/
 
-  publish-npm:
-    needs: build-npm
+  publish-npm-client:
+    needs: [publish-pypi, build-npm]
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@agentegrity/client
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download workspace artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ts-workspace
+          path: clients/typescript/
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish @agentegrity/client
+        run: npm publish --access public
+        working-directory: clients/typescript/packages/client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-npm-adapters:
+    needs: [publish-pypi, build-npm, publish-npm-client]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         package:
-          - client
           - claude-sdk
           - langchain
           - openai-agents
