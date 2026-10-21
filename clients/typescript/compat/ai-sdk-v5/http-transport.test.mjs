@@ -124,11 +124,61 @@ test("provider-utils Undici supports streamed localhost HTTP responses", async (
   );
 });
 
-test("provider-utils Undici aborts an already-aborted request", async () => {
-  const aborter = new AbortController();
-  aborter.abort();
-  await assert.rejects(
-    async () => fetch("http://127.0.0.1:1/aborted", { signal: aborter.signal }),
-    /abort/i,
+test("provider-utils Undici aborts an active HTTP request and closes its socket", {
+  timeout: 15000,
+}, async () => {
+  // Unlike node:test timeout, these races reject the awaited operation,
+  // letting withServer's finally close all connections on a stalled path.
+  async function bounded(promise, description) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Timed out waiting for ${description}`)),
+            4000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  // Prove the request actually reached a server. Pre-aborting a signal
+  // shortcuts fetch without exercising transport cancellation or cleanup.
+  let receivedRequest;
+  let closedConnection;
+  const received = new Promise((resolve) => { receivedRequest = resolve; });
+  const closed = new Promise((resolve) => { closedConnection = resolve; });
+
+  await withServer(
+    async (_req, res) => {
+      // Hold the HTTP response open. The only expected reason for "close"
+      // is the client's in-flight abort, not a normal response finish.
+      res.once("close", closedConnection);
+      receivedRequest();
+    },
+    async (origin) => {
+      const aborter = new AbortController();
+      // Attach rejection handling immediately; even an aborted request
+      // that settles after the timeout must not become an unhandled error.
+      const pending = fetch(`${origin}/in-flight-abort`, {
+        signal: aborter.signal,
+      }).then(
+        () => ({ fulfilled: true }),
+        (error) => ({ fulfilled: false, error }),
+      );
+      try {
+        await bounded(received, "the server to receive the request");
+        aborter.abort();
+        const outcome = await bounded(pending, "the fetch abort rejection");
+        assert.equal(outcome.fulfilled, false);
+        assert.match(String(outcome.error), /abort/i);
+        await bounded(closed, "the aborted socket to close");
+      } finally {
+        aborter.abort();
+      }
+    },
   );
 });
