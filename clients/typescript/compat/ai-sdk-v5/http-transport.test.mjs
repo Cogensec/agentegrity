@@ -124,11 +124,36 @@ test("provider-utils Undici supports streamed localhost HTTP responses", async (
   );
 });
 
-test("provider-utils Undici aborts an already-aborted request", async () => {
-  const aborter = new AbortController();
-  aborter.abort();
-  await assert.rejects(
-    async () => fetch("http://127.0.0.1:1/aborted", { signal: aborter.signal }),
-    /abort/i,
+test("provider-utils Undici aborts an active HTTP request and closes its socket", {
+  timeout: 10000,
+}, async () => {
+  // Prove the request actually reached a server. Pre-aborting a signal
+  // shortcuts fetch without exercising transport cancellation or cleanup.
+  let receivedRequest;
+  let closedConnection;
+  const received = new Promise((resolve) => { receivedRequest = resolve; });
+  const closed = new Promise((resolve) => { closedConnection = resolve; });
+
+  await withServer(
+    async (_req, res) => {
+      // Hold the HTTP response open. The only expected reason for "close"
+      // is the client's in-flight abort, not a normal response finish.
+      res.once("close", closedConnection);
+      receivedRequest();
+    },
+    async (origin) => {
+      const aborter = new AbortController();
+      const pending = fetch(`${origin}/in-flight-abort`, {
+        signal: aborter.signal,
+      });
+      try {
+        await received;
+        aborter.abort();
+        await assert.rejects(pending, /abort/i);
+        await closed;
+      } finally {
+        aborter.abort();
+      }
+    },
   );
 });
