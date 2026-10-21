@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "AGENTEGRITY-013-OPTIONAL-DISTRIBUTION-20261021",
+  "release_version": "0.13.0",
+  "approved_on": "2026-10-21",
+  "expires_on": "2026-11-20",
+  "approval_basis": "Explicit user approval in the project conversation on 2026-10-21; release owner must separately authorize the exact release SHA and tag.",
+  "scope": "OSS package distribution of Agentegrity v0.13.0 only; opt-in CrewAI extra and separately installed legacy AI SDK v5 peers/test fixture; NOT approval of vulnerable production deployments.",
+  "mandatory_controls": [
+    "Base Python wheel contains no required runtime dependencies; no vulnerable CrewAI/ChromaDB/MCP/uv libraries vendored in released archives.",
+    "All seven npm package tarballs ship without legacy ai5, undici 5 or busboy 2 runtime dependencies.",
+    "No public exposure of affected Chroma Python server endpoints, cross-tenant data, or vulnerable MCP stateful HTTP paths is authorized.",
+    "No production use of unpatched AI SDK v5/Undici/Busboy services is authorized by this disposition.",
+    "New advisories, package/version changes or expiry return to NO-GO; reapproval required.",
+    "Publishing still requires successful tests, registry preflight and separate explicit release owner GO for the exact tag SHA."
+  ],
+  "python": {
+    "chromadb@1.5.9": [
+      "PYSEC-2026-311",
+      "PYSEC-2026-3813",
+      "PYSEC-2026-3814",
+      "PYSEC-2026-3815"
+    ],
+    "mcp@1.28.1": [
+      "GHSA-84m7-p3x7-pcfv"
+    ],
+    "uv@0.11.33": [
+      "PYSEC-2026-4321"
+    ]
+  },
+  "npm": {
+    "@ai-sdk/gateway": {
+      "severity": "moderate",
+      "via": [
+        "@ai-sdk/provider-utils"
+      ]
+    },
+    "@ai-sdk/provider-utils": {
+      "severity": "moderate",
+      "via": [
+        "undici"
+      ]
+    },
+    "@fastify/busboy": {
+      "severity": "high",
+      "via": [
+        "GHSA-gxm5-99cw-xjw9",
+        "GHSA-x8mw-p69m-v3mx"
+      ]
+    },
+    "ai": {
+      "severity": "moderate",
+      "via": [
+        "@ai-sdk/gateway",
+        "@ai-sdk/provider-utils"
+      ]
+    },
+    "undici": {
+      "severity": "high",
+      "via": [
+        "@fastify/busboy",
+        "GHSA-2mjp-6q6p-2qxm",
+        "GHSA-35p6-xmwp-9g52",
+        "GHSA-4992-7rv2-5pvq",
+        "GHSA-8xcm-r25x-g524",
+        "GHSA-g8m3-5g58-fq7m",
+        "GHSA-g9mf-h72j-4rw9",
+        "GHSA-m8rv-5g2x-5cg5",
+        "GHSA-p88m-4jfj-68fv",
+        "GHSA-r53p-7pc4-xj5r",
+        "GHSA-v3r7-h72x-cjcm",
+        "GHSA-v9p9-hfj2-hcw8",
+        "GHSA-vrm6-8vpv-qv8q",
+        "GHSA-vxpw-j846-p89q"
+      ]
+    }
+  }
+}
