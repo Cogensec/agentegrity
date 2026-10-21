@@ -122,6 +122,10 @@ jobs:
       - name: Verify version parity
         run: bun run check-versions
         working-directory: clients/typescript
+      - name: Require patched Undici/esbuild dependency resolutions
+        run: node scripts/check-dependency-patches.mjs
+        working-directory: clients/typescript
+
       - name: Build @agentegrity/client first
         run: bun run --filter @agentegrity/client build
         working-directory: clients/typescript

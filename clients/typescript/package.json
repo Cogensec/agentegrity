@@ -7,6 +7,10 @@
   "workspaces": [
     "packages/*"
   ],
+  "overrides": {
+    "undici@^6.28.0": "^6.29.1",
+    "undici@^7.29.0": "^7.30.1"
+  },
   "scripts": {
     "build": "bun run --filter '@agentegrity/*' build",
     "typecheck": "bun run --filter '@agentegrity/*' typecheck",
@@ -19,7 +23,7 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "tsx": "^4.7.0",
+    "tsx": "^4.23.9",
     "@types/node": "^20.0.0",
     "@agentegrity/client": "workspace:*",
     "@agentegrity/claude-sdk": "workspace:*",
