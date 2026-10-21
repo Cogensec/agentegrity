@@ -186,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not (args.npm_installed and args.fixture_manifest and args.release_version):
             raise ValueError("conditional disposition requires version and installed npm evidence")
+        # Compare the actual release tag to the version being built, not just
+        # the static exception file. Tag workflow uses Python 3.12.
+        import tomllib
+
+        with Path("pyproject.toml").open("rb") as metadata:
+            built_version = tomllib.load(metadata)["project"]["version"]
+        if built_version != args.release_version:
+            raise ValueError("release tag does not match source distribution version")
         ok, reason = verify_disposition(
             read_audit(args.disposition_policy),
             python,
