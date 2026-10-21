@@ -53,6 +53,15 @@ An agent has a permitted transfer tool, but its task authorizes only a single sy
 
 The animation is a **replay of the output asserted by the repository's example tests**, not a literal screen recording or a real banking integration. It uses no real accounts, external evidence attestation, or production attack. [Run the exact synthetic example](examples/action_authority_evidence.py).
 
+**Dependency security notice for the v0.13.0 release candidate:** The
+base Python package has no required framework dependencies, but installing
+the optional CrewAI integration or using an AI SDK v5 application can
+introduce known upstream vulnerabilities, including code injection,
+authorization and denial-of-service risks. The temporary
+[distribution-only risk disposition](docs/releases/v0.13.0-risk-disposition.md)
+does **not** approve insecure deployments. Review the advisory and deploy
+with patched upstream components and restricted network boundaries.
+
 ## Quick Start
 
 ### 1. Install and evaluate
