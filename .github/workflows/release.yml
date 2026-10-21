@@ -149,7 +149,7 @@ jobs:
             --disposition-policy docs/releases/v0.13.0-risk-disposition.json \
             --npm-installed security-evidence/ai-sdk-v5-installed.json \
             --fixture-manifest clients/typescript/compat/ai-sdk-v5/package.json \
-            --release-version 0.13.0
+            --release-version "${GITHUB_REF_NAME#v}"
       - name: Retain release-security evidence, even on failure
         if: always()
         uses: actions/upload-artifact@v7
