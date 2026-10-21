@@ -1,0 +1,15 @@
+{
+  "name": "@agentegrity/compat-ai-sdk-v5",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated test-only fixture for legacy AI SDK 5 instrumentation. Never publish.",
+  "scripts": {
+    "test": "AGENTEGRITY_OFFLINE=1 node --test --import tsx index.test.ts"
+  },
+  "devDependencies": {
+    "ai5": "npm:ai@5.0.272",
+    "tsx": "^4.23.9",
+    "zod": "^4"
+  }
+}
