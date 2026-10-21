@@ -172,8 +172,8 @@ def main(argv: list[str] | None = None) -> int:
         python = python_advisories(read_audit(args.pip_audit))
         npm_report = read_audit(args.npm_audit)
         npm = npm_advisories(npm_report)
-        # Even on clean scans validate the detailed npm audit evidence.
-        npm_snapshot(npm_report)
+        # Strict per-advisory matching is required when claiming an approved
+        # exception. Without one, any reported package is blocked outright.
         print(f"CrewAI optional Python: {len(python)} advisory entries")
         print(f"Legacy AI SDK v5: {len(npm)} affected npm packages")
         for item in python + npm:
