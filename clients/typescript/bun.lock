@@ -126,7 +126,6 @@
       "devDependencies": {
         "@types/node": "^20.0.0",
         "ai": "^6.0.0",
-        "ai5": "npm:ai@^5.0.0",
         "ai7": "npm:ai@^7.0.0",
         "tsx": "^4.23.9",
         "typescript": "^5.4.0",
@@ -251,8 +250,6 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.2", "", { "os": "win32", "cpu": "x64" }, "sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g=="],
 
-    "@fastify/busboy": ["@fastify/busboy@2.1.1", "", {}, "sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA=="],
-
     "@google-cloud/vertexai": ["@google-cloud/vertexai@1.12.0", "", { "dependencies": { "@google/genai": "^1.45.0", "google-auth-library": "^9.1.0" } }, "sha512-XMJIk7GIeavFLP5A3YEUlowKa5Y5PZRrnnuTJcqR0k+lFKkv7+IWpdRp+Xbqb8xNDrvQaE2hP2RYPUylyD5EdA=="],
 
     "@google/adk": ["@google/adk@2.3.0", "", { "dependencies": { "@a2a-js/sdk": "^0.3.10", "@google-cloud/vertexai": "^1.12.0", "@google/genai": "^2.29.1", "@mikro-orm/core": "^7.2.0", "@opentelemetry/api": "^1.9.0", "@opentelemetry/api-logs": "^0.222.0", "@opentelemetry/exporter-logs-otlp-http": "^0.222.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.222.0", "@opentelemetry/exporter-trace-otlp-http": "^0.222.0", "@opentelemetry/resource-detector-gcp": "^0.40.0", "@opentelemetry/resources": "^2.1.0", "@opentelemetry/sdk-logs": "^0.222.0", "@opentelemetry/sdk-metrics": "^2.1.0", "@opentelemetry/sdk-trace-base": "^2.1.0", "@opentelemetry/sdk-trace-node": "^2.1.0", "@types/dockerode": "^4.0.1", "adm-zip": "^0.6.1", "google-auth-library": "^10.3.0", "js-yaml": "^4.1.1", "jsonpath-plus": "^10.4.0", "lodash-es": "^4.18.1", "winston": "^3.19.0", "zod": "^4.2.1", "zod-to-json-schema": "^3.25.1" }, "optionalDependencies": { "dockerode": "^5.0.1" }, "peerDependencies": { "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0", "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0", "@google-cloud/secret-manager": "^7.1.1", "@google-cloud/storage": "^7.17.1", "@mikro-orm/mariadb": "^7.2.0", "@mikro-orm/mssql": "^7.2.0", "@mikro-orm/mysql": "^7.2.0", "@mikro-orm/postgresql": "^7.2.0", "@mikro-orm/sqlite": "^7.2.0", "@modelcontextprotocol/sdk": "^1.26.0", "express": "^4.22.1 || ^5.1.0" }, "optionalPeers": ["@google-cloud/opentelemetry-cloud-monitoring-exporter", "@google-cloud/opentelemetry-cloud-trace-exporter", "@google-cloud/secret-manager", "@google-cloud/storage", "@mikro-orm/mariadb", "@mikro-orm/mssql", "@mikro-orm/mysql", "@mikro-orm/postgresql", "@mikro-orm/sqlite", "@modelcontextprotocol/sdk", "express"] }, "sha512-s3YlsvIAZC/1D6NkyNe5k6LCaMUUmA5mFNO988prNdDDV+2sWCoJGrUI9ujWb6ZDERBtpqIdP2+tcZg/lJeZcw=="],
@@ -372,8 +369,6 @@
     "agent-base": ["agent-base@7.1.4", "", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
 
     "ai": ["ai@6.0.311", "", { "dependencies": { "@ai-sdk/gateway": "3.0.218", "@ai-sdk/provider": "3.0.19", "@ai-sdk/provider-utils": "4.0.61", "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-KAq15radG9/R85sflVG+5NqsJg2kJCyTl+qiPKMElCxdNzDobMwJoHnh9Tydj76t90f/b6IdUZcTdlRYL8bcEA=="],
-
-    "ai5": ["ai@5.0.278", "", { "dependencies": { "@ai-sdk/gateway": "2.0.169", "@ai-sdk/provider": "2.0.5", "@ai-sdk/provider-utils": "3.0.41", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-zQ07Vd8NltSS0obxybbYWdpSlTr7G+fC8O58PQOaBOvMXfIDXfcVkHaaueVAcSrkY42rPDFrkgBB+g//KRVkQA=="],
 
     "ai7": ["ai@7.0.147", "", { "dependencies": { "@ai-sdk/gateway": "4.0.120", "@ai-sdk/provider": "4.0.31", "@ai-sdk/provider-utils": "5.0.64" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-9MsjkCddqIPYGDMDc6HF+i4cydkFpC2xteQGlR6Dz5cuWLIV5sCARbFCqaiTUn3/GaNxg3bIfRlfSzxPvi77fw=="],
 
@@ -821,14 +816,6 @@
 
     "@types/ssh2/@types/node": ["@types/node@18.19.130", "", { "dependencies": { "undici-types": "~5.26.4" } }, "sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg=="],
 
-    "ai5/@ai-sdk/gateway": ["@ai-sdk/gateway@2.0.169", "", { "dependencies": { "@ai-sdk/provider": "2.0.5", "@ai-sdk/provider-utils": "3.0.41", "@vercel/oidc": "3.1.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-FG9bPyxlx77x9JvEUhcfMhNeZS7A9g2WNAksWDI1B7k5FbY/W3M26xgPEIVIFO+7VBZYwALY4dtmJbTGCfny3g=="],
-
-    "ai5/@ai-sdk/provider": ["@ai-sdk/provider@2.0.5", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-cmG40u10QFEUrYXWYom6Lo6DLR+pND3wWABTTT9Nf7zg9F7BD46KNj+STekndp9Kg5ZAIPA0WxmTI0IwRvKvvQ=="],
-
-    "ai5/@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@3.0.41", "", { "dependencies": { "@ai-sdk/provider": "2.0.5", "@standard-schema/spec": "^1.0.0", "eventsource-parser": "^3.0.6", "undici": "^5.29.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-xpURVGQud+AEOZ/uRZTBU0eVy2+dt/y/dUEp9ewjW3eTM6yu0vThzTvduhOSabpn6AExewg8WJW04P4D6USVXw=="],
-
-    "ai5/@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
-
     "ai7/@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.120", "", { "dependencies": { "@ai-sdk/provider": "4.0.31", "@ai-sdk/provider-utils": "5.0.64", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-hHGDQrCBgiEiPuimtc1NHPRGwte7sBG3XQuxTdurrpuGXKqCSHVlrBIDsiXjFOBYOms1+9aDz2xpTq+kOhiJWA=="],
 
     "ai7/@ai-sdk/provider": ["@ai-sdk/provider@4.0.31", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-3wJnwVTFg8SwOyoZCv+ov7Re2GB+7IQnU5a5MYJACrtiWDDUHgqTBeeesq2MB2ddgojzL8hgWleltwpAgtUqfg=="],
@@ -870,10 +857,6 @@
     "@opentelemetry/resource-detector-gcp/@opentelemetry/core/@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
 
     "@types/ssh2/@types/node/undici-types": ["undici-types@5.26.5", "", {}, "sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA=="],
-
-    "ai5/@ai-sdk/gateway/@vercel/oidc": ["@vercel/oidc@3.1.0", "", {}, "sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w=="],
-
-    "ai5/@ai-sdk/provider-utils/undici": ["undici@5.29.0", "", { "dependencies": { "@fastify/busboy": "^2.0.0" } }, "sha512-raqeBD6NQK4SkWhQzeYKd1KmIG6dllBOTt55Rmkt4HtI9mwdWtJljnrXjAFUBLTSN67HWrOIZ3EPF4kjUw80Bg=="],
 
     "ai7/@ai-sdk/provider-utils/undici": ["undici@7.30.1", "", {}, "sha512-03KrMbjIFDWQR5RNPrSw3bd1r12JpyFQl9/yxjUbJtqkjmllqC5lFjZh6ujeuJCKr8EOQvRW872Oy/az+nLYxg=="],
 
