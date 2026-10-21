@@ -24,6 +24,7 @@ on:
       - "scripts/registry_version_policy.mjs"
       - "scripts/registry_version_policy.test.mjs"
       - "scripts/verify_release_dependency_audits.py"
+      - "docs/releases/v0.13.0-risk-disposition.json"
   workflow_dispatch: {}
 
 permissions:
@@ -147,14 +148,31 @@ jobs:
       - name: Collect legacy SDK dependency audit
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: npm audit --json --no-package-lock > ../../../../security-evidence/ai-sdk-v5-npm.json || true
+      - name: Snapshot the exact installed vulnerable legacy npm versions
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: |
+          node - <<'NODE' > ../../../../security-evidence/ai-sdk-v5-installed.json
+          const fs = require("node:fs");
+          const packages = ["ai5", "undici", "@fastify/busboy"];
+          const versions = {};
+          for (const name of packages) {
+            const manifest = JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`, "utf8"));
+            versions[name] = manifest.version;
+          }
+          process.stdout.write(JSON.stringify(versions));
+          NODE
       - name: Rehearse hard gate and preserve vulnerability verdict
         id: security-verdict
         run: |
           set +e
           python scripts/verify_release_dependency_audits.py \
             --pip-audit security-evidence/python-crewai.json \
-            --npm-audit security-evidence/ai-sdk-v5-npm.json
-          result=$?
+            --npm-audit security-evidence/ai-sdk-v5-npm.json \
+            --disposition-policy docs/releases/v0.13.0-risk-disposition.json \
+            --npm-installed security-evidence/ai-sdk-v5-installed.json \
+            --fixture-manifest clients/typescript/compat/ai-sdk-v5/package.json \
+            --release-version 0.13.0 | tee security-evidence/disposition-verdict.txt
+          result=${PIPESTATUS[0]}
           set -e
           if [ "$result" -eq 2 ]; then
             echo "::error::Release security audit evidence invalid or missing"
@@ -175,8 +193,15 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$result" -eq 0 ]; then
             {
-              echo "## v0.13.0 dependency audit: clear"
-              echo "No advisories in these two scanned optional paths; separate registry and owner approvals still required."
+              if grep -q 'RELEASE SECURITY: CONDITIONAL DISTRIBUTION-ONLY DISPOSITION' security-evidence/disposition-verdict.txt; then
+                echo "## v0.13.0 release security: CONDITIONALLY ACCEPTED FOR DISTRIBUTION"
+                echo "Known *exact* optional-framework advisories match the time-limited approval. **Not safe deployment approval.**"
+                echo "Approval expires **2026-11-20**; new or changed findings remain NO-GO."
+              else
+                echo "## v0.13.0 dependency audit: CLEAR"
+                echo "No advisories found; no temporary exception required."
+              fi
+              echo "Final exact-SHA release-owner GO and registry checks still required."
               echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
             } >> "$GITHUB_STEP_SUMMARY"
           else
