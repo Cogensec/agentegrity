@@ -141,8 +141,49 @@ jobs:
           path: security-evidence/
           retention-days: 30
 
+  # Validate the current npm publish credential *before* PyPI registration.
+  # Without this, a rotated/expired NPM_TOKEN can leave the Python 0.13.0
+  # artifacts published while all seven npm package uploads fail.
+  # Environment-level NPM_TOKEN secrets are available only in this scope.
+  # A successful whoami validates authentication, NOT per-package publish
+  # permission or eventual registry availability. Trusted publishing (OIDC)
+  # is still the preferred follow-up once the seven packages are configured.
+  npm-auth-preflight:
+    needs: build-npm
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@agentegrity/client
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - name: Test npm release-version collision policy
+        run: node --test scripts/registry_version_policy.test.mjs
+      - name: Reject npm package version conflicts before any Python upload
+        run: node scripts/check_registry_release_versions.mjs
+      - name: Require a currently valid npm publish token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "${NODE_AUTH_TOKEN}" ]]; then
+            echo "::error::NPM_TOKEN is missing; block the release before TestPyPI"
+            exit 1
+          fi
+          if ! npm whoami --registry=https://registry.npmjs.org > /dev/null; then
+            echo "::error::NPM_TOKEN is rejected or expired; block before TestPyPI"
+            exit 1
+          fi
+          echo "npm authentication preflight passed (identity hidden)"
+
   publish-testpypi:
-    needs: [build, build-npm, legacy-ai-sdk-v5-tests, optional-dependency-security-gate]
+    needs: [build, build-npm, legacy-ai-sdk-v5-tests, optional-dependency-security-gate, npm-auth-preflight]
     runs-on: ubuntu-latest
     environment:
       name: testpypi

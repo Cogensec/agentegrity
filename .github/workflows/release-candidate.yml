@@ -20,6 +20,9 @@ on:
       - ".github/workflows/release-candidate.yml"
       - "scripts/check_release_artifacts.py"
       - "scripts/check_release_npm.mjs"
+      - "scripts/check_registry_release_versions.mjs"
+      - "scripts/registry_version_policy.mjs"
+      - "scripts/registry_version_policy.test.mjs"
       - "scripts/verify_release_dependency_audits.py"
   workflow_dispatch: {}
 
@@ -167,3 +170,28 @@ jobs:
           name: rehearsal-optional-framework-security
           path: security-evidence/
           retention-days: 30
+
+  npm-registry-version-availability:
+    # Read-only registry metadata query, without secrets, tags or uploads.
+    # This does not prove ownership or the future availability of a token.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      # On a PR, compare package names/versions to the actual base commit.
+      # Once a complete seven-package release is published, unchanged
+      # maintenance PRs still pass; new versions/collisions fail closed.
+      - name: Fetch PR base manifests for safe published-baseline detection
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+      - name: Test safe released-baseline and new-candidate version policy
+        run: node --test scripts/registry_version_policy.test.mjs
+      - name: Check seven npm versions without blocking released maintenance PRs
+        env:
+          PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: node scripts/check_registry_release_versions.mjs
