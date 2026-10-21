@@ -70,6 +70,10 @@ jobs:
       - name: Check version and lockfile parity
         run: bun run check-versions
         working-directory: clients/typescript
+      - name: Require patched Undici/esbuild dependency resolutions
+        run: node scripts/check-dependency-patches.mjs
+        working-directory: clients/typescript
+
       - name: Build npm distributions without uploading
         run: |
           bun run --filter @agentegrity/client build
