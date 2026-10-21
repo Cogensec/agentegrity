@@ -179,5 +179,15 @@ jobs:
         with:
           node-version: "20"
           package-manager-cache: false
-      - name: Confirm that all seven v0.13.0 npm package versions are unused
+      # On a PR, compare package names/versions to the actual base commit.
+      # Once a complete seven-package release is published, unchanged
+      # maintenance PRs still pass; new versions/collisions fail closed.
+      - name: Fetch PR base manifests for safe published-baseline detection
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+      - name: Check seven npm versions without blocking released maintenance PRs
+        env:
+          PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: node scripts/check_registry_release_versions.mjs
