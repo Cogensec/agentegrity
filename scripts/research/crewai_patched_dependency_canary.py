@@ -9,7 +9,6 @@ the published mcp and crewai-cli/uv requirements.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -73,7 +72,7 @@ def main() -> int:
     if uv_bin is None:
         raise RuntimeError("CrewAI CLI uv binary is missing")
     proc = subprocess.run([uv_bin, "--version"], check=True, text=True, capture_output=True)
-    if not re.search(r"uv \\d+\\.\\d+", proc.stdout):
+    if not proc.stdout.startswith("uv "):
         raise RuntimeError(f"unexpected uv CLI output: {proc.stdout!r}")
     print(f"uv executable: {proc.stdout.strip()}")
     print("PASS: CrewAI adapter, MCP client/transport, and uv CLI import smoke")
