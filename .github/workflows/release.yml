@@ -97,8 +97,50 @@ jobs:
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: npm test
 
+  # Audit the exact separately-installed OPTIONAL frameworks that remain
+  # vulnerable upstream. This is a hard publication gate, not advisory CI.
+  # No registry job may begin while the audit reports known vulnerabilities
+  # or if the audit result cannot be parsed. See security issue #97.
+  optional-dependency-security-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Install CrewAI extra and vulnerability scanner
+        run: python -m pip install -e ".[crewai]" pip-audit
+      - name: Collect CrewAI optional installation audit
+        run: |
+          mkdir -p security-evidence
+          pip-audit --format json --output security-evidence/python-crewai.json || true
+      - name: Install isolated legacy AI SDK v5 fixture
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm install --ignore-scripts --no-package-lock
+      - name: Collect isolated AI SDK v5 advisory report
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: |
+          npm audit --json --no-package-lock > ../../../security-evidence/ai-sdk-v5-npm.json || true
+      - name: Require zero unresolved optional-framework advisories
+        run: |
+          python scripts/verify_release_dependency_audits.py \
+            --pip-audit security-evidence/python-crewai.json \
+            --npm-audit security-evidence/ai-sdk-v5-npm.json
+      - name: Retain release-security evidence, even on failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: optional-framework-security-reports
+          path: security-evidence/
+          retention-days: 30
+
   publish-testpypi:
-    needs: [build, build-npm, legacy-ai-sdk-v5-tests]
+    needs: [build, build-npm, legacy-ai-sdk-v5-tests, optional-dependency-security-gate]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
