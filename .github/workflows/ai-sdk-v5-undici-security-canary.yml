@@ -58,6 +58,9 @@ jobs:
       - name: Exercise actual AI SDK v5 tracing and usage semantics
         working-directory: clients/typescript/compat/ai-sdk-v5
         run: npm test
+      - name: Exercise real local HTTP JSON, multipart, streamed response and abort behavior
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: node --test http-transport.test.mjs
       - name: Record advisory differences (research, not a release clearance)
         if: always()
         working-directory: clients/typescript/compat/ai-sdk-v5
