@@ -53,6 +53,41 @@ and it cannot prove that a resolver will install the candidate pins in a
 supported environment. It only offers an initial regression signal that
 can inform upstream-compatible maintenance.
 
+## Verified result — exact CrewAI 1.15.28 baseline
+
+[GitHub Actions run 39541301915](https://github.com/Cogensec/agentegrity/actions/runs/39541301915)
+successfully completed **both** isolated jobs. The workflows pinned the
+exact upstream CrewAI 1.15.28, ChromaDB 1.5.9, MCP 1.28.1 and uv 0.11.33
+baseline before the patched candidate was installed.
+
+- **Published baseline:** MCP 1.28.1 and uv 0.11.33 passed the
+  credential-free CrewAI/Agentegrity/MCP import and subscription smoke.
+- **Patched-runtime candidate:** MCP 1.30.0 and uv 0.13.4 also passed
+  the *same* smoke checks, demonstrating these public entrypoints still
+  work in the experiment.
+- **Dependency correctness:** the candidate `pip check` correctly
+  reported two conflicts: CrewAI 1.15.28 still declares
+  `mcp~=1.28.1`, and CrewAI CLI 1.15.28 still declares
+  `uv~=0.11.6`. **The patched combination is not currently a
+  valid published CrewAI resolver result.**
+- **Still vulnerable:** ChromaDB 1.5.9 remains pinned and has no
+  corresponding verified stable patched version. The separate AI SDK
+  v5/Undici/Busboy consumer risk also remains open.
+
+### Actionable upstream candidate changes (not yet vendor-approved)
+
+A CrewAI maintainer could test and publish `mcp>=1.30.0,<2` in the
+**CrewAI package**, which is already reflected in its main development
+branch. In **crewai-cli**, the candidate floor is
+`uv>=0.13.4,<0.14`, subject to the full CLI regression suite and
+upstream release policy. Neither change alone fixes ChromaDB: a
+separate stable security remediation and corresponding CrewAI range
+change are still needed.
+
+These results establish **preliminary runtime import compatibility
+only**. They are not permission to overwrite CrewAI's published
+dependency metadata from an Agentegrity consumer environment.
+
 ## Recommended next steps
 
 1. Review both canary runs and their `pip-check.txt` artifacts.
