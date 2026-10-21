@@ -16,7 +16,7 @@
     "typecheck": "bun run --filter '@agentegrity/*' typecheck",
     "test": "bun run --filter '@agentegrity/*' test && bun test test/",
     "test:parity": "bun test test/",
-    "test:coverage": "bun test --coverage",
+    "test:coverage": "bun run scripts/check-coverage.ts",
     "check-coverage": "bun run scripts/check-coverage.ts",
     "clean": "bun run --filter '@agentegrity/*' clean",
     "check-versions": "tsx scripts/check-versions.ts"

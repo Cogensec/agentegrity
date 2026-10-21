@@ -21,11 +21,35 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 
 const MIN_LINE = 80;
 const MIN_FUNC = 70;
 
-const result = spawnSync("bun", ["test", "--coverage", "--coverage-reporter=text"], {
+// The intentionally separate compat/ai-sdk-v5/ fixture has its own npm
+// installation and CI job. Do not recursively discover it with `bun test`
+// from this modern workspace: doing so both fails on missing `ai5` and
+// conflates an optional legacy SDK dependency with shipped package coverage.
+// Explicitly enumerate only the package and cross-package parity suites.
+const roots = [
+  ...readdirSync("packages", { withFileTypes: true })
+    .filter((x) => x.isDirectory())
+    .map((x) => join("packages", x.name, "src")),
+  "test",
+];
+const testFiles: string[] = [];
+for (const root of roots) {
+  for (const file of readdirSync(root)) {
+    if (file.endsWith(".test.ts")) testFiles.push(join(root, file));
+  }
+}
+if (testFiles.length === 0) {
+  console.error("No modern TypeScript package tests found for coverage");
+  process.exit(2);
+}
+
+const result = spawnSync("bun", ["test", "--coverage", "--coverage-reporter=text", ...testFiles], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "pipe"],
 });
