@@ -21,6 +21,8 @@ on:
       - "scripts/check_release_artifacts.py"
       - "scripts/check_release_npm.mjs"
       - "scripts/check_registry_release_versions.mjs"
+      - "scripts/registry_version_policy.mjs"
+      - "scripts/registry_version_policy.test.mjs"
       - "scripts/verify_release_dependency_audits.py"
   workflow_dispatch: {}
 
@@ -187,6 +189,8 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+      - name: Test safe released-baseline and new-candidate version policy
+        run: node --test scripts/registry_version_policy.test.mjs
       - name: Check seven npm versions without blocking released maintenance PRs
         env:
           PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
