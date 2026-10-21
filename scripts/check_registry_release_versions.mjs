@@ -9,6 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { registryVersionDecision } from "./registry_version_policy.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = resolve(root, "clients/typescript/packages");
@@ -111,23 +112,28 @@ for (const name of names) {
 }
 if (failed) process.exit(1);
 
-// Maintenance PRs must not be blocked by the registry version released by
-// the unchanged base branch. Crucially, ALL seven packages must already
-// exist. A partially published release stays a hard failure.
-if (alreadyPublished.length === names.length && baselineUnchanged) {
+// For a PR against an unchanged seven-package released baseline, allow
+// normal maintenance. Tag-based publishing still has no PR base and always
+// fails for already-published versions.
+let decision;
+try {
+  decision = registryVersionDecision({
+    publishedCount: alreadyPublished.length,
+    packageCount: names.length,
+    baselineUnchanged,
+  });
+} catch (error) {
+  for (const fullName of alreadyPublished) {
+    console.error(`Already published: ${fullName}@${expected}`);
+  }
+  console.error(`Registry version check failed: ${error.message}`);
+  process.exit(1);
+}
+if (decision === "published-base") {
   console.log(
     `All seven versions already published at unchanged PR base ${prBaseSha}; ` +
     "maintenance verification passed. No publication authorized.",
   );
-} else if (alreadyPublished.length > 0) {
-  for (const fullName of alreadyPublished) {
-    console.error(`Already published: ${fullName}@${expected}`);
-  }
-  console.error(
-    "Registry version collision or partial publication; release blocked. " +
-    "New version candidates must be unused.",
-  );
-  process.exit(1);
 } else {
   console.log("All seven npm versions are available; this does not verify publishing access.");
 }
