@@ -19,6 +19,18 @@ if (tag && tag !== `v${expected}`) {
   console.error(`Release tag ${tag} does not match package version ${expected}`);
   process.exit(1);
 }
+// Only a PR against an unchanged, already-published baseline may keep
+// working after the release. The tag-driven workflow never sets this value
+// and ALWAYS rejects reused registry versions.
+const prBaseSha = process.env.PR_BASE_SHA || null;
+if (prBaseSha && (
+  process.env.GITHUB_EVENT_NAME !== "pull_request" ||
+  !/^[a-f0-9]{40}$/.test(prBaseSha) ||
+  tag
+)) {
+  console.error("PR_BASE_SHA is permitted only for a pull request base commit");
+  process.exit(1);
+}
 const names = readdirSync(packageDir, { withFileTypes: true })
   .filter((ent) => ent.isDirectory())
   .map((ent) => ent.name)
@@ -29,7 +41,38 @@ if (names.length !== 7) {
   process.exit(1);
 }
 
+// Detect version-changing PRs by comparing every package against the actual
+// base commit. A PR updating or rolling back a version must pass the strict
+// unused-version check, even if the requested version exists on npm.
+let baselineUnchanged = Boolean(prBaseSha);
+if (prBaseSha) {
+  for (const name of names) {
+    const relativePath = `clients/typescript/packages/${name}/package.json`;
+    const original = spawnSync("git", ["show", `${prBaseSha}:${relativePath}`], {
+      encoding: "utf8", timeout: 10000,
+    });
+    if (original.error || original.status !== 0) {
+      console.error(`Cannot inspect PR base manifest ${relativePath}; fail closed`);
+      process.exit(1);
+    }
+    let basePackage;
+    try {
+      basePackage = JSON.parse(original.stdout);
+    } catch {
+      console.error(`Invalid base package metadata: ${relativePath}`);
+      process.exit(1);
+    }
+    const current = JSON.parse(
+      readFileSync(resolve(packageDir, name, "package.json"), "utf8"),
+    );
+    if (basePackage.name !== current.name || basePackage.version !== current.version) {
+      baselineUnchanged = false;
+    }
+  }
+}
+
 let failed = false;
+const alreadyPublished = [];
 for (const name of names) {
   const json = JSON.parse(
     readFileSync(resolve(packageDir, name, "package.json"), "utf8"),
@@ -61,11 +104,30 @@ for (const name of names) {
     continue;
   }
   if (versions.includes(expected)) {
-    console.error(`Already published: ${fullName}@${expected}; abort the release`);
-    failed = true;
+    alreadyPublished.push(fullName);
   } else {
     console.log(`Available: ${fullName}@${expected}`);
   }
 }
 if (failed) process.exit(1);
-console.log("All seven npm versions are available; this does not verify publishing access.");
+
+// Maintenance PRs must not be blocked by the registry version released by
+// the unchanged base branch. Crucially, ALL seven packages must already
+// exist. A partially published release stays a hard failure.
+if (alreadyPublished.length === names.length && baselineUnchanged) {
+  console.log(
+    `All seven versions already published at unchanged PR base ${prBaseSha}; ` +
+    "maintenance verification passed. No publication authorized.",
+  );
+} else if (alreadyPublished.length > 0) {
+  for (const fullName of alreadyPublished) {
+    console.error(`Already published: ${fullName}@${expected}`);
+  }
+  console.error(
+    "Registry version collision or partial publication; release blocked. " +
+    "New version candidates must be unused.",
+  );
+  process.exit(1);
+} else {
+  console.log("All seven npm versions are available; this does not verify publishing access.");
+}
