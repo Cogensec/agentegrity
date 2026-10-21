@@ -66,8 +66,39 @@ jobs:
           name: dist
           path: dist/
 
+  # AI SDK v5 compatibility uses a deliberately isolated npm fixture with
+  # legacy Undici/Busboy advisories. Its three behavior tests must pass on
+  # every supported Node major before ANY registry publication begins.
+  # These tests are not included in `bun run test` from packages/*.
+  legacy-ai-sdk-v5-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Install modern workspace from frozen lock
+        working-directory: clients/typescript
+        run: bun install --frozen-lockfile
+      - name: Build shared client
+        working-directory: clients/typescript
+        run: bun run --filter @agentegrity/client build
+      - name: Install isolated AI SDK v5 compatibility fixture
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm install --ignore-scripts --no-package-lock
+      - name: Verify advertised AI SDK v5 behavior
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm test
+
   publish-testpypi:
-    needs: [build, build-npm]
+    needs: [build, build-npm, legacy-ai-sdk-v5-tests]
     runs-on: ubuntu-latest
     environment:
       name: testpypi

@@ -10,6 +10,7 @@ on:
       - "clients/typescript/packages/vercel-ai/**"
       - "clients/typescript/packages/client/**"
       - ".github/workflows/ci-legacy-ai-sdk-v5.yml"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
@@ -17,11 +18,15 @@ permissions:
 jobs:
   isolated-ai-sdk-v5:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["18", "20", "22"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node-version }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
