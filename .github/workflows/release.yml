@@ -5,6 +5,11 @@ on:
     tags:
       - "v*.*.*"
 
+# Default token is read-only. Registry publication uses explicitly scoped
+# OIDC permissions in its dedicated environment-gated jobs.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
