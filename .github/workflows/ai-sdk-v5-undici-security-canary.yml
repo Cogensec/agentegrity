@@ -1,0 +1,73 @@
+name: AI SDK v5 patched Undici compatibility research
+
+# Research only: never feeds a registry publishing gate or runtime package.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/ai-sdk-v5-undici-security-canary.yml"
+      - "clients/typescript/compat/ai-sdk-v5/**"
+      - "clients/typescript/packages/vercel-ai/**"
+      - "clients/typescript/packages/client/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  v5-upstream-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["18", "20", "22"]
+        resolution: ["published-v5", "experimental-undici6"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Install modern workspace from committed lockfile
+        working-directory: clients/typescript
+        run: bun install --frozen-lockfile
+      - name: Compile @agentegrity/client without publishing
+        working-directory: clients/typescript
+        run: bun run --filter @agentegrity/client build
+      - name: Set experimental Undici override in the private fixture only
+        if: matrix.resolution == 'experimental-undici6'
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm pkg set 'overrides.undici=^6.29.1'
+      - name: Install isolated AI SDK v5 dependency tree
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm install --ignore-scripts --no-package-lock
+      - name: Inspect exact resolved packages and dependency constraints
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: |
+          npm ls undici @fastify/busboy --all > dependency-tree.txt 2>&1 || true
+          cat dependency-tree.txt
+          if [ "${{ matrix.resolution }}" = "experimental-undici6" ]; then
+            grep -q 'undici@6.' dependency-tree.txt
+            if grep -q 'undici@5.' dependency-tree.txt; then
+              echo "::error::Legacy Undici 5 remains in experimental candidate"
+              exit 1
+            fi
+          fi
+      - name: Exercise actual AI SDK v5 tracing and usage semantics
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm test
+      - name: Record advisory differences (research, not a release clearance)
+        if: always()
+        working-directory: clients/typescript/compat/ai-sdk-v5
+        run: npm audit --json --no-package-lock > audit-report.json || true
+      - name: Retain proof of installed graph and live advisories
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai5-${{ matrix.resolution }}-node${{ matrix.node-version }}
+          path: |
+            clients/typescript/compat/ai-sdk-v5/dependency-tree.txt
+            clients/typescript/compat/ai-sdk-v5/audit-report.json
+          retention-days: 14
