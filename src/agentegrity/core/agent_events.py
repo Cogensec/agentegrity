@@ -15,6 +15,15 @@ from typing import Any, Mapping
 
 EVENT_SCHEMA_VERSION = "1.0"
 _EVENT_NAME = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
+# Mirror schemas/agent-event-v1.json and TS validWireTimestamp. Explicitly
+# reject fromisoformat's arbitrary separators, compact offsets and truncation
+# of fractional seconds beyond microsecond precision.
+_WIRE_TIMESTAMP = re.compile(
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
+    r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+)
+
 _MAX_IDENTIFIER = 256
 
 
@@ -162,9 +171,19 @@ class CanonicalAgentEvent:
             raise ValueError("source must be an object")
         if set(source) - {"host", "integration", "assurance", "evidence_ref"}:
             raise ValueError("unknown event source fields")
+        # Optional means absent, not an explicitly supplied JSON null.
+        optional = (
+            "session_id", "action_id", "parent_event_id",
+            "tool_name", "effect", "outcome",
+        )
+        for key in optional:
+            if key in raw and raw[key] is None:
+                raise ValueError(f"{key} cannot be null")
+        if "evidence_ref" in source and source["evidence_ref"] is None:
+            raise ValueError("source.evidence_ref cannot be null")
         timestamp = raw.get("occurred_at")
-        if not isinstance(timestamp, str):
-            raise ValueError("occurred_at must be an ISO 8601 string")
+        if not isinstance(timestamp, str) or not _WIRE_TIMESTAMP.fullmatch(timestamp):
+            raise ValueError("occurred_at must be a timezone-aware ISO 8601 timestamp")
         try:
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError as exc:
