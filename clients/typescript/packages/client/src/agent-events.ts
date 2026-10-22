@@ -64,7 +64,22 @@ const CAPABILITIES: Capability[] = [
 const STATUSES: CapabilityStatus[] = ["unavailable", "implemented", "validated"];
 const ASSURANCES: SourceAssurance[] = ["unverified", "host_asserted", "authenticated"];
 const EVENT_TYPE = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
-const ZONED_TIME = /(Z|[+-]\d{2}:\d{2})$/;
+// RFC 3339 subset agreed with the Python parser and JSON schema: exact
+// calendar date, uppercase T/Z, second precision and <=6 fractional digits.
+const WIRE_TIMESTAMP = /^([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$/;
+
+function validWireTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = WIRE_TIMESTAMP.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1]!;
+}
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -112,10 +127,7 @@ export function parseCanonicalAgentEvent(value: unknown): CanonicalAgentEventV1 
   if (typeof raw.event_type !== "string" || !EVENT_TYPE.test(raw.event_type)) {
     throw new TypeError("invalid canonical event type");
   }
-  if (
-    typeof raw.occurred_at !== "string" || !ZONED_TIME.test(raw.occurred_at) ||
-    !Number.isFinite(Date.parse(raw.occurred_at))
-  ) {
+  if (!validWireTimestamp(raw.occurred_at)) {
     throw new TypeError("occurred_at must be a valid timezone-aware ISO timestamp");
   }
   const source = object(raw.source, "event source");
