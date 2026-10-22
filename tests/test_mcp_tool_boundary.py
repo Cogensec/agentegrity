@@ -27,7 +27,6 @@ from agentegrity.core.trust_boundaries import (
 from agentegrity.sdk.gateway import GatewayTool, TrustedActionGateway
 from agentegrity.sdk.mcp_boundary import MCPToolBoundary, MCPToolCallError
 
-
 NOW = datetime(2026, 10, 22, 15, tzinfo=timezone.utc)
 
 
