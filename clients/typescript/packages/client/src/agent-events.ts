@@ -96,7 +96,7 @@ function allowedFields(value: Record<string, unknown>, allowed: Set<string>): vo
 
 function identifier(value: unknown, label: string): string {
   if (
-    typeof value !== "string" || value.length > 256 ||
+    typeof value !== "string" || Array.from(value).length > 256 ||
     value.trim().length === 0
   ) {
     throw new TypeError(`${label} must be a nonempty string up to 256 characters`);
