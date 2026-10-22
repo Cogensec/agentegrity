@@ -1,9 +1,5 @@
 # agentegrity for Claude Code
 
-> **v0.13.0 release candidate:** The install command below is for the
-> forthcoming release; v0.12.0 remains the published package until v0.13.0
-> is available on PyPI.
-
 Stateful integrity verification for every tool call in a Claude Code
 session, with a hash-linked decision chain you can verify afterwards.
 Everything runs locally. Sessions stream to an

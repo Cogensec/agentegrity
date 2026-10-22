@@ -10,10 +10,7 @@ describes proposed integrations, not guarantees of shipped support.
 
 ## [Unreleased]
 
-## [0.13.0] - Release candidate (not yet published)
-
-**Prepared for a future v0.13.0 publication; no tag or package release has
-occurred.** This section will receive the actual date when published.
+## [0.13.0] - 2026-10-21
 
 Runtime Action Authority, provenance-aware trust boundaries, bounded
 multi-agent delegation, and downstream-effect evidence reconciliation.
@@ -24,7 +21,7 @@ previously ineffective enforcement and reporting paths are corrected.
 **Important:** `enforce=True` can now deny actions it previously only
 observed. Review the Breaking section, approval policies, and deployment
 configurations before upgrading. See the
-[v0.13.0 release-candidate notes](docs/releases/v0.13.0.md).
+[v0.13.0 release notes](docs/releases/v0.13.0.md).
 
 ### Breaking
 
@@ -1385,7 +1382,9 @@ Severity tags below map to the audit: **Critical**, **High**,
 - Three working examples (`basic_evaluation.py`,
   `runtime_monitoring.py`, `custom_validator.py`).
 
-[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/cogensec/agentegrity/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.13.0
+[0.12.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.12.0
 [0.11.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.11.0
 [0.10.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.10.0
 [0.9.0]: https://github.com/cogensec/agentegrity/releases/tag/v0.9.0

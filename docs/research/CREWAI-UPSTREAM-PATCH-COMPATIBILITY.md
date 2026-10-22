@@ -101,7 +101,10 @@ dependency metadata from an Agentegrity consumer environment.
    audit. The latter still requires a vendor-compatible Undici/Busboy
    remedy or an explicit, independently reviewed support decision.
 5. Keep v0.13.0 **unpublished** until the full release security gate
-   passes or a documented, authorized exception is reviewed.
+   passes or a documented, authorized exception is reviewed. (Resolved
+   2026-10-21: v0.13.0 was published under the
+   [narrow risk disposition](../releases/v0.13.0-risk-disposition.md),
+   which expires 2026-11-20.)
 
 Do not replace Agentegrity's supported dependency metadata with the
 ephemeral canary's versions and do not infer `pip check` success from
