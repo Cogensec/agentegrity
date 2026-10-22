@@ -207,6 +207,90 @@ def test_async_gateway_enforces_before_execution() -> None:
     assert calls == ["acct-42"]
 
 
+def test_sync_wrapper_returning_coroutine_runs_via_ainvoke() -> None:
+    """Decorated async tools must remain usable without bypassing the gate."""
+    effects: list[str] = []
+
+    async def transfer(account_id: str) -> str:
+        effects.append(account_id)
+        return "synthetic-transfer"
+
+    def decorated_tool(account_id: str) -> object:
+        return transfer(account_id)
+
+    mandate = TaskMandate(
+        mandate_id="mandate-wrapped",
+        principal_id="principal",
+        agent_id="agent-1",
+        run_id="run-1",
+        expires_at=NOW + timedelta(minutes=5),
+        allowed_tools=frozenset({"transfer"}),
+        allowed_resources=frozenset({"acct-42"}),
+        allowed_effects=frozenset({EffectType.FINANCIAL_WRITE}),
+    )
+    gateway = TrustedActionGateway(
+        mandate,
+        {"transfer": GatewayTool(
+            ToolAuthority(EffectType.FINANCIAL_WRITE, resource_argument="account_id"),
+            decorated_tool,
+        )},
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(AuthorizationDenied, match="resource_not_authorized"):
+            await gateway.ainvoke("transfer", {"account_id": "acct-99"}, now=NOW)
+        assert effects == []
+        result = await gateway.ainvoke(
+            "transfer", {"account_id": "acct-42"}, action_id="wrapped", now=NOW
+        )
+        assert result.result == "synthetic-transfer"
+        assert result.receipt.status is EffectStatus.PENDING
+        assert gateway.gate.effects_verified(["wrapped"]) is False
+
+    asyncio.run(exercise())
+    assert effects == ["acct-42"]
+
+
+def test_sync_wrapper_returning_future_runs_via_ainvoke() -> None:
+    """A callback returning an asyncio.Future is supported as well."""
+    effects: list[str] = []
+
+    def future_tool(account_id: str) -> asyncio.Future[str]:
+        effects.append(account_id)
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        future.set_result("enqueued")
+        return future
+
+    mandate = TaskMandate(
+        mandate_id="mandate-future",
+        principal_id="principal",
+        agent_id="agent-1",
+        run_id="run-1",
+        expires_at=NOW + timedelta(minutes=5),
+        allowed_tools=frozenset({"transfer"}),
+        allowed_resources=frozenset({"acct-42"}),
+        allowed_effects=frozenset({EffectType.FINANCIAL_WRITE}),
+    )
+    gateway = TrustedActionGateway(
+        mandate,
+        {"transfer": GatewayTool(
+            ToolAuthority(EffectType.FINANCIAL_WRITE, resource_argument="account_id"),
+            future_tool,
+        )},
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(AuthorizationDenied, match="resource_not_authorized"):
+            await gateway.ainvoke("transfer", {"account_id": "acct-99"}, now=NOW)
+        assert effects == []
+        result = await gateway.ainvoke("transfer", {"account_id": "acct-42"}, now=NOW)
+        assert result.result == "enqueued"
+        assert result.receipt.status is EffectStatus.PENDING
+
+    asyncio.run(exercise())
+    assert effects == ["acct-42"]
+
+
 def test_gateway_rejects_unbound_run() -> None:
     mandate = TaskMandate(
         mandate_id="mandate-4",
