@@ -1,6 +1,6 @@
 """Canonical event and capability contract regression and security tests."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -131,6 +131,14 @@ def test_utc_z_timestamp_is_accepted() -> None:
     raw = _event().to_dict()
     raw["occurred_at"] = "2026-10-22T00:00:00Z"
     assert CanonicalAgentEvent.from_dict(raw).occurred_at.utcoffset().total_seconds() == 0
+
+
+def test_seconds_level_timezone_is_normalized_before_export() -> None:
+    odd_zone = timezone(timedelta(seconds=30))
+    event = _event(occurred_at=datetime(2026, 10, 22, tzinfo=odd_zone))
+    serialized = event.to_dict()
+    assert serialized["occurred_at"] == "2026-10-21T23:59:30+00:00"
+    assert CanonicalAgentEvent.from_dict(serialized).to_dict() == serialized
 
 
 def test_capability_card_requires_all_levels() -> None:
