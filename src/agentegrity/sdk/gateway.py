@@ -13,7 +13,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, TypeVar
+from typing import Any
 
 from agentegrity.core.action_security import (
     ActionExecution,
@@ -24,7 +24,6 @@ from agentegrity.core.action_security import (
 )
 from agentegrity.core.trust_boundaries import ActionProvenance, TrustBoundaryPolicy
 
-_T = TypeVar("_T")
 MAX_GATEWAY_ARGUMENT_BYTES = 65536
 
 
@@ -54,7 +53,7 @@ def _snapshot_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("argument keys must be nonempty strings")
     try:
         wire = json.dumps(dict(arguments), allow_nan=False, ensure_ascii=True)
-    except (ValueError, TypeError, OverflowError) as exc:
+    except (ValueError, TypeError, OverflowError, RecursionError) as exc:
         raise ValueError("tool arguments must be finite JSON values") from exc
     if len(wire.encode("utf-8")) > MAX_GATEWAY_ARGUMENT_BYTES:
         raise ValueError("tool arguments exceed gateway size limit")
@@ -121,6 +120,8 @@ class TrustedActionGateway:
         now: datetime | None,
         provenance: ActionProvenance | None,
     ) -> GatewayTool:
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ValueError("tool_name must be nonempty")
         binding = self._bindings.get(tool_name)
         if binding is None:
             verdict = self._gate.check(
