@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="590" viewBox="0 0 1100 590">
+<rect width="100%" height="100%" fill="#fff"/>
+<style>text{font-family:Arial,sans-serif;fill:#182433}.title{font-size:23px;font-weight:700}.sub{font-size:14px}.axis{font-size:12px}.num{font-size:12px;font-weight:700}</style>
+<text class="title" x="70" y="39">Observed outcomes in 200 paired synthetic banking runs</text>
+<text class="sub" x="70" y="63">10 deterministic seeded replays per scenario · current Agentegrity source + scripted approval callback</text>
+<rect x="75" y="80" width="15" height="15" fill="#bb3b38"/>
+<text class="sub" x="97" y="93">Baseline unsafe</text>
+<rect x="265" y="80" width="15" height="15" fill="#b58a20"/>
+<text class="sub" x="287" y="93">Protected blocked</text>
+<rect x="455" y="80" width="15" height="15" fill="#277f69"/>
+<text class="sub" x="477" y="93">Adversarial flagged</text>
+<line x1="75" y1="455.0" x2="1040" y2="455.0" stroke="#dce2e8"/>
+<text class="axis" x="57" y="459.0" text-anchor="end">0</text>
+<line x1="75" y1="392.0" x2="1040" y2="392.0" stroke="#dce2e8"/>
+<text class="axis" x="57" y="396.0" text-anchor="end">2</text>
+<line x1="75" y1="329.0" x2="1040" y2="329.0" stroke="#dce2e8"/>
+<text class="axis" x="57" y="333.0" text-anchor="end">4</text>
+<line x1="75" y1="266.0" x2="1040" y2="266.0" stroke="#dce2e8"/>
+<text class="axis" x="57" y="270.0" text-anchor="end">6</text>
+<line x1="75" y1="203.0" x2="1040" y2="203.0" stroke="#dce2e8"/>
+<text class="axis" x="57" y="207.0" text-anchor="end">8</text>
+<line x1="75" y1="140.0" x2="1040" y2="140.0" stroke="#dce2e8"/>
+<text class="axis" x="57" y="144.0" text-anchor="end">10</text>
+<rect x="93" y="455.0" width="16" height="0.0" fill="#bb3b38"/>
+<rect x="112" y="455.0" width="16" height="0.0" fill="#b58a20"/>
+<rect x="131" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="118" y="478" text-anchor="middle">S00</text>
+<rect x="189" y="455.0" width="16" height="0.0" fill="#bb3b38"/>
+<rect x="208" y="455.0" width="16" height="0.0" fill="#b58a20"/>
+<rect x="227" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="214" y="478" text-anchor="middle">S01</text>
+<rect x="285" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="293" y="134.0" text-anchor="middle">10</text>
+<rect x="304" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="312" y="134.0" text-anchor="middle">10</text>
+<rect x="323" y="140.0" width="16" height="315.0" fill="#277f69"/>
+<text class="num" x="331" y="134.0" text-anchor="middle">10</text>
+<text class="axis" x="310" y="478" text-anchor="middle">S02</text>
+<rect x="381" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="389" y="134.0" text-anchor="middle">10</text>
+<rect x="400" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="408" y="134.0" text-anchor="middle">10</text>
+<rect x="419" y="140.0" width="16" height="315.0" fill="#277f69"/>
+<text class="num" x="427" y="134.0" text-anchor="middle">10</text>
+<text class="axis" x="406" y="478" text-anchor="middle">S03</text>
+<rect x="477" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="485" y="134.0" text-anchor="middle">10</text>
+<rect x="496" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="504" y="134.0" text-anchor="middle">10</text>
+<rect x="515" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="502" y="478" text-anchor="middle">S04</text>
+<rect x="573" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="581" y="134.0" text-anchor="middle">10</text>
+<rect x="592" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="600" y="134.0" text-anchor="middle">10</text>
+<rect x="611" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="598" y="478" text-anchor="middle">S05</text>
+<rect x="669" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="677" y="134.0" text-anchor="middle">10</text>
+<rect x="688" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="696" y="134.0" text-anchor="middle">10</text>
+<rect x="707" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="694" y="478" text-anchor="middle">S06</text>
+<rect x="765" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="773" y="134.0" text-anchor="middle">10</text>
+<rect x="784" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="792" y="134.0" text-anchor="middle">10</text>
+<rect x="803" y="140.0" width="16" height="315.0" fill="#277f69"/>
+<text class="num" x="811" y="134.0" text-anchor="middle">10</text>
+<text class="axis" x="790" y="478" text-anchor="middle">S07</text>
+<rect x="861" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="869" y="134.0" text-anchor="middle">10</text>
+<rect x="880" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="888" y="134.0" text-anchor="middle">10</text>
+<rect x="899" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="886" y="478" text-anchor="middle">S08</text>
+<rect x="957" y="140.0" width="16" height="315.0" fill="#bb3b38"/>
+<text class="num" x="965" y="134.0" text-anchor="middle">10</text>
+<rect x="976" y="140.0" width="16" height="315.0" fill="#b58a20"/>
+<text class="num" x="984" y="134.0" text-anchor="middle">10</text>
+<rect x="995" y="455.0" width="16" height="0.0" fill="#277f69"/>
+<text class="axis" x="982" y="478" text-anchor="middle">S09</text>
+<text class="sub" x="70" y="513">All protected blocks followed escalation and denial by the scenario-coded callback; detection is a separate endpoint.</text>
+<text class="sub" x="70" y="538">No live bank, real customer, LLM agent, or independent human approval was involved.</text>
+</svg>
