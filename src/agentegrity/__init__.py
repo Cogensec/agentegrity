@@ -31,6 +31,7 @@ from agentegrity.core.action_security import (
     TaskMandate,
     ToolAuthority,
 )
+from agentegrity.core.host_observer import EventCapacityExceeded, HostAgentObserver, ToolCompletion
 from agentegrity.core.agent_events import (
     EVENT_SCHEMA_VERSION,
     AgentCapabilityCard,
@@ -115,6 +116,9 @@ from agentegrity.sdk.runtime import (
 )
 
 __all__ = [
+    "EventCapacityExceeded",
+    "HostAgentObserver",
+    "ToolCompletion",
     "EVENT_SCHEMA_VERSION",
     "AgentCapabilityCard",
     "CanonicalAgentEvent",
