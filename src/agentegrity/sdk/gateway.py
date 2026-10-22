@@ -19,6 +19,7 @@ from agentegrity.core.action_security import (
     ActionExecution,
     ActionSecurityGate,
     AuthorizationDenied,
+    EffectType,
     TaskMandate,
     ToolAuthority,
 )
@@ -107,6 +108,7 @@ class TrustedActionGateway:
         *,
         trust_boundary: TrustBoundaryPolicy | None = None,
         evidence_timeout: timedelta | None = None,
+        max_delegation_depth: int = 0,
     ) -> None:
         if not isinstance(mandate, TaskMandate) or not mandate.run_id:
             raise ValueError("gateway requires a trusted run-bound TaskMandate")
@@ -123,7 +125,53 @@ class TrustedActionGateway:
             {name: binding.authority for name, binding in registry.items()},
             trust_boundary=trust_boundary,
             evidence_timeout=evidence_timeout,
+            max_delegation_depth=max_delegation_depth,
         )
+
+    def delegate(
+        self,
+        *,
+        agent_id: str,
+        run_id: str,
+        allowed_tools: frozenset[str],
+        allowed_resources: frozenset[str],
+        allowed_effects: frozenset[EffectType],
+        expires_at: datetime,
+        allowed_credentials: frozenset[str] = frozenset(),
+        not_before: datetime | None = None,
+        credential_expires_at: datetime | None = None,
+        now: datetime | None = None,
+    ) -> TrustedActionGateway:
+        """Grant a strictly narrower, host-issued execution gateway to a peer.
+
+        The trusted orchestration host alone may call this. Never delegate
+        based on model text, tool descriptions or peer-provided instructions.
+        Child authority and replay state are created by ActionSecurityGate,
+        including inherited revocation and provenance constraints.
+
+        Each child has only the *registered executors* in its delegated tool
+        subset. It cannot regain a parent-only executor by supplying a tool
+        name, argument, or changed run identity.
+        """
+        child_gate = self._gate.delegate(
+            agent_id=agent_id,
+            run_id=run_id,
+            allowed_tools=allowed_tools,
+            allowed_resources=allowed_resources,
+            allowed_effects=allowed_effects,
+            expires_at=expires_at,
+            allowed_credentials=allowed_credentials,
+            not_before=not_before,
+            credential_expires_at=credential_expires_at,
+            now=now,
+        )
+        child = TrustedActionGateway.__new__(TrustedActionGateway)
+        child._gate = child_gate
+        child._bindings = {
+            name: self._bindings[name]
+            for name in child_gate.mandate.allowed_tools
+        }
+        return child
 
     @property
     def gate(self) -> ActionSecurityGate:
