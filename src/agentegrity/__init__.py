@@ -80,6 +80,14 @@ from agentegrity.core.trust_boundaries import (
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
 from agentegrity.exporters.alerts import SlackAlertExporter, WebhookAlertExporter
+from agentegrity.exporters.canonical_pro import (
+    CanonicalDeliveryDuplicate,
+    CanonicalDeliveryError,
+    CanonicalDeliveryReceipt,
+    CanonicalDeliveryRejected,
+    CanonicalDeliveryUncertain,
+    CanonicalProSender,
+)
 from agentegrity.exporters.http import HTTPExporter
 from agentegrity.google_adk import instrument as google_adk_instrument
 from agentegrity.google_adk import report as google_adk_report
@@ -163,6 +171,12 @@ __all__ = [
     # drifted reimplementation returns zero matches, which looks like "no leaks found".
     "fingerprint",
     "CredentialRef",
+    "CanonicalDeliveryDuplicate",
+    "CanonicalDeliveryError",
+    "CanonicalDeliveryReceipt",
+    "CanonicalDeliveryRejected",
+    "CanonicalDeliveryUncertain",
+    "CanonicalProSender",
     "HTTPExporter",
     "WebhookAlertExporter",
     "SlackAlertExporter",
