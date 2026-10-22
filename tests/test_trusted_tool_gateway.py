@@ -121,7 +121,7 @@ def test_mandate_registry_is_snapshot_of_host_registration() -> None:
 
 def test_non_json_arguments_rejected_without_executing() -> None:
     gateway, effects = _gateway()
-    with pytest.raises(ValueError, match="finite JSON"):
+    with pytest.raises(ValueError, match="JSON objects"):
         gateway.invoke("prepare_transfer", {"account_id": {"bad": object()}}, now=NOW)
     with pytest.raises(ValueError, match="size limit"):
         gateway.invoke(
@@ -129,6 +129,10 @@ def test_non_json_arguments_rejected_without_executing() -> None:
         )
     with pytest.raises(ValueError, match="finite JSON"):
         gateway.invoke("prepare_transfer", {"account_id": float("nan")}, now=NOW)
+    with pytest.raises(ValueError, match="argument keys"):
+        gateway.invoke(
+            "prepare_transfer", {"account_id": "acct-42", "note": [{1: "bad"}]}, now=NOW
+        )
     assert effects == []
 
 
