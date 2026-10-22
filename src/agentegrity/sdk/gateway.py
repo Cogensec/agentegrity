@@ -188,11 +188,13 @@ class TrustedActionGateway:
         now: datetime | None = None,
         provenance: ActionProvenance | None = None,
     ) -> ActionExecution[Any]:
-        """Await an asynchronous host tool through the same action gate."""
+        """Await an async tool or a callable returning an awaitable."""
         copied = _snapshot_arguments(arguments)
         binding = self._binding_or_deny(tool_name, copied, action_id, now, provenance)
-        if not _async_executor(binding.executor):
-            raise TypeError("sync executor requires invoke")
+        # A regular callable may return an awaitable (for example a sync
+        # decorator wrapping an async tool). The gate checks authorization
+        # before invoking and awaits the returned value. Non-awaitable
+        # results become UNKNOWN receipts, never verified success.
         return await self._gate.ainvoke(
             agent_id=self._gate.mandate.agent_id,
             run_id=self._gate.mandate.run_id or "",
