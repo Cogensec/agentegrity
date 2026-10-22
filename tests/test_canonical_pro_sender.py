@@ -101,7 +101,8 @@ def test_sender_rejects_insecure_or_unexpected_endpoints(endpoint: str) -> None:
 
 
 @pytest.mark.parametrize("token", [
-    "", "  ", "secret\\nheader: x", "secret\\rheader: x", "hi\\x00there",
+    "", "  ", "secret" + chr(10) + "header: x", "secret" + chr(13) + "header: x",
+    "hi" + chr(0) + "there",
 ])
 def test_sender_rejects_unusable_tokens(token: str) -> None:
     with pytest.raises(ValueError, match="token"):
