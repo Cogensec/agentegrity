@@ -27,7 +27,6 @@ from agentegrity.core.trust_boundaries import (
 )
 from agentegrity.sdk.gateway import GatewayTool, TrustedActionGateway
 
-
 NOW = datetime(2026, 10, 22, 15, tzinfo=timezone.utc)
 
 
