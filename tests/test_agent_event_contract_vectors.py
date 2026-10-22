@@ -1,6 +1,7 @@
 """Shared JSON contract vectors and Draft 2020-12 schema validation."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import jsonschema
@@ -25,6 +26,23 @@ _CARD_SCHEMA = json.loads(
     (_ROOT / "schemas/agent-capabilities-v1.json").read_text(encoding="utf-8")
 )
 _FORMAT = jsonschema.FormatChecker()
+
+
+@_FORMAT.checks("date-time")
+def _check_calendar_date(value: object) -> bool:
+    """The default format checker accepts impossible days on some runtimes.
+
+    Require calendar validity in addition to the schema's strict timestamp
+    pattern; this mirrors production boundary parsing.
+    """
+    if not isinstance(value, str):
+        return True
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
 
 
 @pytest.mark.parametrize("event", _VECTORS["valid_events"])
