@@ -54,7 +54,7 @@ class CanonicalDeliveryReceipt:
 class _NoRedirect(HTTPRedirectHandler):
     """Never forward the workspace bearer token across HTTP redirects."""
 
-    def redirect_request(  # type: ignore[override]
+    def redirect_request(
         self,
         req: Request,
         fp: Any,
