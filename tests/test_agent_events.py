@@ -90,10 +90,41 @@ def test_parser_rejects_unknown_fields_and_invalid_time() -> None:
         })
     with pytest.raises(ValueError, match="timezone-aware"):
         CanonicalAgentEvent.from_dict({**raw, "occurred_at": "2026-10-22T12:00:00"})
-    with pytest.raises(ValueError, match="invalid occurred_at"):
+    with pytest.raises(ValueError, match="timezone-aware"):
         CanonicalAgentEvent.from_dict({**raw, "occurred_at": "tomorrow"})
     with pytest.raises(ValueError, match="object"):
         CanonicalAgentEvent.from_dict([])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("field", [
+    "session_id", "action_id", "parent_event_id", "tool_name", "effect", "outcome",
+])
+def test_wire_parser_rejects_present_null_optional_fields(field: str) -> None:
+    raw = _event().to_dict()
+    raw[field] = None
+    with pytest.raises(ValueError, match="cannot be null"):
+        CanonicalAgentEvent.from_dict(raw)
+
+
+def test_wire_parser_rejects_null_source_evidence_reference() -> None:
+    raw = _event().to_dict()
+    raw["source"]["evidence_ref"] = None
+    with pytest.raises(ValueError, match="cannot be null"):
+        CanonicalAgentEvent.from_dict(raw)
+
+
+@pytest.mark.parametrize("timestamp", [
+    "2026-10-22X10:00:00+00:00",
+    "2026-10-22T10:00:00+0000",
+    "2026-10-22T10:00:00+00:00:30",
+    "2026-02-30T10:00:00Z",
+    "2026-10-22T10:00:00.1234567Z",
+])
+def test_wire_parser_rejects_invalid_or_noncanonical_timestamps(timestamp: str) -> None:
+    raw = _event().to_dict()
+    raw["occurred_at"] = timestamp
+    with pytest.raises(ValueError):
+        CanonicalAgentEvent.from_dict(raw)
 
 
 def test_utc_z_timestamp_is_accepted() -> None:
