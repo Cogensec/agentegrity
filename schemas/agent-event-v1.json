@@ -5,39 +5,108 @@
   "description": "Opt-in metadata-only interoperability contract. Source authentication claims are not independently verified by validating this schema.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "event_id", "event_type", "occurred_at", "agent_id", "run_id", "source"],
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "agent_id",
+    "run_id",
+    "source"
+  ],
   "properties": {
-    "schema_version": { "const": "1.0" },
-    "event_id": { "$ref": "#/$defs/identifier" },
-    "event_type": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$" },
-    "occurred_at": { "type": "string", "format": "date-time" },
-    "agent_id": { "$ref": "#/$defs/identifier" },
-    "run_id": { "$ref": "#/$defs/identifier" },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "agent_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "run_id": {
+      "$ref": "#/$defs/identifier"
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["host", "integration", "assurance"],
+      "required": [
+        "host",
+        "integration",
+        "assurance"
+      ],
       "properties": {
-        "host": { "$ref": "#/$defs/identifier" },
-        "integration": { "$ref": "#/$defs/identifier" },
-        "assurance": { "enum": ["unverified", "host_asserted", "authenticated"] },
-        "evidence_ref": { "$ref": "#/$defs/identifier" }
+        "host": {
+          "$ref": "#/$defs/identifier"
+        },
+        "integration": {
+          "$ref": "#/$defs/identifier"
+        },
+        "assurance": {
+          "enum": [
+            "unverified",
+            "host_asserted",
+            "authenticated"
+          ]
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/identifier"
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "assurance": { "const": "authenticated" } }, "required": ["assurance"] },
-          "then": { "required": ["evidence_ref"] }
+          "if": {
+            "properties": {
+              "assurance": {
+                "const": "authenticated"
+              }
+            },
+            "required": [
+              "assurance"
+            ]
+          },
+          "then": {
+            "required": [
+              "evidence_ref"
+            ]
+          }
         }
       ]
     },
-    "session_id": { "$ref": "#/$defs/identifier" },
-    "action_id": { "$ref": "#/$defs/identifier" },
-    "parent_event_id": { "$ref": "#/$defs/identifier" },
-    "tool_name": { "$ref": "#/$defs/identifier" },
-    "effect": { "$ref": "#/$defs/identifier" },
-    "outcome": { "$ref": "#/$defs/identifier" }
+    "session_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "action_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "parent_event_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "tool_name": {
+      "$ref": "#/$defs/identifier"
+    },
+    "effect": {
+      "$ref": "#/$defs/identifier"
+    },
+    "outcome": {
+      "$ref": "#/$defs/identifier"
+    }
   },
   "$defs": {
-    "identifier": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" }
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "\\S"
+    }
   }
 }
