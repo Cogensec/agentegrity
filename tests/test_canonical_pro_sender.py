@@ -100,7 +100,9 @@ def test_sender_rejects_insecure_or_unexpected_endpoints(endpoint: str) -> None:
         CanonicalProSender(endpoint=endpoint, token=TOKEN)
 
 
-@pytest.mark.parametrize("token", ["", "  ", "secret\nheader: x", "secret\rheader: x", "hi\x00there"])
+@pytest.mark.parametrize("token", [
+    "", "  ", "secret\\nheader: x", "secret\\rheader: x", "hi\\x00there",
+])
 def test_sender_rejects_unusable_tokens(token: str) -> None:
     with pytest.raises(ValueError, match="token"):
         CanonicalProSender(endpoint=ENDPOINT, token=token)
