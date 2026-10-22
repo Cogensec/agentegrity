@@ -72,25 +72,18 @@ upgrade as soon as upstream fixed releases are compatible.
 
 ## Supported versions
 
-The source tree is staged for **v0.13.0** but that version is **not yet
-published**. **v0.12.x remains the latest public release until the actual
-PyPI and npm publication.** The release-candidate row below states the
-support policy that takes effect upon publication; it does not claim
-that v0.13.0 is already available.
-
-Pre-1.0, the latest published minor line receives security backports.
-v0.12.x becomes EOL only when v0.13.0 is actually published.
+v0.13.0 was published to PyPI and npm on 2026-10-21. Pre-1.0, only the
+latest published minor line receives security backports.
 
 | Version | Supported | Notes |
 |---|:---:|---|
-| 0.13.x | ✅ | Prepared release candidate; support begins **upon publication**. |
-| 0.12.x | ⚠️ | Latest publicly released line until v0.13.0 is published; EOL after publication. |
+| 0.13.x | ✅ | Latest release, published 2026-10-21. |
+| 0.12.x | ❌ | EOL after the 2026-10-21 v0.13.0 release. |
 | 0.11.x | ❌ | EOL after the 2026-10-06 v0.12.0 release. |
 | < 0.11 | ❌ | Not supported. Upgrade to the latest published minor. |
 
-`scripts/check_versions.py` checks that this table's intended target
-matches the source version. Before tagging, replace the candidate wording
-with the actual publication state and verify the published distributions.
+`scripts/check_versions.py` checks that this table's supported line
+matches the source version.
 
 ## Scope
 

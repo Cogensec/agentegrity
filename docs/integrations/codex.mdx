@@ -41,7 +41,7 @@ codex plugin marketplace add cogensec/agentegrity
 
 Install `agentegrity` from the marketplace, then run `/hooks` once to review and trust the plugin's hooks. Codex does not run hooks that are not managed until you trust them. Organizations can ship them as managed hooks through `requirements.toml` instead.
 
-The prepared plugin version (0.13.0, **not yet published**) matches the planned SDK release. Use this install command after the v0.13.0 package is available; until publication, v0.12.0 remains current on PyPI. If the hook command fails because the library is missing or older than 0.11.0, the plugin prints a system message saying the action was not checked, and the action goes through.
+The plugin version (0.13.0) matches the library release it needs. If the hook command fails because the library is missing or older than 0.11.0, the plugin prints a system message saying the action was not checked, and the action goes through.
 
 The plugin is a root [`plugin.json`](https://github.com/Cogensec/agentegrity/blob/main/integrations/codex/plugin.json) and [`hooks/hooks.json`](https://github.com/Cogensec/agentegrity/blob/main/integrations/codex/hooks/hooks.json). Every command has a 20 second timeout except `SessionEnd` (5 seconds), and `PreToolUse` and `PostToolUse` use `"matcher": "*"`. If your Python launcher is `python` rather than `python3`, change the command in `hooks/hooks.json`.
 

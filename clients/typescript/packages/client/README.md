@@ -6,10 +6,8 @@ The Python library runs the evaluator and keeps the attestation chain. This clie
 
 ## Install
 
-Not yet published to npm. For now, vendor the `clients/typescript/` directory or install from source:
-
 ```bash
-cd clients/typescript && npm install && npm run build
+npm install @agentegrity/client
 ```
 
 ## Use

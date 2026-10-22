@@ -45,7 +45,7 @@ Then, inside Claude Code:
 
 Run `/agentegrity-status` to check the wiring. It reports whether the library is importable, the mode, whether console streaming is on, the chain directory, and record and decision counts for up to five chain files in that directory. It also warns about legacy `AGENTEGRITY_CC_*` variables, which are ignored.
 
-The prepared plugin version (0.13.0, **not yet published**) matches the planned SDK release. Use this install command after the v0.13.0 package is available; until publication, v0.12.0 remains current on PyPI. If the hook command fails because the library is missing or older than 0.11.0, the plugin prints a system message saying the action was not checked, and the action goes through.
+The plugin version (0.13.0) matches the library release it needs. If the hook command fails because the library is missing or older than 0.11.0, the plugin prints a system message saying the action was not checked, and the action goes through.
 
 ### Wiring the hook without the plugin
 

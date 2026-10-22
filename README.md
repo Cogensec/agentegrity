@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://pypi.org/project/agentegrity/"><img src="https://img.shields.io/pypi/v/agentegrity?label=PyPI" alt="PyPI release"></a>
   <a href="https://www.npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/v/@agentegrity/client" alt="npm package"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.13.0-3E7465" alt="Repository source version: 0.13.0 release candidate"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.13.0-3E7465" alt="Library version 0.13.0"></a>
   <a href=".github/workflows/ci.yml"><img src="https://github.com/Cogensec/agentegrity/actions/workflows/ci.yml/badge.svg" alt="Continuous integration"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-informational" alt="Apache 2.0"></a>
 </p>
@@ -41,7 +41,7 @@ Use it to **observe** your existing agent, **enforce** task-bound authority at a
 | --- | --- | --- | --- |
 | Detect adversarial signals, drift, and integrity degradation | Constrain supported tool actions using trusted task mandates | Record decisions and reconcile downstream effects | Evaluate continuity, checkpoints, and recovery mechanisms |
 
-**Release candidate vs. published packages:** Repository source is prepared for **v0.13.0 (not yet published)**; the last published GitHub release is **v0.12.0**. Runtime Action Authority APIs were merged after v0.12.0 and are included in this candidate, **not automatically in a currently installed v0.12.0**. Verify PyPI/npm publication and your installed package before using these APIs. See the [changelog](CHANGELOG.md).
+**v0.13.0 is published** on PyPI and npm (2026-10-21). The Runtime Action Authority APIs are new in v0.13.0, so an installed v0.12.0 does not have them; run `pip install -U agentegrity` to upgrade. See the [changelog](CHANGELOG.md).
 
 ## See It in Action
 
@@ -53,7 +53,7 @@ An agent has a permitted transfer tool, but its task authorizes only a single sy
 
 The animation is a **replay of the output asserted by the repository's example tests**, not a literal screen recording or a real banking integration. It uses no real accounts, external evidence attestation, or production attack. [Run the exact synthetic example](examples/action_authority_evidence.py).
 
-**Dependency security notice for the v0.13.0 release candidate:** The
+**Dependency security notice for v0.13.0:** The
 base Python package has no required framework dependencies, but installing
 the optional CrewAI integration or using an AI SDK v5 application can
 introduce known upstream vulnerabilities, including code injection,
