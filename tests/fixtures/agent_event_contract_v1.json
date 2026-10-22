@@ -31,6 +31,22 @@
       },
       "parent_event_id": "evt-001",
       "outcome": "observed"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "leap-day",
+      "event_type": "tool.intent",
+      "occurred_at": "2024-02-29T23:59:59.123456-05:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
     }
   ],
   "invalid_events": [
@@ -143,6 +159,314 @@
         "integration": "python-sdk",
         "assurance": "unverified",
         "provider_token": "abc"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-02-30T10:00:00Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "October 22, 2026 10:00:00Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22X10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+0000",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00:30",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+24:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00.1234567Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22t10:00:00z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "0000-01-01T00:00:00Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:60Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T25:00:00Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-04-31T10:00:00Z",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": null,
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write",
+      "session_id": null
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write",
+      "parent_event_id": null
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": null,
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": null
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write",
+      "outcome": null
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified",
+        "evidence_ref": null
       },
       "action_id": "act-001",
       "tool_name": "transfer",
