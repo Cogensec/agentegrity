@@ -1,0 +1,260 @@
+{
+  "valid_events": [
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-002",
+      "event_type": "agent.delegated",
+      "occurred_at": "2026-10-22T10:01:00Z",
+      "agent_id": "parent-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "orchestrator",
+        "integration": "gateway",
+        "assurance": "authenticated",
+        "evidence_ref": "signed-log-17"
+      },
+      "parent_event_id": "evt-001",
+      "outcome": "observed"
+    }
+  ],
+  "invalid_events": [
+    {
+      "schema_version": "9.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "TOOL.INTENT",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write",
+      "raw_prompt": "ignore prior instructions"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "authenticated"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt-001",
+      "event_type": "tool.intent",
+      "occurred_at": "2026-10-22T10:00:00+00:00",
+      "agent_id": "bank-agent",
+      "run_id": "run-001",
+      "source": {
+        "host": "synthetic-bank",
+        "integration": "python-sdk",
+        "assurance": "unverified",
+        "provider_token": "abc"
+      },
+      "action_id": "act-001",
+      "tool_name": "transfer",
+      "effect": "financial_write"
+    }
+  ],
+  "valid_cards": [
+    {
+      "integration": "python-sdk",
+      "host": "synthetic-bank",
+      "host_version": "1.0",
+      "claims": [
+        {
+          "capability": "observe",
+          "status": "implemented"
+        },
+        {
+          "capability": "evaluate",
+          "status": "unavailable"
+        },
+        {
+          "capability": "authorize",
+          "status": "unavailable"
+        },
+        {
+          "capability": "verify_effect",
+          "status": "unavailable"
+        },
+        {
+          "capability": "recover",
+          "status": "unavailable"
+        }
+      ]
+    }
+  ],
+  "invalid_cards": [
+    {
+      "integration": "python-sdk",
+      "host": "synthetic-bank",
+      "host_version": "1.0",
+      "claims": [
+        {
+          "capability": "observe",
+          "status": "implemented"
+        },
+        {
+          "capability": "evaluate",
+          "status": "unavailable"
+        },
+        {
+          "capability": "authorize",
+          "status": "unavailable"
+        },
+        {
+          "capability": "verify_effect",
+          "status": "unavailable"
+        }
+      ]
+    },
+    {
+      "integration": "python-sdk",
+      "host": "synthetic-bank",
+      "host_version": "1.0",
+      "claims": [
+        {
+          "capability": "observe",
+          "status": "validated"
+        },
+        {
+          "capability": "evaluate",
+          "status": "unavailable"
+        },
+        {
+          "capability": "authorize",
+          "status": "unavailable"
+        },
+        {
+          "capability": "verify_effect",
+          "status": "unavailable"
+        },
+        {
+          "capability": "recover",
+          "status": "unavailable"
+        }
+      ]
+    },
+    {
+      "integration": "python-sdk",
+      "host": "synthetic-bank",
+      "host_version": "1.0",
+      "claims": [
+        {
+          "capability": "observe",
+          "status": "implemented"
+        },
+        {
+          "capability": "observe",
+          "status": "implemented"
+        },
+        {
+          "capability": "authorize",
+          "status": "unavailable"
+        },
+        {
+          "capability": "verify_effect",
+          "status": "unavailable"
+        },
+        {
+          "capability": "recover",
+          "status": "unavailable"
+        }
+      ]
+    }
+  ]
+}
