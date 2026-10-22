@@ -49,8 +49,26 @@ def _snapshot_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
     """
     if not isinstance(arguments, Mapping):
         raise TypeError("arguments must be a mapping")
-    if not all(isinstance(key, str) and key for key in arguments):
-        raise ValueError("argument keys must be nonempty strings")
+    # json.dumps silently converts integer dictionary keys to strings.
+    # Reject such coercion even in nested structures before authorization.
+    pending: list[Any] = [arguments]
+    seen: set[int] = set()
+    while pending:
+        item = pending.pop()
+        if isinstance(item, (Mapping, list)):
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
+        if isinstance(item, Mapping):
+            if not all(isinstance(key, str) and key for key in item):
+                raise ValueError("argument keys must be nonempty strings")
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif item is None or isinstance(item, (str, int, float, bool)):
+            continue
+        else:
+            raise ValueError("tool arguments must be JSON objects, arrays or scalars")
     try:
         wire = json.dumps(dict(arguments), allow_nan=False, ensure_ascii=True)
     except (ValueError, TypeError, OverflowError, RecursionError) as exc:
