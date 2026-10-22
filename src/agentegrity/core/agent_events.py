@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping
 
@@ -136,11 +136,19 @@ class CanonicalAgentEvent:
             _optional_identifier(getattr(self, name), name)
 
     def to_dict(self) -> dict[str, Any]:
+        timestamp = self.occurred_at
+        offset = timestamp.utcoffset()
+        # Python tzinfo can represent seconds-level offsets, while the
+        # shared RFC 3339 wire subset accepts minute-level offsets only.
+        # Normalize unusual offsets to UTC rather than emitting events that
+        # our own parser and the TypeScript client must reject.
+        if offset is not None and offset.total_seconds() % 60:
+            timestamp = timestamp.astimezone(timezone.utc)
         result: dict[str, Any] = {
             "schema_version": self.schema_version,
             "event_id": self.event_id,
             "event_type": self.event_type,
-            "occurred_at": self.occurred_at.isoformat(),
+            "occurred_at": timestamp.isoformat(),
             "agent_id": self.agent_id,
             "run_id": self.run_id,
             "source": self.source.to_dict(),
