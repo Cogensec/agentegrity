@@ -50,3 +50,18 @@ export type {
 export type { Evidence, EvidenceType } from "./evidence.js";
 export { UsageLedger, UNKNOWN_MODEL } from "./usage.js";
 export type { TokenUsage, UsageSource, RecordOptions } from "./usage.js";
+
+export {
+  AGENT_EVENT_SCHEMA_VERSION,
+  parseCanonicalAgentEvent,
+  parseAgentCapabilityCard,
+} from "./agent-events.js";
+export type {
+  SourceAssurance,
+  Capability,
+  CapabilityStatus,
+  EventSourceV1,
+  CanonicalAgentEventV1,
+  CapabilityEvidenceV1,
+  AgentCapabilityCardV1,
+} from "./agent-events.js";
