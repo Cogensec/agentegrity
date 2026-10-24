@@ -31,6 +31,16 @@ from agentegrity.core.action_security import (
     TaskMandate,
     ToolAuthority,
 )
+from agentegrity.core.agent_events import (
+    EVENT_SCHEMA_VERSION,
+    AgentCapabilityCard,
+    CanonicalAgentEvent,
+    Capability,
+    CapabilityEvidence,
+    CapabilityStatus,
+    EventSource,
+    SourceAssurance,
+)
 from agentegrity.core.approval import ApprovalDecision, ApprovalWorkflow
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -46,6 +56,7 @@ from agentegrity.core.decision import (
     RejectedAlternative,
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
+from agentegrity.core.host_observer import EventCapacityExceeded, HostAgentObserver, ToolCompletion
 from agentegrity.core.keys import FileKeyProvider, KeyProvider, StaticKeyProvider
 from agentegrity.core.monitor import IntegrityMonitor, IntegrityViolationError
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
@@ -69,6 +80,14 @@ from agentegrity.core.trust_boundaries import (
 from agentegrity.crewai import instrument as crewai_instrument
 from agentegrity.crewai import report as crewai_report
 from agentegrity.exporters.alerts import SlackAlertExporter, WebhookAlertExporter
+from agentegrity.exporters.canonical_pro import (
+    CanonicalDeliveryDuplicate,
+    CanonicalDeliveryError,
+    CanonicalDeliveryReceipt,
+    CanonicalDeliveryRejected,
+    CanonicalDeliveryUncertain,
+    CanonicalProSender,
+)
 from agentegrity.exporters.http import HTTPExporter
 from agentegrity.google_adk import instrument as google_adk_instrument
 from agentegrity.google_adk import report as google_adk_report
@@ -105,6 +124,17 @@ from agentegrity.sdk.runtime import (
 )
 
 __all__ = [
+    "EventCapacityExceeded",
+    "HostAgentObserver",
+    "ToolCompletion",
+    "EVENT_SCHEMA_VERSION",
+    "AgentCapabilityCard",
+    "CanonicalAgentEvent",
+    "Capability",
+    "CapabilityEvidence",
+    "CapabilityStatus",
+    "EventSource",
+    "SourceAssurance",
     "AgentegrityRuntime",
     "detect_frameworks",
     "init",
@@ -141,6 +171,12 @@ __all__ = [
     # drifted reimplementation returns zero matches, which looks like "no leaks found".
     "fingerprint",
     "CredentialRef",
+    "CanonicalDeliveryDuplicate",
+    "CanonicalDeliveryError",
+    "CanonicalDeliveryReceipt",
+    "CanonicalDeliveryRejected",
+    "CanonicalDeliveryUncertain",
+    "CanonicalProSender",
     "HTTPExporter",
     "WebhookAlertExporter",
     "SlackAlertExporter",
