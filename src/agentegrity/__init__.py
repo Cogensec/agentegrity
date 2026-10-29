@@ -108,6 +108,7 @@ from agentegrity.layers import (
 from agentegrity.openai_agents import report as openai_agents_report
 from agentegrity.openai_agents import run_hooks as openai_agents_run_hooks
 from agentegrity.sdk.client import AgentegrityClient
+from agentegrity.sdk.gateway import GatewayTool, TrustedActionGateway
 from agentegrity.sdk.runtime import (
     AgentegrityRuntime,
     detect_frameworks,
@@ -119,6 +120,8 @@ __all__ = [
     "EventCapacityExceeded",
     "HostAgentObserver",
     "ToolCompletion",
+    "GatewayTool",
+    "TrustedActionGateway",
     "EVENT_SCHEMA_VERSION",
     "AgentCapabilityCard",
     "CanonicalAgentEvent",
