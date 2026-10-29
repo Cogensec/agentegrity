@@ -31,6 +31,16 @@ from agentegrity.core.action_security import (
     TaskMandate,
     ToolAuthority,
 )
+from agentegrity.core.agent_events import (
+    EVENT_SCHEMA_VERSION,
+    AgentCapabilityCard,
+    CanonicalAgentEvent,
+    Capability,
+    CapabilityEvidence,
+    CapabilityStatus,
+    EventSource,
+    SourceAssurance,
+)
 from agentegrity.core.approval import ApprovalDecision, ApprovalWorkflow
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -108,6 +118,14 @@ from agentegrity.sdk.runtime import (
 __all__ = [
     "GatewayTool",
     "TrustedActionGateway",
+    "EVENT_SCHEMA_VERSION",
+    "AgentCapabilityCard",
+    "CanonicalAgentEvent",
+    "Capability",
+    "CapabilityEvidence",
+    "CapabilityStatus",
+    "EventSource",
+    "SourceAssurance",
     "AgentegrityRuntime",
     "detect_frameworks",
     "init",
