@@ -31,6 +31,16 @@ from agentegrity.core.action_security import (
     TaskMandate,
     ToolAuthority,
 )
+from agentegrity.core.agent_events import (
+    EVENT_SCHEMA_VERSION,
+    AgentCapabilityCard,
+    CanonicalAgentEvent,
+    Capability,
+    CapabilityEvidence,
+    CapabilityStatus,
+    EventSource,
+    SourceAssurance,
+)
 from agentegrity.core.approval import ApprovalDecision, ApprovalWorkflow
 from agentegrity.core.attestation import (
     AttestationChain,
@@ -46,6 +56,7 @@ from agentegrity.core.decision import (
     RejectedAlternative,
 )
 from agentegrity.core.evaluator import IntegrityEvaluator, IntegrityScore, PropertyWeights
+from agentegrity.core.host_observer import EventCapacityExceeded, HostAgentObserver, ToolCompletion
 from agentegrity.core.keys import FileKeyProvider, KeyProvider, StaticKeyProvider
 from agentegrity.core.monitor import IntegrityMonitor, IntegrityViolationError
 from agentegrity.core.profile import AgentProfile, AgentType, DeploymentContext, RiskTier
@@ -109,8 +120,19 @@ from agentegrity.sdk.runtime import (
 __all__ = [
     "MCPToolBoundary",
     "MCPToolCallError",
+    "EventCapacityExceeded",
+    "HostAgentObserver",
+    "ToolCompletion",
     "GatewayTool",
     "TrustedActionGateway",
+    "EVENT_SCHEMA_VERSION",
+    "AgentCapabilityCard",
+    "CanonicalAgentEvent",
+    "Capability",
+    "CapabilityEvidence",
+    "CapabilityStatus",
+    "EventSource",
+    "SourceAssurance",
     "AgentegrityRuntime",
     "detect_frameworks",
     "init",
