@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentegrity.cogensec.com/schemas/agent-capabilities-v1.json",
+  "title": "Agentegrity integration capability declaration v1",
+  "description": "Host-specific claims. Validating this card does not independently attest capability tests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["integration", "host", "host_version", "claims"],
+  "properties": {
+    "integration": { "$ref": "#/$defs/identifier" },
+    "host": { "$ref": "#/$defs/identifier" },
+    "host_version": { "$ref": "#/$defs/identifier" },
+    "claims": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability", "status"],
+        "properties": {
+          "capability": { "enum": ["observe", "evaluate", "authorize", "verify_effect", "recover"] },
+          "status": { "enum": ["unavailable", "implemented", "validated"] },
+          "evidence_ref": { "$ref": "#/$defs/identifier" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "validated" } }, "required": ["status"] },
+            "then": { "required": ["evidence_ref"] }
+          },
+          {
+            "if": { "properties": { "status": { "const": "unavailable" } }, "required": ["status"] },
+            "then": { "not": { "required": ["evidence_ref"] } }
+          }
+        ]
+      },
+      "allOf": [
+        {
+          "contains": { "properties": { "capability": { "const": "observe" } }, "required": ["capability"] }
+        },
+        {
+          "contains": { "properties": { "capability": { "const": "evaluate" } }, "required": ["capability"] }
+        },
+        {
+          "contains": { "properties": { "capability": { "const": "authorize" } }, "required": ["capability"] }
+        },
+        {
+          "contains": { "properties": { "capability": { "const": "verify_effect" } }, "required": ["capability"] }
+        },
+        {
+          "contains": { "properties": { "capability": { "const": "recover" } }, "required": ["capability"] }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" }
+  }
+}
