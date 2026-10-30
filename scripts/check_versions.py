@@ -133,8 +133,8 @@ def check_security_policy(version: str) -> bool:
     Such a branch must NOT advertise an unpublished version as supported.
     """
     policy = read(ROOT / "SECURITY.md")
-    supported = re.findall(r"^\\| *([^|]+?) *\\| *✅ *\\|", policy, re.MULTILINE)
-    candidate = re.findall(r"^\\| *([^|]+?) *\\| *🧪 *\\|", policy, re.MULTILINE)
+    supported = re.findall(r"^\| *([^|]+?) *\| *✅ *\|", policy, re.MULTILINE)
+    candidate = re.findall(r"^\| *([^|]+?) *\| *🧪 *\|", policy, re.MULTILINE)
     current = ".".join(version.split(".")[:2]) + ".x"
     if candidate:
         if candidate != [current]:
