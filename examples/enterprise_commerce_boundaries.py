@@ -29,27 +29,44 @@ from agentegrity.core.trust_boundaries import (
 from agentegrity.sdk.gateway import GatewayTool, TrustedActionGateway
 
 
-def _provenance(*, controlled_by: str, contaminated_by: str | None = None) -> ActionProvenance:
+def _provenance(
+    *,
+    action_field: str,
+    resource_control: str = "trusted_operator",
+    action_control: str | None = "trusted_operator",
+    resource_data: str | None = None,
+    action_data: str | None = None,
+) -> ActionProvenance:
+    controls = {"resource_id": frozenset({resource_control})}
+    if action_control is not None:
+        controls[action_field] = frozenset({action_control})
+    data = {}
+    if resource_data is not None:
+        data["resource_id"] = frozenset({resource_data})
+    if action_data is not None:
+        data[action_field] = frozenset({action_data})
     return ActionProvenance(
-        control_origins={"resource_id": frozenset({controlled_by})},
-        data_origins=(
-            {"resource_id": frozenset({contaminated_by})}
-            if contaminated_by else {}
-        ),
+        control_origins=controls,
+        data_origins=data,
     )
 
 
-def run_domain(*, domain: str, tool_name: str, effect: EffectType) -> dict:
-    """Fail closed on retrieval/peer control and resource substitution."""
+def run_domain(
+    *, domain: str, tool_name: str, effect: EffectType,
+    action_field: str, action_value: str | int,
+) -> dict:
+    """Protect both the resource and the business action from untrusted control."""
     now = datetime.now(timezone.utc)
-    journal: list[str] = []
+    journal: list[dict[str, str | int]] = []
     authorized = domain + "-resource-1"
     foreign = domain + "-resource-2"
 
-    def executor(resource_id: str) -> str:
+    def executor(resource_id: str, **action: str | int) -> str:
         # In real deployments the downstream system must ALSO independently
         # enforce operator identity and resource scope.
-        journal.append(resource_id)
+        if action != {action_field: action_value}:
+            raise ValueError("synthetic action is outside the host-installed contract")
+        journal.append({"resource_id": resource_id, **action})
         return "synthetic-tool-returned"
 
     boundary = TrustBoundaryPolicy(
@@ -64,7 +81,7 @@ def run_domain(*, domain: str, tool_name: str, effect: EffectType) -> dict:
                 "peer_agent", SourceTrust.DATA_ONLY, SourceChannel.PEER_AGENT,
             ),
         },
-        protected_fields={tool_name: frozenset({"resource_id"})},
+        protected_fields={tool_name: frozenset({"resource_id", action_field})},
     )
     gateway = TrustedActionGateway(
         mandate=TaskMandate(
@@ -84,17 +101,37 @@ def run_domain(*, domain: str, tool_name: str, effect: EffectType) -> dict:
     )
     denied: dict[str, str] = {}
 
-    for label, resource_id, provenance in (
-        ("retrieval", authorized, _provenance(controlled_by="retrieved_doc")),
-        ("peer", authorized, _provenance(controlled_by="peer_agent")),
-        ("contamination", authorized, _provenance(
-            controlled_by="trusted_operator", contaminated_by="retrieved_doc",
+    action_arguments = {"resource_id": authorized, action_field: action_value}
+    for label, arguments, provenance in (
+        ("retrieval", action_arguments, _provenance(
+            action_field=action_field, resource_control="retrieved_doc",
         )),
-        ("resource_substitution", foreign, _provenance(controlled_by="trusted_operator")),
+        ("peer", action_arguments, _provenance(
+            action_field=action_field, resource_control="peer_agent",
+        )),
+        ("contamination", action_arguments, _provenance(
+            action_field=action_field, resource_data="retrieved_doc",
+        )),
+        ("resource_substitution", {**action_arguments, "resource_id": foreign},
+         _provenance(action_field=action_field)),
+        ("action_retrieval", action_arguments, _provenance(
+            action_field=action_field, action_control="retrieved_doc",
+        )),
+        ("action_peer", action_arguments, _provenance(
+            action_field=action_field, action_control="peer_agent",
+        )),
+        ("action_contamination", action_arguments, _provenance(
+            action_field=action_field, action_data="retrieved_doc",
+        )),
+        ("action_missing_lineage", action_arguments, _provenance(
+            action_field=action_field, action_control=None,
+        )),
+        ("action_omitted", {"resource_id": authorized},
+         _provenance(action_field=action_field)),
     ):
         try:
             gateway.invoke(
-                tool_name, {"resource_id": resource_id},
+                tool_name, arguments,
                 action_id="attempt-" + label, now=now, provenance=provenance,
             )
         except AuthorizationDenied as exc:
@@ -104,14 +141,14 @@ def run_domain(*, domain: str, tool_name: str, effect: EffectType) -> dict:
         assert journal == [], "denied requests must never invoke the executor"
 
     allowed = gateway.invoke(
-        tool_name, {"resource_id": authorized},
+        tool_name, action_arguments,
         action_id="authorized", now=now,
-        provenance=_provenance(controlled_by="trusted_operator"),
+        provenance=_provenance(action_field=action_field),
     )
     assert allowed.result == "synthetic-tool-returned"
     assert allowed.receipt.status is EffectStatus.PENDING
     assert not gateway.gate.effects_verified(["authorized"])
-    assert journal == [authorized]
+    assert journal == [action_arguments]
     return {
         "domain": domain,
         "executed": journal,
@@ -125,10 +162,12 @@ def run_demo() -> dict[str, dict]:
     return {
         "enterprise": run_domain(
             domain="enterprise", tool_name="update_crm_case", effect=EffectType.WRITE,
+            action_field="case_status", action_value="resolved",
         ),
         "commerce": run_domain(
             domain="commerce", tool_name="request_refund",
             effect=EffectType.FINANCIAL_WRITE,
+            action_field="amount_cents", action_value=2500,
         ),
     }
 
@@ -138,3 +177,4 @@ if __name__ == "__main__":
         print(kind, "blocked:", sorted(report["denied"]),
               "authorized return:", report["receipt_status"],
               "(downstream effect not independently verified)")
+
