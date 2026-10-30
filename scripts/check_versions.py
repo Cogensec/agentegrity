@@ -127,9 +127,29 @@ def check_plugin_manifests(version: str) -> bool:
 
 
 def check_security_policy(version: str) -> bool:
-    """SECURITY.md supports exactly one line, the current minor (``X.Y.x``)."""
-    supported = re.findall(r"^\| *([^|]+?) *\| *✅ *\|", read(ROOT / "SECURITY.md"), re.MULTILINE)
+    """Keep the published line supported until a new release is approved.
+
+    Version parity may advance on an unpublished release-candidate branch.
+    Such a branch must NOT advertise an unpublished version as supported.
+    """
+    policy = read(ROOT / "SECURITY.md")
+    supported = re.findall(r"^\| *([^|]+?) *\| *✅ *\|", policy, re.MULTILINE)
+    candidate = re.findall(r"^\| *([^|]+?) *\| *🧪 *\|", policy, re.MULTILINE)
     current = ".".join(version.split(".")[:2]) + ".x"
+    if candidate:
+        if candidate != [current]:
+            fail(f"SECURITY.md candidate versions {candidate} != [{current!r}]")
+            return False
+        major, minor = map(int, version.split(".")[:2])
+        if minor == 0:
+            fail("cannot infer preceding published minor for a .0 release candidate")
+            return False
+        published = f"{major}.{minor - 1}.x"
+        if supported != [published]:
+            fail(f"SECURITY.md supported versions {supported} != [{published!r}] during RC")
+            return False
+        ok(f"SECURITY.md marks {current} unpublished; {published} remains supported")
+        return True
     if supported != [current]:
         fail(f"SECURITY.md supported versions {supported} != [{current!r}]")
         return False

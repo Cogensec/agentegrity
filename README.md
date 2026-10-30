@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://pypi.org/project/agentegrity/"><img src="https://img.shields.io/pypi/v/agentegrity?label=PyPI" alt="PyPI release"></a>
   <a href="https://www.npmjs.com/package/@agentegrity/client"><img src="https://img.shields.io/npm/v/@agentegrity/client" alt="npm package"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.13.0-3E7465" alt="Library version 0.13.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/library-v0.14.0--candidate-3E7465" alt="Library version 0.14.0 candidate (not published)"></a>
   <a href=".github/workflows/ci.yml"><img src="https://github.com/Cogensec/agentegrity/actions/workflows/ci.yml/badge.svg" alt="Continuous integration"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-informational" alt="Apache 2.0"></a>
 </p>
@@ -41,7 +41,7 @@ Use it to **observe** your existing agent, **enforce** task-bound authority at a
 | --- | --- | --- | --- |
 | Detect adversarial signals, drift, and integrity degradation | Constrain supported tool actions using trusted task mandates | Record decisions and reconcile downstream effects | Evaluate continuity, checkpoints, and recovery mechanisms |
 
-**v0.13.0 is published** on PyPI and npm (2026-10-21). The Runtime Action Authority APIs are new in v0.13.0, so an installed v0.12.0 does not have them; run `pip install -U agentegrity` to upgrade. See the [changelog](CHANGELOG.md).
+**Unreleased v0.14.0 candidate on this review branch.** Do not install this version from registries yet. **v0.13.0 is published** on PyPI and npm (2026-10-21). The Runtime Action Authority APIs are new in v0.13.0, so an installed v0.12.0 does not have them; run `pip install -U agentegrity` to upgrade. See the [changelog](CHANGELOG.md).
 
 ## See It in Action
 
