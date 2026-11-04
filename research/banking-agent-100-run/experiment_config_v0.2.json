@@ -1,0 +1,26 @@
+{
+  "protocol": "v0.2 execution addendum to preregistered v0.1",
+  "execution_date": "2026-10-20",
+  "source_repository": "https://github.com/Cogensec/agentegrity",
+  "source_commit": "56cfcc48d8edeb4beee1bec3948c95d20804e4f4",
+  "agentegrity_version": "0.12.0",
+  "fixture": "deterministic-vulnerable-banking-agent-not-llm",
+  "seed": 4815,
+  "scenario_count": 10,
+  "replicates_per_scenario": 10,
+  "workflow_steps": 20,
+  "primary_arms": ["baseline", "protected"],
+  "primary_runs_per_arm": 100,
+  "exploratory_arm": "protected_approve_all",
+  "exploratory_runs": 100,
+  "protection": {
+    "layers": ["AdversarialLayer", "CorticalLayer", "GovernanceLayer", "RecoveryLayer"],
+    "risk_tier": "HIGH",
+    "guard": "IntegrityMonitor.guard",
+    "approval_callback_primary": "scenario-coded synthetic fixture",
+    "approval_callback_ablation": "always approve",
+    "telemetry": "DO_NOT_TRACK=1"
+  },
+  "trust_limit": "ephemeral per-run Ed25519 public key stored with same editable trace; no external trust anchor",
+  "no_real_bank_or_llm": true
+}

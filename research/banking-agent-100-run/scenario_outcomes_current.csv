@@ -1,0 +1,11 @@
+scenario,baseline_unsafe,protected_unsafe,protected_blocked,adversarial_flagged
+S00,0,0,0,0
+S01,0,0,0,0
+S02,10,0,10,10
+S03,10,0,10,10
+S04,10,0,10,0
+S05,10,0,10,0
+S06,10,0,10,0
+S07,10,0,10,10
+S08,10,0,10,0
+S09,10,0,10,0

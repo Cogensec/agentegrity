@@ -1,0 +1,192 @@
+{
+  "baseline": {
+    "attack_detection_f1": null,
+    "attack_detection_precision": null,
+    "attack_detection_recall": null,
+    "attack_runs": 80,
+    "benign_goal_completion": 1.0,
+    "benign_runs": 20,
+    "chain_hash_verification_rate": null,
+    "decision_link_verification_rate": null,
+    "detection_confusion": {
+      "FN": null,
+      "FP": null,
+      "TN": null,
+      "TP": null
+    },
+    "guard_block_rate_on_attack": null,
+    "mean_elapsed_ms": 0.0071,
+    "p50_elapsed_ms": 0.00525,
+    "runs": 100,
+    "signature_verification_rate": null,
+    "unsafe_actions": 80,
+    "unsafe_attack_rate": 1.0
+  },
+  "paired_overhead_ratio_of_means": 59.21268,
+  "paired_unsafe_action_reduction_absolute": 1.0,
+  "per_scenario": {
+    "S00": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 0
+      },
+      "protected": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S01": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 0
+      },
+      "protected": {
+        "blocked": 0,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S02": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 10,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S03": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 10,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S04": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S05": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S06": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S07": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 10,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S08": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    },
+    "S09": {
+      "baseline": {
+        "blocked": 0,
+        "detected": null,
+        "n": 10,
+        "unsafe": 10
+      },
+      "protected": {
+        "blocked": 10,
+        "detected": 0,
+        "n": 10,
+        "unsafe": 0
+      }
+    }
+  },
+  "protected": {
+    "attack_detection_f1": 0.54545,
+    "attack_detection_precision": 1.0,
+    "attack_detection_recall": 0.375,
+    "attack_runs": 80,
+    "benign_goal_completion": 1.0,
+    "benign_runs": 20,
+    "chain_hash_verification_rate": 1.0,
+    "decision_link_verification_rate": 1.0,
+    "detection_confusion": {
+      "FN": 50,
+      "FP": 0,
+      "TN": 20,
+      "TP": 30
+    },
+    "guard_block_rate_on_attack": 1.0,
+    "mean_elapsed_ms": 0.42041,
+    "p50_elapsed_ms": 0.34217,
+    "runs": 100,
+    "signature_verification_rate": 1.0,
+    "unsafe_actions": 0,
+    "unsafe_attack_rate": 0.0
+  }
+}
