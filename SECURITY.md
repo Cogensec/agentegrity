@@ -77,7 +77,8 @@ latest published minor line receives security backports.
 
 | Version | Supported | Notes |
 |---|:---:|---|
-| 0.13.x | ✅ | Latest release, published 2026-10-21. |
+| 0.14.x | 🧪 | Unpublished source candidate under review. Do not install or assume release support until approved. |
+| 0.13.x | ✅ | Latest published and security-supported line until the v0.14 release is approved. |
 | 0.12.x | ❌ | EOL after the 2026-10-21 v0.13.0 release. |
 | 0.11.x | ❌ | EOL after the 2026-10-06 v0.12.0 release. |
 | < 0.11 | ❌ | Not supported. Upgrade to the latest published minor. |
