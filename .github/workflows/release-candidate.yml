@@ -165,28 +165,36 @@ jobs:
         id: security-verdict
         run: |
           set +e
+          RELEASE_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          # Never apply v0.13's temporary disposition to another release.
+          # Fresh candidates without an approved policy are an explicit NO-GO
+          # whenever their optional dependency audit reports advisories.
+          DISPOSITION=()
+          if [ "$RELEASE_VERSION" = "0.13.0" ]; then
+            DISPOSITION=(--disposition-policy docs/releases/v0.13.0-risk-disposition.json)
+          fi
           python scripts/verify_release_dependency_audits.py \
             --pip-audit security-evidence/python-crewai.json \
             --npm-audit security-evidence/ai-sdk-v5-npm.json \
-            --disposition-policy docs/releases/v0.13.0-risk-disposition.json \
+            "${DISPOSITION[@]}" \
             --npm-installed security-evidence/ai-sdk-v5-installed.json \
             --fixture-manifest clients/typescript/compat/ai-sdk-v5/package.json \
-            --release-version 0.13.0 | tee security-evidence/disposition-verdict.txt
+            --release-version "$RELEASE_VERSION" | tee security-evidence/disposition-verdict.txt
           result=${PIPESTATUS[0]}
           set -e
           if [ "$result" -eq 2 ]; then
             echo "::error::Release security audit evidence invalid or missing"
             {
-              echo "## v0.13.0 release security: NO-GO"
+              echo "## candidate release security: NO-GO"
               echo "Audit evidence is missing or malformed. Fix the scanner/inputs."
               echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 2
           fi
           if [ "$result" -eq 1 ]; then
-            echo "::warning::v0.13.0 registry publication remains BLOCKED; see release tracker #106"
+            echo "::warning::candidate registry publication remains BLOCKED; see release tracker #106"
             {
-              echo "## v0.13.0 release security: NO-GO"
+              echo "## candidate release security: NO-GO"
               echo "Supported optional integration dependencies have unresolved audit findings."
               echo "The tag-triggered release job will **fail**. Green PR rehearsal is NOT a waiver."
               echo "See [release tracker #106](https://github.com/Cogensec/agentegrity/issues/106)."
@@ -194,11 +202,11 @@ jobs:
           elif [ "$result" -eq 0 ]; then
             {
               if grep -q 'RELEASE SECURITY: CONDITIONAL DISTRIBUTION-ONLY DISPOSITION' security-evidence/disposition-verdict.txt; then
-                echo "## v0.13.0 release security: CONDITIONALLY ACCEPTED FOR DISTRIBUTION"
+                echo "## candidate release security: CONDITIONALLY ACCEPTED FOR DISTRIBUTION"
                 echo "Known *exact* optional-framework advisories match the time-limited approval. **Not safe deployment approval.**"
                 echo "Approval expires **2026-11-20**; new or changed findings remain NO-GO."
               else
-                echo "## v0.13.0 dependency audit: CLEAR"
+                echo "## candidate dependency audit: CLEAR"
                 echo "No advisories found; no temporary exception required."
               fi
               echo "Final exact-SHA release-owner GO and registry checks still required."
