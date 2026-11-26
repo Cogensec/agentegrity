@@ -163,9 +163,8 @@ framework itself, with an offline model.
 | ~~Threat model document~~              | ✅ | Shipped at [`spec/threat-model.md`](spec/threat-model.md) — STRIDE on the framework itself, 14 mitigations cross-linked to the test suite, residual-risk discussion per category, open items for v0.7. Companion to `SECURITY.md`. |
 | Reference docs site (MkDocs / Docusaurus) | 7 | Auto-generated API reference + per-layer / per-adapter guides. |
 
-Phases reference the canonical dev plan; see `/root/.claude/plans/`
-during active development or the `docs/dev-plan.md` once it lands in
-the repo.
+Phases reference the internal development plan; the public
+`docs/dev-plan.md` will replace this note once it lands in the repo.
 
 ---
 
