@@ -102,15 +102,14 @@ print(report())
 
 This hook example uses **measure-only semantics** by default, not automatic tool blocking. See the [framework quickstart](docs/quickstart.md) for LangChain/LangGraph, CrewAI, OpenAI Agents, Google ADK, coding agents, and TypeScript.
 
-### 2. Enforce an authorized action (repository source)
+### 2. Enforce an authorized action
 
-To try the new task-scoped Python APIs before they appear in a published release:
+The task-scoped Python APIs ship in v0.13.0. Run the offline example against the published package:
 
 ```bash
-git clone https://github.com/Cogensec/agentegrity.git
-cd agentegrity
-pip install -e .
-python examples/action_authority_evidence.py
+pip install -U agentegrity
+curl -O https://raw.githubusercontent.com/Cogensec/agentegrity/main/examples/action_authority_evidence.py
+python action_authority_evidence.py
 ```
 
 The offline, test-covered example prints:
